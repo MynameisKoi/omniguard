@@ -1,10 +1,20 @@
 from fastapi import FastAPI 
 from models import Alert, AlertCreate
 
+from fastapi.middleware.cors import CORSMiddleware
+
 # This is temporary as we don't have a storage for now
 alerts: list[Alert] = []
 
 app = FastAPI(title="OmniGuard SOC API")
+
+app.add_middleware(
+    CORSMiddleware, 
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 
 @app.get("/health")
 def get_health():
