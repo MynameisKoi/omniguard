@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Testing & Linters
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model checkpoints (optional: keep .pt/.joblib if production weights are committed, or ignore large artifacts)
+# spectrac2-engine/inference/models/*.pt
+# spectrac2-engine/inference/models/*.joblib
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
