@@ -1,10 +1,12 @@
 from fastapi import FastAPI 
 from models import Alert, AlertCreate
+from db import database
 
 from fastapi.middleware.cors import CORSMiddleware
 
-# This is temporary as we don't have a storage for now
-alerts: list[Alert] = []
+# getting the collection
+alerts_collection = database["alerts"]
+
 
 app = FastAPI(title="OmniGuard SOC API")
 
@@ -25,12 +27,12 @@ def get_health():
 @app.post("/alerts", response_model=Alert, status_code=201)
 def create_alert(payload: AlertCreate) -> Alert:
     alert = Alert(**payload.model_dump())
-
-    alerts.append(alert)
+    alerts_collection.insert_one(alert.model_dump())
 
     return alert
 
 # This is for the frontend 
 @app.get("/alerts", response_model=list[Alert])
 def get_alerts() -> list[Alert]:
+    alerts: list[Alert] = list(alerts_collection.find({}, {"_id": 0}))
     return alerts
