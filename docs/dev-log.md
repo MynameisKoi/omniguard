@@ -1,8 +1,32 @@
 # Dev Log
 
-My notes while building the OmniGuard dashboard + backend. Newest on top.
+My notes while building the OmniGuard dashboard + backend + frontend + MongoDB. Newest on top.
 
 ---
+
+## Fri, Sept 18 2026
+Worked on a lot of things
+
+Mongo
+- set up local mongodb 
+- connected that with python drivers
+- made alerts persist on mongodb collection
+
+
+Integration of Khoi's engine with API 
+- Ran Spectra2 and checked the API - worked the first try 
+- Beacon -> his detector -> POST -> MONGO -> Dashboard
+- Added dst_ip and confidence in the alert 
+
+
+Integration of Rahim's verifeye 
+- Ran the code and works for github login page
+
+Neo4j
+- Installed, and ran some tests locally 
+- Siddik is working on it for now 
+
+
 
 ## Fri, Sep 11 2026
 
@@ -21,3 +45,5 @@ python3 -m venv venv
 source venv/bin/activate
 pip install "fastapi[standard]" uvicorn
 pip freeze > requirements.txt
+
+Looks good
