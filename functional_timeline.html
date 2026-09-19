@@ -1,0 +1,1899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OmniGuard SOC - Functional Characteristics & Capabilities Timeline</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #06090f;
+      --bg-surface: #0b111e;
+      --bg-card: rgba(15, 23, 42, 0.75);
+      --bg-card-hover: rgba(30, 41, 59, 0.85);
+      --border-subtle: rgba(56, 189, 248, 0.12);
+      --border-focus: rgba(56, 189, 248, 0.4);
+      --border-grid: rgba(255, 255, 255, 0.05);
+
+      --cyan: #38bdf8;
+      --cyan-glow: rgba(56, 189, 248, 0.25);
+      --green: #10b981;
+      --green-glow: rgba(16, 185, 129, 0.25);
+      --purple: #a855f7;
+      --purple-glow: rgba(168, 85, 247, 0.25);
+      --amber: #f59e0b;
+      --amber-glow: rgba(245, 158, 11, 0.25);
+      --rose: #f43f5e;
+      --rose-glow: rgba(244, 63, 94, 0.25);
+      --blue: #3b82f6;
+
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+
+      /* Functional Pillar Theme Colors */
+      --pillar-ingress: #10b981;
+      --pillar-spectrac2: #38bdf8;
+      --pillar-telemetry: #0284c7;
+      --pillar-graph: #f59e0b;
+      --pillar-llm: #a855f7;
+      --pillar-dashboard: #f43f5e;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      min-height: 100vh;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(56, 189, 248, 0.12), transparent),
+        radial-gradient(circle at 10% 90%, rgba(168, 85, 247, 0.08), transparent),
+        radial-gradient(circle at 90% 20%, rgba(16, 185, 129, 0.08), transparent);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--bg-base);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+
+    .app-container {
+      max-width: 1720px;
+      margin: 0 auto;
+      padding: 24px 32px 64px;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 24px;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .badge-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(16, 185, 129, 0.2));
+      border: 1px solid var(--border-focus);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      box-shadow: 0 0 24px var(--cyan-glow);
+    }
+
+    .title-area h1 {
+      font-size: 23px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .title-area h1 span.tag {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 3px 9px;
+      border-radius: 6px;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--green);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      font-weight: 600;
+    }
+
+    .title-area p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn {
+      padding: 8px 15px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      border: 1px solid transparent;
+      font-family: inherit;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      color: #fff;
+      border-color: rgba(56, 189, 248, 0.4);
+      box-shadow: 0 2px 12px var(--cyan-glow);
+    }
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #0369a1, #075985);
+      box-shadow: 0 0 16px var(--cyan-glow);
+    }
+
+    .btn-secondary {
+      background: rgba(30, 41, 59, 0.6);
+      color: var(--text-main);
+      border-color: rgba(148, 163, 184, 0.2);
+    }
+    .btn-secondary:hover {
+      background: rgba(51, 65, 85, 0.8);
+      border-color: var(--cyan);
+    }
+
+    /* Top Evaluation Matrix Summary Bar */
+    .eval-summary-grid {
+      display: grid;
+      grid-template-columns: 310px 1fr;
+      gap: 20px;
+      margin-bottom: 28px;
+    }
+    @media (max-width: 1024px) {
+      .eval-summary-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      backdrop-filter: blur(14px);
+      border-radius: 16px;
+      padding: 20px 24px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s ease;
+    }
+    .card:hover {
+      border-color: var(--border-focus);
+    }
+
+    /* Overall Readiness Score Card */
+    .readiness-score-card {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .readiness-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .readiness-header h3 {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .readiness-value-box {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .readiness-big-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 48px;
+      font-weight: 800;
+      line-height: 1;
+      background: linear-gradient(135deg, #38bdf8, #10b981);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .readiness-denom {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 16px;
+      color: var(--text-dim);
+    }
+    .readiness-status-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--cyan);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      width: fit-content;
+      margin-bottom: 12px;
+    }
+
+    .readiness-breakdown {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border-grid);
+      padding-top: 12px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Pillar Health Bars Grid */
+    .pillar-meters-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    @media (max-width: 1280px) {
+      .pillar-meters-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    @media (max-width: 768px) {
+      .pillar-meters-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .pillar-meter-item {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border-grid);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: all 0.2s;
+    }
+    .pillar-meter-item:hover {
+      background: rgba(30, 41, 59, 0.7);
+      border-color: var(--border-subtle);
+    }
+
+    .pmi-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .pmi-title {
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .pmi-percent {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .pmi-sub {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+
+    .pmi-bar-bg {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .pmi-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+
+    /* Controls Bar */
+    .controls-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 12px 20px;
+      margin-bottom: 24px;
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .filter-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+      font-weight: 700;
+      margin-right: 4px;
+    }
+
+    .pill-btn {
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+      transition: all 0.2s ease;
+    }
+    .pill-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+    }
+    .pill-btn.active {
+      background: rgba(16, 185, 129, 0.18);
+      border-color: var(--green);
+      color: var(--green);
+      box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+    }
+
+    .view-mode-group {
+      display: flex;
+      background: rgba(15, 23, 42, 0.8);
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+    }
+    .view-btn {
+      padding: 5px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      transition: all 0.15s;
+    }
+    .view-btn.active {
+      background: var(--green);
+      color: #06090f;
+    }
+
+    /* Functional Gantt Timeline Grid */
+    .timeline-container {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 32px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .timeline-header-row {
+      display: grid;
+      grid-template-columns: 380px 140px repeat(14, 1fr);
+      background: #090e1a;
+      border-bottom: 1px solid var(--border-subtle);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .th-col {
+      padding: 12px 10px;
+      text-align: center;
+      border-right: 1px solid var(--border-grid);
+    }
+    .th-col.feat-col {
+      text-align: left;
+      padding-left: 20px;
+    }
+    .th-col.status-col {
+      text-align: left;
+    }
+    .th-col.current-week {
+      background: rgba(56, 189, 248, 0.1);
+      color: var(--cyan);
+      font-weight: 700;
+      position: relative;
+    }
+    .th-col.current-week::after {
+      content: 'NOW';
+      position: absolute;
+      top: 1px;
+      right: 2px;
+      font-size: 8px;
+      background: var(--cyan);
+      color: #06090f;
+      padding: 0 3px;
+      border-radius: 2px;
+    }
+
+    /* Pillar Group Section */
+    .pillar-group {
+      border-bottom: 2px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .pillar-banner {
+      background: rgba(15, 23, 42, 0.95);
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s;
+    }
+    .pillar-banner:hover {
+      background: rgba(30, 41, 59, 0.95);
+    }
+
+    .pillar-banner-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .pillar-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+
+    .pillar-banner-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-muted);
+    }
+
+    .pillar-eval-summary {
+      padding: 3px 9px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .pillar-eval-summary.ready {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--green);
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+
+    /* Functional Feature Row */
+    .feat-row {
+      display: grid;
+      grid-template-columns: 380px 140px repeat(14, 1fr);
+      align-items: center;
+      border-bottom: 1px solid var(--border-grid);
+      font-size: 12px;
+      transition: background 0.15s;
+      position: relative;
+    }
+    .feat-row:hover {
+      background: rgba(30, 41, 59, 0.4);
+    }
+    .feat-row.verified {
+      background: rgba(16, 185, 129, 0.03);
+    }
+
+    .feat-cell {
+      padding: 10px 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      border-right: 1px solid var(--border-grid);
+    }
+
+    .feat-checkbox {
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 5px;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      background: rgba(15, 23, 42, 0.6);
+      cursor: pointer;
+      position: relative;
+      flex-shrink: 0;
+      margin-top: 2px;
+      transition: all 0.2s;
+    }
+    .feat-checkbox:hover {
+      border-color: var(--green);
+      box-shadow: 0 0 8px var(--green-glow);
+    }
+    .feat-checkbox:checked {
+      background: var(--green);
+      border-color: var(--green);
+      box-shadow: 0 0 10px var(--green-glow);
+    }
+    .feat-checkbox:checked::after {
+      content: '✓';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 12px;
+      color: #06090f;
+      font-weight: 800;
+    }
+
+    .feat-info {
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .feat-name {
+      font-weight: 600;
+      color: var(--text-main);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .feat-name:hover {
+      color: var(--cyan);
+    }
+    .feat-row.verified .feat-name {
+      color: var(--text-muted);
+    }
+
+    .feat-metric {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Status Dropdown Selector */
+    .status-cell {
+      padding: 8px 12px;
+      border-right: 1px solid var(--border-grid);
+    }
+
+    .status-select {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--text-main);
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 4px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .status-select:focus {
+      border-color: var(--cyan);
+    }
+    .status-select.st-planned { color: var(--text-dim); border-color: rgba(148, 163, 184, 0.2); }
+    .status-select.st-in-progress { color: var(--amber); border-color: rgba(245, 158, 11, 0.4); }
+    .status-select.st-functional { color: var(--cyan); border-color: rgba(56, 189, 248, 0.4); }
+    .status-select.st-verified { color: var(--green); border-color: rgba(16, 185, 129, 0.4); }
+
+    /* Timeline Grid Area */
+    .timeline-grid {
+      grid-column: 3 / span 14;
+      display: grid;
+      grid-template-columns: repeat(14, 1fr);
+      height: 100%;
+      position: relative;
+      align-items: center;
+      padding: 6px 0;
+    }
+
+    .week-col-bg {
+      height: 100%;
+      border-right: 1px solid var(--border-grid);
+    }
+    .week-col-bg.is-current {
+      background: rgba(56, 189, 248, 0.05);
+    }
+
+    /* Characteristic Gantt Span Bar */
+    .span-bar {
+      position: absolute;
+      height: 24px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 10px;
+      font-size: 10px;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+      color: #fff;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      overflow: hidden;
+      white-space: nowrap;
+      z-index: 2;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+    .span-bar:hover {
+      transform: translateY(-1px) scaleY(1.06);
+      filter: brightness(1.15);
+      z-index: 5;
+    }
+    .span-bar.verified-bar {
+      opacity: 0.85;
+      border-style: solid;
+    }
+    .span-bar.verified-bar::after {
+      content: '✓ TESTED';
+      font-size: 9px;
+      background: rgba(0, 0, 0, 0.35);
+      padding: 1px 4px;
+      border-radius: 3px;
+      margin-left: 6px;
+    }
+
+    /* Modal Details & Team Evaluation Drawer */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal-card {
+      background: #0d1527;
+      border: 1px solid var(--border-focus);
+      border-radius: 18px;
+      max-width: 680px;
+      width: 100%;
+      padding: 28px 32px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7), 0 0 35px var(--cyan-glow);
+      position: relative;
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 20px;
+      right: 22px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 22px;
+      cursor: pointer;
+    }
+    .modal-close:hover {
+      color: var(--rose);
+    }
+
+    .modal-header {
+      margin-bottom: 20px;
+    }
+    .modal-header h2 {
+      font-size: 19px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .modal-badges {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .modal-body {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-muted);
+    }
+
+    .modal-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--cyan);
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .notes-textarea {
+      width: 100%;
+      height: 80px;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      padding: 10px;
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 12px;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .notes-textarea:focus {
+      border-color: var(--cyan);
+    }
+
+    /* Print styling */
+    @media print {
+      body {
+        background: #fff;
+        color: #000;
+      }
+      .controls-bar, .header-actions {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+    
+    <!-- Top Header -->
+    <header>
+      <div class="header-left">
+        <div class="badge-icon">⚡</div>
+        <div class="title-area">
+          <h1>
+            OmniGuard SOC <span class="tag">FUNCTIONAL CHARACTERISTICS TIMELINE</span>
+          </h1>
+          <p>System Architecture & Capabilities Evaluation Matrix Across the 14-Week Capstone Lifecycle</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="chronological_timeline.html" class="btn btn-secondary" title="Switch to Chronological Slide & Milestone Timeline">
+          <span>🖼️</span> Slide Timeline
+        </a>
+        <a href="timeline_gantt.html" class="btn btn-secondary" title="Switch to Weekly Gantt Milestone Schedule">
+          <span>📅</span> Weekly Schedule
+        </a>
+        <a href="presentations/OmniGuard_Checkpoint1_Presentation.pdf" target="_blank" class="btn btn-secondary" title="Open Checkpoint 1 Presentation Deck (PDF)">
+          <span>📊</span> CP1 Slides (PDF)
+        </a>
+        <button class="btn btn-secondary" id="exportBtn" title="Export team evaluation report to JSON">
+          <span>📥</span> Export Report
+        </button>
+        <button class="btn btn-secondary" id="importBtn" title="Import team evaluation data">
+          <span>📤</span> Import Report
+        </button>
+        <input type="file" id="importFileInput" style="display: none;" accept=".json" />
+        <button class="btn btn-secondary" id="resetBtn" title="Reset evaluation to defaults">
+          <span>🔄</span> Reset
+        </button>
+        <button class="btn btn-primary" onclick="window.print()" title="Print or save as PDF">
+          <span>🖨️</span> Print Matrix
+        </button>
+      </div>
+    </header>
+
+    <!-- Top Evaluation Matrix Summary Bar -->
+    <div class="eval-summary-grid">
+      
+      <!-- Readiness Score Card -->
+      <div class="card readiness-score-card">
+        <div>
+          <div class="readiness-header">
+            <h3>System Maturity Index</h3>
+            <span style="font-size: 16px;">🏆</span>
+          </div>
+          <div class="readiness-value-box">
+            <span class="readiness-big-num" id="overallMaturityScore">0%</span>
+            <span class="readiness-denom">/ 100% Target</span>
+          </div>
+          <div class="readiness-status-badge" id="maturityStatusBadge">Calibrating...</div>
+        </div>
+        <div class="readiness-breakdown">
+          <span id="verifiedCharCount">0/24 Verified</span>
+          <span id="targetWeekStatus">Week 4 Active</span>
+        </div>
+      </div>
+
+      <!-- Functional Pillar Health Meters (6 Pillars) -->
+      <div class="card">
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px;">
+          Functional Pillar Readiness Breakdown
+        </div>
+        <div class="pillar-meters-grid" id="pillarMetersContainer">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Controls Bar -->
+    <div class="controls-bar">
+      
+      <!-- Filter Group -->
+      <div class="filter-group">
+        <span class="filter-label">Pillar:</span>
+        <button class="pill-btn active" data-pillar="all">All Characteristics</button>
+        <button class="pill-btn" data-pillar="ingress">VerifyEye Ingress</button>
+        <button class="pill-btn" data-pillar="spectrac2">SpectraC2 Engine</button>
+        <button class="pill-btn" data-pillar="telemetry">Streaming Pipeline</button>
+        <button class="pill-btn" data-pillar="graph">Property Graph</button>
+        <button class="pill-btn" data-pillar="llm">Local LLM Triage</button>
+        <button class="pill-btn" data-pillar="dashboard">Unified Dashboard</button>
+      </div>
+
+      <!-- View Selector -->
+      <div class="view-mode-group">
+        <button class="view-btn active" id="viewGanttBtn">Timeline Grid</button>
+        <button class="view-btn" id="viewCardsBtn">Evaluation Cards</button>
+      </div>
+
+    </div>
+
+    <!-- Timeline Grid Container -->
+    <div class="timeline-container" id="timelineContainer">
+      
+      <!-- Week Columns Header -->
+      <div class="timeline-header-row">
+        <div class="th-col feat-col">Functional Characteristic & System Capability</div>
+        <div class="th-col status-col">Evaluation Status</div>
+        <div class="th-col" data-w="1">W1</div>
+        <div class="th-col" data-w="2">W2</div>
+        <div class="th-col" data-w="3">W3</div>
+        <div class="th-col" data-w="4">W4</div>
+        <div class="th-col" data-w="5">W5</div>
+        <div class="th-col" data-w="6">W6</div>
+        <div class="th-col" data-w="7">W7</div>
+        <div class="th-col" data-w="8">W8</div>
+        <div class="th-col" data-w="9">W9</div>
+        <div class="th-col" data-w="10">W10</div>
+        <div class="th-col" data-w="11">W11</div>
+        <div class="th-col" data-w="12">W12</div>
+        <div class="th-col" data-w="13">W13</div>
+        <div class="th-col" data-w="14">W14</div>
+      </div>
+
+      <!-- Pillar Groups & Functional Features (Injected by JS) -->
+      <div id="functionalBody"></div>
+
+    </div>
+
+    <!-- Evaluation Cards View Container (Alternate View) -->
+    <div id="cardsViewContainer" style="display: none; margin-bottom: 32px;"></div>
+
+    <!-- Footer Note -->
+    <footer style="text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border-subtle);">
+      OmniGuard SOC Autonomous Threat Defense & Incident Triage • Functional Characteristics Evaluation Matrix • Built for Team Milestone Assessment.
+    </footer>
+
+  </div>
+
+  <!-- Detail & Evaluation Modal -->
+  <div class="modal-backdrop" id="featModal">
+    <div class="modal-card">
+      <button class="modal-close" id="modalCloseBtn">&times;</button>
+      <div class="modal-header">
+        <h2 id="modalTitle">Capability Title</h2>
+        <div class="modal-badges">
+          <span class="pillar-badge" id="modalPillarBadge">Pillar</span>
+          <span class="pillar-badge" style="background: rgba(255,255,255,0.08); color: var(--text-main);" id="modalSpanBadge">Weeks Span</span>
+          <span class="pillar-badge" style="background: rgba(56,189,248,0.15); color: var(--cyan);" id="modalMitreBadge">MITRE Technique</span>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div>
+          <div class="modal-section-title">Functional Description & Operational Role</div>
+          <p id="modalDescription">Description</p>
+        </div>
+        <div>
+          <div class="modal-section-title">Evaluation Benchmark & Verification Criteria</div>
+          <p id="modalCriteria" style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--green);">Criteria</p>
+        </div>
+        <div>
+          <div class="modal-section-title">Key Architectural Components</div>
+          <p id="modalComponents" style="font-size: 12px; color: var(--text-muted);"></p>
+        </div>
+        <div>
+          <div class="modal-section-title">Team Evaluation Notes & Testing Log</div>
+          <textarea class="notes-textarea" id="modalNotesText" placeholder="Record team review comments, benchmark numbers, or test findings..."></textarea>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="modalCheckbox" class="feat-checkbox" />
+            <span style="font-weight: 600; color: var(--text-main);">Validated & Verified for Production</span>
+          </label>
+          <button class="btn btn-primary" id="modalSaveNotesBtn">Save Evaluation</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Functional Characteristics Architecture Hierarchy
+    const FUNCTIONAL_PILLARS = [
+      {
+        id: "ingress",
+        name: "1. Visual & DOM Ingress Defense (VerifyEye)",
+        badge: "VERIFYEYE",
+        color: "var(--pillar-ingress)",
+        lead: "Abu Bakar Siddik",
+        description: "Zero-hour client-side rendering anomaly inspection, perceptual logo recognition, and BadUSB emulation.",
+        features: [
+          {
+            id: "f_ing_1",
+            name: "Physical BadUSB & Captive Portal Redirection",
+            metric: "Keystroke payload execution <3s",
+            startWeek: 1,
+            endWeek: 3,
+            mitre: "T1056 / Input Capture",
+            components: "Flipper Zero DuckyScript, Sub-GHz RF payloads, Evil Portal DNS redirect",
+            description: "Simulates initial physical breach vector injecting automated keystrokes to redirect users to lookalike captive portals.",
+            criteria: "Automated execution launches zero-hour credential login interface without OS elevation prompt."
+          },
+          {
+            id: "f_ing_2",
+            name: "Headless Playwright DOM Form-Action Extraction",
+            metric: "DOM parsing <400ms per URL",
+            startWeek: 4,
+            endWeek: 6,
+            mitre: "T1566 / Phishing",
+            components: "Playwright Headless Chromium, DOM Action Inspector, URL Normalizer",
+            description: "Crawls suspected URLs in real time to extract cross-origin submission targets, password fields, and hidden iframes.",
+            criteria: "Accurately flags cross-origin form POST endpoints differing from legitimate domain identity."
+          },
+          {
+            id: "f_ing_3",
+            name: "Sub-500ms YOLOv8 Brand Logo Detection (ONNX)",
+            metric: ">92% mAP / <500ms inference",
+            startWeek: 4,
+            endWeek: 7,
+            mitre: "T1566 / Brand Spoofing",
+            components: "YOLOv8 Nano/Small, ONNX Runtime, Microsoft/Okta/Google weights",
+            description: "Applies computer vision bounding box detection to identify authentic corporate brand logos on unverified domains.",
+            criteria: "Correctly identifies Microsoft 365, Okta, and Google Workspace logos with >92% mAP."
+          },
+          {
+            id: "f_ing_4",
+            name: "Perceptual Hashing (pHash) Favicon & Layout Matcher",
+            metric: "Hamming distance <= 10 / <50ms",
+            startWeek: 5,
+            endWeek: 8,
+            mitre: "T1566.002 / Spearphishing Link",
+            components: "pHash algorithm, OpenCV, reference brand asset store",
+            description: "Computes discrete cosine transform visual hashes on rendered favicons and UI layouts to catch visually identical clone pages.",
+            criteria: "Identifies altered or resized brand graphics within threshold distance of genuine reference assets."
+          },
+          {
+            id: "f_ing_5",
+            name: "Client Input Freezing & Ingress Alert Dispatch",
+            metric: "Real-time DOM locking in Chrome MV3",
+            startWeek: 10,
+            endWeek: 12,
+            mitre: "T1056.001 / Keylogging Defense",
+            components: "Chrome Extension (Manifest V3), Content Script DOM freeze, Threat Overlay",
+            description: "Locks HTML form inputs and renders visual bounding warning boxes before credentials can be submitted over the wire.",
+            criteria: "Prevents POST submit event and emits structured JSON ingress alert to Kafka streaming pipeline."
+          }
+        ]
+      },
+      {
+        id: "spectrac2",
+        name: "2. Jitter-Invariant Encrypted C2 Analytics (SpectraC2)",
+        badge: "SPECTRAC2",
+        color: "var(--pillar-spectrac2)",
+        lead: "Khoi Duong",
+        description: "Metadata-only behavioral flow analytics isolating encrypted beacons without TLS 1.3 decryption.",
+        features: [
+          {
+            id: "f_spc_1",
+            name: "Inter-Arrival Time (IAT) Variance & Flow Delta Tracking",
+            metric: "Temporal delta resolution: microseconds",
+            startWeek: 2,
+            endWeek: 5,
+            mitre: "T1071.001 / Web Protocols",
+            components: "NumPy flow array, sliding-window aggregator, packet delta calculator",
+            description: "Calculates inter-packet arrival time deltas Δt = t_i - t_{i-1} and packet sizing symmetry without decrypting TLS payloads.",
+            criteria: "Extracts normalized 50-packet flow sequence vectors with statistical jitter variance in <10ms."
+          },
+          {
+            id: "f_spc_2",
+            name: "Fast Fourier Transform (FFT) & Spectral Energy Density",
+            metric: "Periodic harmonic peak SNR > 3.0",
+            startWeek: 4,
+            endWeek: 6,
+            mitre: "TA0011 / Command and Control",
+            components: "SciPy FFT, Power Spectral Density (PSD), peak harmonic detector",
+            description: "Transforms time-series inter-arrival intervals into frequency domain to unmask hidden periodic loops under 10%–50% randomized jitter.",
+            criteria: "Isolates programmatic beacon frequencies from noisy human web browsing distributions."
+          },
+          {
+            id: "f_spc_3",
+            name: "Bidirectional LSTM Sequence Classifier",
+            metric: ">95% precision on C2 flow test suites",
+            startWeek: 4,
+            endWeek: 7,
+            mitre: "T1573 / Encrypted Channel",
+            components: "PyTorch BiLSTM, spectrac2_lstm.pt model checkpoint, sequence tokenizer",
+            description: "Evaluates multi-packet sequential dependencies and flow rhythm to classify automated implant beaconing.",
+            criteria: "Correctly flags Sliver, Cobalt Strike, and custom reverse shell beacon streams with >95% precision."
+          },
+          {
+            id: "f_spc_4",
+            name: "Flow Anomaly Isolation Forest",
+            metric: "Unsupervised anomaly scoring <5ms",
+            startWeek: 5,
+            endWeek: 7,
+            mitre: "T1071 / Application Layer Protocol",
+            components: "Scikit-Learn Isolation Forest, isolation_forest.joblib",
+            description: "Provides zero-day outlier detection for unknown or heavily obfuscated egress channels deviating from enterprise baselines.",
+            criteria: "Scores flow anomalies independently and feeds joint confidence score to inference service."
+          },
+          {
+            id: "f_spc_5",
+            name: "IBM LinuxONE (s390x) Containerized Microservice",
+            metric: ">10,000 concurrent flows / sub-50ms latency",
+            startWeek: 5,
+            endWeek: 9,
+            mitre: "Enterprise Mainframe Scale",
+            components: "Dockerfile.s390x, FastAPI service/main.py, IBM LinuxONE III",
+            description: "Deploys inference pipeline onto IBM LinuxONE s390x mainframe architecture ensuring mission-critical enterprise throughput.",
+            criteria: "Container runs natively on s390x compute node with batch inference processing."
+          }
+        ]
+      },
+      {
+        id: "telemetry",
+        name: "3. High-Throughput Streaming Telemetry Pipeline",
+        badge: "TELEMETRY",
+        color: "var(--pillar-telemetry)",
+        lead: "Khoi Duong",
+        description: "Scalable network log streaming, protocol parsing, and backpressure buffering.",
+        features: [
+          {
+            id: "f_tel_1",
+            name: "Zeek (Bro) Connection & SSL Stream Extractors",
+            metric: "100% conn.log / ssl.log schema alignment",
+            startWeek: 2,
+            endWeek: 4,
+            mitre: "Network Telemetry",
+            components: "Zeek conn_parser.py, ssl_parser.py, protocol normalizer",
+            description: "Extracts connection durations, cumulative byte counts, TLS SNI headers, and TCP state flags from live sensor taps.",
+            criteria: "Parses and outputs standardized 5-tuple JSON records with microsecond timestamps."
+          },
+          {
+            id: "f_tel_2",
+            name: "Suricata EVE JSON Signature & Anomaly Ingestion",
+            metric: "Zero dropped alerts during burst traffic",
+            startWeek: 2,
+            endWeek: 4,
+            mitre: "Intrusion Detection Feeds",
+            components: "Suricata eve_parser.py, EVE.json streaming reader",
+            description: "Ingests real-time signature hits, TLS certificates, and HTTP metadata from network boundary taps.",
+            criteria: "Successfully translates Suricata alert payloads into normalized alert events for pipeline ingestion."
+          },
+          {
+            id: "f_tel_3",
+            name: "Kafka Backpressure Buffering & 5-Tuple Window Aggregator",
+            metric: "Sliding window aggregation (50 packets)",
+            startWeek: 3,
+            endWeek: 6,
+            mitre: "Streaming Ingestion",
+            components: "Apache Kafka topics, Redis queue workers, stream_consumer.py",
+            description: "Maintains high-throughput sliding flow windows per 5-tuple key, forwarding completed flow vectors directly to inference engine.",
+            criteria: "Aggregates packets into 50-packet windows and forwards to SpectraC2 and Graph Triage without packet drop."
+          }
+        ]
+      },
+      {
+        id: "graph",
+        name: "4. Multi-Relational Attack Graph & Blast Radius Core",
+        badge: "NEO4J GRAPH",
+        color: "var(--pillar-graph)",
+        lead: "Aayush Maharjan",
+        description: "Dynamic property graph maintaining enterprise entity relationships and calculating lateral movement blast radiuses.",
+        features: [
+          {
+            id: "f_grp_1",
+            name: "Neo4j Property Graph Schema & Index Constraints",
+            metric: "Cypher constraint index lookups <5ms",
+            startWeek: 4,
+            endWeek: 6,
+            mitre: "Enterprise Entity Modeling",
+            components: "Neo4j Cypher schemas, Node labels (Host, User, IP, Process, Domain)",
+            description: "Maintains persistent graph representations of enterprise topology with relationships (CONNECTED_TO, SPAWNED, AUTHENTICATED_AS).",
+            criteria: "Neo4j database boots with unique constraints and indexes configured across all primary keys."
+          },
+          {
+            id: "f_grp_2",
+            name: "Automated Real-Time Entity Resolution Pipeline",
+            metric: "Node/Edge upsert latency <20ms",
+            startWeek: 5,
+            endWeek: 7,
+            mitre: "Graph Ingestion",
+            components: "graph-triage-core API, Neo4j Python Driver, Deduplication engine",
+            description: "Consumes normalized alerts from SpectraC2 and VerifyEye, dynamically creating and linking graph nodes without entity duplication.",
+            criteria: "Merges new alerts to existing IP/Host nodes seamlessly, building unified multi-hop attack trails."
+          },
+          {
+            id: "f_grp_3",
+            name: "NetworkX / Cypher Shortest-Path & Lateral Movement Tracking",
+            metric: "Multi-hop pivot traversal <100ms",
+            startWeek: 7,
+            endWeek: 9,
+            mitre: "TA0008 / Lateral Movement",
+            components: "NetworkX, Dijkstra shortest-path, Pass-the-Hash log stitcher",
+            description: "Identifies lateral pivoting across workstations and domain controllers (e.g., LSASS dump, SMB authentication paths).",
+            criteria: "Traces attack route from initial Flipper/Phishing ingress node to current internal foothold."
+          },
+          {
+            id: "f_grp_4",
+            name: "Dynamic Blast Radius & Centrality Risk Scoring",
+            metric: "Blast radius calculation <200ms",
+            startWeek: 8,
+            endWeek: 10,
+            mitre: "Impact Assessment",
+            components: "Graph Centrality algorithms, Blast radius propagation engine",
+            description: "Quantifies the risk perimeter by traversing outbound reachability from compromised assets, prioritizing high-value assets.",
+            criteria: "Computes blast radius subgraph and returns quantified severity score to analyst console."
+          }
+        ]
+      },
+      {
+        id: "llm",
+        name: "5. Air-Gapped Local LLM Triage & Remediation Engine",
+        badge: "OLLAMA LLM",
+        color: "var(--pillar-llm)",
+        lead: "Aayush Maharjan",
+        description: "Zero-cloud-egress threat synthesis, automated MITRE ATT&CK mapping, and 1-click mitigation generation.",
+        features: [
+          {
+            id: "f_llm_1",
+            name: "Air-Gapped On-Premise Ollama Runtime Deployment",
+            metric: "Zero cloud network egress / 100% local",
+            startWeek: 7,
+            endWeek: 8,
+            mitre: "Data Sovereignty & Privacy",
+            components: "Ollama container, Llama-3-Cyber / Mistral weights, Local inference",
+            description: "Runs local threat analysis model on-premise without transmitting sensitive network topology or credentials to cloud APIs.",
+            criteria: "Network inspection confirms zero third-party outbound HTTP/DNS traffic during prompt execution."
+          },
+          {
+            id: "f_llm_2",
+            name: "Structured Pydantic JSON Schema Prompt Engineering",
+            metric: "100% schema validation compliance",
+            startWeek: 8,
+            endWeek: 10,
+            mitre: "Deterministic Threat Synthesis",
+            components: "LangChain, Pydantic schemas, Structured JSON outputs",
+            description: "Injects attack graph subgraphs into templated prompts producing deterministic, typed JSON incident summaries.",
+            criteria: "Model outputs conform strictly to IncidentReportSchema with zero parsing failures."
+          },
+          {
+            id: "f_llm_3",
+            name: "Dynamic MITRE ATT&CK Matrix Tactic Tagging",
+            metric: "Accurate technique mapping (T1566, T1071, etc.)",
+            startWeek: 8,
+            endWeek: 10,
+            mitre: "MITRE ATT&CK v15.0",
+            components: "MITRE ATT&CK mapping engine, Kill-chain classifier",
+            description: "Correlates multi-modal indicators (phishing, beaconing, pivoting) to official MITRE tactics and techniques.",
+            criteria: "Generated summaries accurately identify and tag Ingress (T1566), C2 (T1071), and Lateral Movement (TA0008)."
+          },
+          {
+            id: "f_llm_4",
+            name: "Autonomous 1-Click Mitigation Action Generator",
+            metric: "Actionable firewall & isolation commands",
+            startWeek: 9,
+            endWeek: 12,
+            mitre: "Incident Containment",
+            components: "Remediation synthesizer, Host quarantine scripts, IPTables rules",
+            description: "Produces executable containment directives (e.g., isolate host IP, block C2 port, terminate malicious PID).",
+            criteria: "Pushes validated remediation commands ready for 1-click execution in the analyst console."
+          }
+        ]
+      },
+      {
+        id: "dashboard",
+        name: "6. Unified SOC Visualizer & Autonomous Containment Console",
+        badge: "SOC CONSOLE",
+        color: "var(--pillar-dashboard)",
+        lead: "Aayush Maharjan & Khoi Duong",
+        description: "Interactive multi-pane interface for attack graph exploration, FFT spectral heatmaps, and live containment.",
+        features: [
+          {
+            id: "f_dsh_1",
+            name: "Interactive React Flow Attack Topology Canvas",
+            metric: "60 FPS rendering / pan-zoom navigation",
+            startWeek: 5,
+            endWeek: 11,
+            mitre: "Visual SOC Investigation",
+            components: "React.js, React Flow, Custom node rendering, Edge pulse animations",
+            description: "Renders live interactive graph of compromised nodes, active C2 beacons, and lateral pivot vectors.",
+            criteria: "Smoothly navigates complex multi-hop graphs with node inspection and blast radius visual highlighting."
+          },
+          {
+            id: "f_dsh_2",
+            name: "D3.js / Recharts FFT Periodicity & Beacon Heatmaps",
+            metric: "Real-time frequency spectra display",
+            startWeek: 10,
+            endWeek: 12,
+            mitre: "Spectral C2 Analytics UI",
+            components: "D3.js, Recharts, Frequency spectrum visualizer",
+            description: "Displays power spectral density plots and inter-arrival time heatmaps proving algorithmic beacon periodicity.",
+            criteria: "Visually isolates beaconing harmonic frequencies from background human web browsing noise."
+          },
+          {
+            id: "f_dsh_3",
+            name: "Sub-Second Bi-Directional WebSocket Streaming",
+            metric: "End-to-end alert latency <200ms",
+            startWeek: 11,
+            endWeek: 13,
+            mitre: "Real-Time SOC Operations",
+            components: "FastAPI WebSockets, React event listener, Audio/Visual notification",
+            description: "Streams live alerts and graph mutations to connected analyst browsers with sub-second responsiveness.",
+            criteria: "Alerts appear on dashboard canvas immediately upon Kafka message emission."
+          },
+          {
+            id: "f_dsh_4",
+            name: "End-to-End Showcase Replay & 1-Click Host Containment",
+            metric: "MTTR reduction >90% / Live quarantine",
+            startWeek: 13,
+            endWeek: 14,
+            mitre: "Full Kill-Chain Demonstration",
+            components: "Full-spectrum replay suite, Live 1-click quarantine buttons, MTTR benchmark",
+            description: "Enables interactive 1-click host quarantine and demonstrates end-to-end defense across the entire kill-chain.",
+            criteria: "Demonstrates complete BadUSB -> C2 -> Graph Triage -> 1-Click Isolation in under 5 minutes."
+          }
+        ]
+      }
+    ];
+
+    // Persistence State
+    const FUNCTIONAL_STORAGE_KEY = 'omniguard_functional_timeline_v1';
+    let state = {
+      verifiedFeatures: {}, // { [featId]: boolean }
+      featureStatus: {},   // { [featId]: 'planned' | 'in-progress' | 'functional' | 'verified' }
+      featureNotes: {},    // { [featId]: string }
+      filterPillar: 'all',
+      viewMode: 'gantt',   // 'gantt' | 'cards'
+      collapsedPillars: {}
+    };
+
+    // Defaults based on current progress
+    const DEFAULT_VERIFIED = {
+      f_ing_1: true, // Flipper Zero scripts authored
+      f_spc_1: true, // IAT temporal feature extraction
+      f_spc_2: true, // FFT spectral power density implemented
+      f_spc_3: true, // BiLSTM model trained
+      f_spc_4: true, // Isolation Forest trained
+      f_tel_1: true, // Zeek stream parser implemented
+      f_tel_2: true, // Suricata EVE parser implemented
+      f_tel_3: true  // Kafka stream consumer & window aggregator implemented
+    };
+
+    const DEFAULT_STATUS = {
+      f_ing_1: 'verified',
+      f_ing_2: 'in-progress',
+      f_ing_3: 'in-progress',
+      f_ing_4: 'planned',
+      f_ing_5: 'planned',
+      
+      f_spc_1: 'verified',
+      f_spc_2: 'verified',
+      f_spc_3: 'verified',
+      f_spc_4: 'verified',
+      f_spc_5: 'functional',
+
+      f_tel_1: 'verified',
+      f_tel_2: 'verified',
+      f_tel_3: 'verified',
+
+      f_grp_1: 'in-progress',
+      f_grp_2: 'in-progress',
+      f_grp_3: 'planned',
+      f_grp_4: 'planned',
+
+      f_llm_1: 'planned',
+      f_llm_2: 'planned',
+      f_llm_3: 'planned',
+      f_llm_4: 'planned',
+
+      f_dsh_1: 'in-progress',
+      f_dsh_2: 'planned',
+      f_dsh_3: 'planned',
+      f_dsh_4: 'planned'
+    };
+
+    function loadState() {
+      const saved = localStorage.getItem(FUNCTIONAL_STORAGE_KEY);
+      if (saved) {
+        try {
+          state = { ...state, ...JSON.parse(saved) };
+        } catch (e) {
+          console.error("Failed to parse functional timeline state", e);
+        }
+      } else {
+        state.verifiedFeatures = { ...DEFAULT_VERIFIED };
+        state.featureStatus = { ...DEFAULT_STATUS };
+      }
+    }
+
+    function saveState() {
+      localStorage.setItem(FUNCTIONAL_STORAGE_KEY, JSON.stringify(state));
+    }
+
+    // Calculations
+    function computeMetrics() {
+      let totalFeats = 0;
+      let verifiedCount = 0;
+      let totalWeight = 0;
+      let earnedWeight = 0;
+
+      const pillarStats = {};
+
+      FUNCTIONAL_PILLARS.forEach(pillar => {
+        let pTotal = 0;
+        let pVerified = 0;
+        let pScore = 0;
+
+        pillar.features.forEach(feat => {
+          totalFeats++;
+          pTotal++;
+          const isVerified = !!state.verifiedFeatures[feat.id];
+          if (isVerified) {
+            verifiedCount++;
+            pVerified++;
+          }
+
+          // Weighted status score:
+          // planned: 10%, in-progress: 40%, functional: 75%, verified: 100%
+          const st = state.featureStatus[feat.id] || 'planned';
+          let weight = 0.1;
+          if (st === 'in-progress') weight = 0.45;
+          else if (st === 'functional') weight = 0.8;
+          else if (st === 'verified' || isVerified) weight = 1.0;
+
+          pScore += weight;
+          totalWeight += 1.0;
+          earnedWeight += weight;
+        });
+
+        pillarStats[pillar.id] = {
+          total: pTotal,
+          verified: pVerified,
+          percent: pTotal ? Math.round((pScore / pTotal) * 100) : 0
+        };
+      });
+
+      const overallMaturity = totalWeight ? Math.round((earnedWeight / totalWeight) * 100) : 0;
+
+      // Update Header Metrics
+      document.getElementById('overallMaturityScore').textContent = `${overallMaturity}%`;
+      document.getElementById('verifiedCharCount').textContent = `${verifiedCount}/${totalFeats} Characteristics Verified`;
+
+      const badge = document.getElementById('maturityStatusBadge');
+      if (overallMaturity >= 80) {
+        badge.textContent = "Production Capstone Ready";
+        badge.style.color = "var(--green)";
+        badge.style.borderColor = "var(--green)";
+      } else if (overallMaturity >= 45) {
+        badge.textContent = "Mid-Stage Architecture Active";
+        badge.style.color = "var(--cyan)";
+        badge.style.borderColor = "var(--cyan)";
+      } else {
+        badge.textContent = "Foundational Stage (Phase 1–2)";
+        badge.style.color = "var(--amber)";
+        badge.style.borderColor = "var(--amber)";
+      }
+
+      // Render Pillar Health Meters
+      const container = document.getElementById('pillarMetersContainer');
+      container.innerHTML = '';
+
+      FUNCTIONAL_PILLARS.forEach(pillar => {
+        const pStat = pillarStats[pillar.id] || { percent: 0, verified: 0, total: 0 };
+        const meter = document.createElement('div');
+        meter.className = 'pillar-meter-item';
+        meter.innerHTML = `
+          <div>
+            <div class="pmi-header">
+              <span class="pmi-title" style="color: ${pillar.color};">
+                <span>●</span> ${pillar.badge}
+              </span>
+              <span class="pmi-percent" style="color: ${pillar.color};">${pStat.percent}%</span>
+            </div>
+            <div class="pmi-sub">${pillar.lead}</div>
+          </div>
+          <div>
+            <div class="pmi-bar-bg">
+              <div class="pmi-bar-fill" style="width: ${pStat.percent}%; background: ${pillar.color};"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-top: 4px; font-family: 'JetBrains Mono', monospace;">
+              <span>${pStat.verified}/${pStat.total} Verified</span>
+              <span>${pStat.percent >= 80 ? 'Robust' : pStat.percent >= 40 ? 'Evolving' : 'Scaffold'}</span>
+            </div>
+          </div>
+        `;
+        container.appendChild(meter);
+      });
+    }
+
+    // Render Timeline View
+    function renderTimeline() {
+      const container = document.getElementById('functionalBody');
+      container.innerHTML = '';
+
+      FUNCTIONAL_PILLARS.forEach(pillar => {
+        // Filter
+        if (state.filterPillar !== 'all' && pillar.id !== state.filterPillar) {
+          return;
+        }
+
+        const pillarGroup = document.createElement('div');
+        pillarGroup.className = 'pillar-group';
+
+        const isCollapsed = !!state.collapsedPillars[pillar.id];
+
+        // Banner
+        const banner = document.createElement('div');
+        banner.className = 'pillar-banner';
+        banner.style.borderLeft = `4px solid ${pillar.color}`;
+
+        const verifiedCount = pillar.features.filter(f => !!state.verifiedFeatures[f.id]).length;
+        const totalCount = pillar.features.length;
+        const isAllDone = verifiedCount === totalCount;
+
+        banner.innerHTML = `
+          <div class="pillar-banner-left">
+            <span>${isCollapsed ? '▶' : '▼'}</span>
+            <span>${pillar.name}</span>
+            <span class="pillar-badge" style="background: rgba(255,255,255,0.08); color: ${pillar.color}; border: 1px solid ${pillar.color}40;">
+              Lead: ${pillar.lead}
+            </span>
+          </div>
+          <div class="pillar-banner-right">
+            <span>${pillar.features.length} Capabilities</span>
+            <span class="pillar-eval-summary ${isAllDone ? 'ready' : ''}">
+              ${verifiedCount}/${totalCount} Verified
+            </span>
+          </div>
+        `;
+        banner.onclick = () => {
+          state.collapsedPillars[pillar.id] = !isCollapsed;
+          saveState();
+          renderTimeline();
+        };
+        pillarGroup.appendChild(banner);
+
+        // Feature Rows
+        if (!isCollapsed) {
+          pillar.features.forEach(feat => {
+            const isVerified = !!state.verifiedFeatures[feat.id];
+            const currentStatus = state.featureStatus[feat.id] || 'planned';
+
+            const row = document.createElement('div');
+            row.className = `feat-row ${isVerified ? 'verified' : ''}`;
+
+            // 1. Feature Name & Metric Cell
+            const featCell = document.createElement('div');
+            featCell.className = 'feat-cell';
+
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.className = 'feat-checkbox';
+            chk.checked = isVerified;
+            chk.title = "Toggle verification status";
+            chk.onclick = (e) => {
+              e.stopPropagation();
+              toggleVerified(feat.id, chk.checked);
+            };
+
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'feat-info';
+
+            const nameSpan = document.createElement('div');
+            nameSpan.className = 'feat-name';
+            nameSpan.innerHTML = `<span>${feat.name}</span>`;
+            nameSpan.onclick = () => openModal(feat, pillar);
+
+            const metricDiv = document.createElement('div');
+            metricDiv.className = 'feat-metric';
+            metricDiv.innerHTML = `
+              <span style="color: ${pillar.color};">⚙ ${feat.metric}</span>
+              <span style="color: var(--text-dim);">| ${feat.mitre}</span>
+            `;
+
+            infoDiv.appendChild(nameSpan);
+            infoDiv.appendChild(metricDiv);
+            featCell.appendChild(chk);
+            featCell.appendChild(infoDiv);
+            row.appendChild(featCell);
+
+            // 2. Status Selector Cell
+            const statusCell = document.createElement('div');
+            statusCell.className = 'status-cell';
+
+            const select = document.createElement('select');
+            select.className = `status-select st-${currentStatus}`;
+            select.innerHTML = `
+              <option value="planned" ${currentStatus==='planned'?'selected':''}>🔴 Planned</option>
+              <option value="in-progress" ${currentStatus==='in-progress'?'selected':''}>🟡 In Progress</option>
+              <option value="functional" ${currentStatus==='functional'?'selected':''}>🔵 Functional</option>
+              <option value="verified" ${currentStatus==='verified'?'selected':''}>🟢 Verified</option>
+            `;
+            select.onchange = (e) => {
+              updateStatus(feat.id, e.target.value);
+            };
+            statusCell.appendChild(select);
+            row.appendChild(statusCell);
+
+            // 3. Timeline Grid (Weeks 1 to 14)
+            const grid = document.createElement('div');
+            grid.className = 'timeline-grid';
+
+            for (let w = 1; w <= 14; w++) {
+              const bg = document.createElement('div');
+              bg.className = `week-col-bg ${w === 4 ? 'is-current' : ''}`;
+              grid.appendChild(bg);
+            }
+
+            // Timeline Span Bar
+            const bar = document.createElement('div');
+            const leftPct = ((feat.startWeek - 1) / 14) * 100;
+            const widthPct = ((feat.endWeek - feat.startWeek + 1) / 14) * 100;
+
+            bar.className = `span-bar ${isVerified ? 'verified-bar' : ''}`;
+            bar.style.left = `calc(${leftPct}% + 4px)`;
+            bar.style.width = `calc(${widthPct}% - 8px)`;
+            bar.style.background = `linear-gradient(90deg, ${pillar.color}cc, ${pillar.color}ee)`;
+            bar.style.borderColor = `${pillar.color}`;
+            bar.textContent = `W${feat.startWeek}–W${feat.endWeek}`;
+            bar.title = `${feat.name} (Weeks ${feat.startWeek}–${feat.endWeek}) - Click for evaluation modal`;
+            bar.onclick = () => openModal(feat, pillar);
+
+            grid.appendChild(bar);
+            row.appendChild(grid);
+
+            pillarGroup.appendChild(row);
+          });
+        }
+
+        container.appendChild(pillarGroup);
+      });
+
+      computeMetrics();
+    }
+
+    // Render Cards View (Alternative View)
+    function renderCards() {
+      const container = document.getElementById('cardsViewContainer');
+      container.innerHTML = '';
+
+      const grid = document.createElement('div');
+      grid.style.display = 'grid';
+      grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(480px, 1fr))';
+      grid.style.gap = '20px';
+
+      FUNCTIONAL_PILLARS.forEach(pillar => {
+        if (state.filterPillar !== 'all' && pillar.id !== state.filterPillar) return;
+
+        pillar.features.forEach(feat => {
+          const isVerified = !!state.verifiedFeatures[feat.id];
+          const st = state.featureStatus[feat.id] || 'planned';
+          const notes = state.featureNotes[feat.id] || '';
+
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.style.borderLeft = `4px solid ${pillar.color}`;
+          card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+              <span class="pillar-badge" style="background: rgba(255,255,255,0.06); color: ${pillar.color}; border: 1px solid ${pillar.color}40;">
+                ${pillar.badge}
+              </span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim);">
+                Weeks ${feat.startWeek}–${feat.endWeek}
+              </span>
+            </div>
+            <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 6px; cursor: pointer;" onclick="openModalById('${feat.id}')">
+              ${feat.name}
+            </h3>
+            <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px;">
+              ${feat.description}
+            </p>
+            <div style="background: rgba(15,23,42,0.6); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-grid); margin-bottom: 12px; font-size: 11px;">
+              <div style="font-family: 'JetBrains Mono', monospace; color: ${pillar.color}; font-weight: 600; margin-bottom: 3px;">
+                ⚙ Target Metric: ${feat.metric}
+              </div>
+              <div style="color: var(--text-dim); font-family: 'JetBrains Mono', monospace;">
+                Target MITRE: ${feat.mitre}
+              </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; pt-2; border-top: 1px solid var(--border-grid);">
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer;">
+                <input type="checkbox" class="feat-checkbox" ${isVerified ? 'checked' : ''} onchange="toggleVerified('${feat.id}', this.checked)" />
+                <span>Verified</span>
+              </label>
+              <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px;" onclick="openModalById('${feat.id}')">
+                Evaluation Notes ${notes ? '💬' : ''}
+              </button>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+      });
+
+      container.appendChild(grid);
+    }
+
+    // Toggle Verification
+    function toggleVerified(featId, checked) {
+      if (checked) {
+        state.verifiedFeatures[featId] = true;
+        state.featureStatus[featId] = 'verified';
+      } else {
+        delete state.verifiedFeatures[featId];
+        if (state.featureStatus[featId] === 'verified') {
+          state.featureStatus[featId] = 'functional';
+        }
+      }
+      saveState();
+      if (state.viewMode === 'gantt') renderTimeline();
+      else renderCards();
+      computeMetrics();
+    }
+
+    // Update Status Dropdown
+    function updateStatus(featId, newStatus) {
+      state.featureStatus[featId] = newStatus;
+      if (newStatus === 'verified') {
+        state.verifiedFeatures[featId] = true;
+      } else {
+        delete state.verifiedFeatures[featId];
+      }
+      saveState();
+      if (state.viewMode === 'gantt') renderTimeline();
+      else renderCards();
+      computeMetrics();
+    }
+
+    // Modal Details Logic
+    let activeModalFeat = null;
+
+    function openModal(feat, pillar) {
+      activeModalFeat = feat;
+      const modal = document.getElementById('featModal');
+      
+      document.getElementById('modalTitle').textContent = feat.name;
+      
+      const pBadge = document.getElementById('modalPillarBadge');
+      pBadge.textContent = pillar.badge;
+      pBadge.style.color = pillar.color;
+      pBadge.style.borderColor = `${pillar.color}40`;
+      pBadge.style.background = `${pillar.color}15`;
+
+      document.getElementById('modalSpanBadge').textContent = `Active: Weeks ${feat.startWeek}–${feat.endWeek}`;
+      document.getElementById('modalMitreBadge').textContent = feat.mitre;
+      document.getElementById('modalDescription').textContent = feat.description;
+      document.getElementById('modalCriteria').textContent = feat.criteria;
+      document.getElementById('modalComponents').textContent = feat.components;
+
+      const notesText = document.getElementById('modalNotesText');
+      notesText.value = state.featureNotes[feat.id] || '';
+
+      const chk = document.getElementById('modalCheckbox');
+      chk.checked = !!state.verifiedFeatures[feat.id];
+      chk.onchange = () => {
+        toggleVerified(feat.id, chk.checked);
+      };
+
+      document.getElementById('modalSaveNotesBtn').onclick = () => {
+        state.featureNotes[feat.id] = notesText.value;
+        saveState();
+        alert("Evaluation notes saved successfully!");
+        closeModal();
+      };
+
+      modal.classList.add('open');
+    }
+
+    function openModalById(featId) {
+      for (const pillar of FUNCTIONAL_PILLARS) {
+        const f = pillar.features.find(item => item.id === featId);
+        if (f) {
+          openModal(f, pillar);
+          return;
+        }
+      }
+    }
+
+    function closeModal() {
+      document.getElementById('featModal').classList.remove('open');
+      activeModalFeat = null;
+    }
+
+    // Init & Listeners
+    document.addEventListener('DOMContentLoaded', () => {
+      loadState();
+
+      // Pillar Filter buttons
+      document.querySelectorAll('.pill-btn[data-pillar]').forEach(btn => {
+        btn.onclick = () => {
+          document.querySelectorAll('.pill-btn[data-pillar]').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          state.filterPillar = btn.getAttribute('data-pillar');
+          saveState();
+          if (state.viewMode === 'gantt') renderTimeline();
+          else renderCards();
+        };
+      });
+
+      // View Toggle Buttons
+      const ganttBtn = document.getElementById('viewGanttBtn');
+      const cardsBtn = document.getElementById('viewCardsBtn');
+      const tContainer = document.getElementById('timelineContainer');
+      const cContainer = document.getElementById('cardsViewContainer');
+
+      ganttBtn.onclick = () => {
+        ganttBtn.classList.add('active');
+        cardsBtn.classList.remove('active');
+        state.viewMode = 'gantt';
+        tContainer.style.display = 'block';
+        cContainer.style.display = 'none';
+        renderTimeline();
+      };
+
+      cardsBtn.onclick = () => {
+        cardsBtn.classList.add('active');
+        ganttBtn.classList.remove('active');
+        state.viewMode = 'cards';
+        tContainer.style.display = 'none';
+        cContainer.style.display = 'block';
+        renderCards();
+      };
+
+      // Reset Button
+      document.getElementById('resetBtn').onclick = () => {
+        if (confirm("Reset all functional characteristic evaluation statuses back to initial defaults?")) {
+          state.verifiedFeatures = { ...DEFAULT_VERIFIED };
+          state.featureStatus = { ...DEFAULT_STATUS };
+          state.featureNotes = {};
+          saveState();
+          if (state.viewMode === 'gantt') renderTimeline();
+          else renderCards();
+          computeMetrics();
+        }
+      };
+
+      // Export JSON Report
+      document.getElementById('exportBtn').onclick = () => {
+        const report = {
+          project: "OmniGuard SOC",
+          type: "Functional Characteristics & Capabilities Evaluation",
+          exportedAt: new Date().toISOString(),
+          maturityScore: document.getElementById('overallMaturityScore').textContent,
+          state: state
+        };
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(report, null, 2));
+        const dlAnchor = document.createElement('a');
+        dlAnchor.setAttribute("href", dataStr);
+        dlAnchor.setAttribute("download", `omniguard_functional_evaluation_${new Date().toISOString().slice(0,10)}.json`);
+        dlAnchor.click();
+      };
+
+      // Import JSON
+      const importBtn = document.getElementById('importBtn');
+      const importInput = document.getElementById('importFileInput');
+      importBtn.onclick = () => importInput.click();
+      importInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const imported = JSON.parse(event.target.result);
+            if (imported && (imported.state || imported.verifiedFeatures)) {
+              const loaded = imported.state || imported;
+              state = { ...state, ...loaded };
+              saveState();
+              if (state.viewMode === 'gantt') renderTimeline();
+              else renderCards();
+              computeMetrics();
+              alert("Functional evaluation data imported successfully!");
+            } else {
+              alert("Invalid functional evaluation JSON format.");
+            }
+          } catch (err) {
+            alert("Error reading JSON file: " + err.message);
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      // Modal Close Listeners
+      document.getElementById('modalCloseBtn').onclick = closeModal;
+      document.getElementById('featModal').onclick = (e) => {
+        if (e.target.id === 'featModal') closeModal();
+      };
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeModal();
+      });
+
+      // Initial Render
+      renderTimeline();
+    });
+  </script>
+</body>
+</html>

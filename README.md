@@ -249,6 +249,11 @@ Navigate to `http://localhost:3000` to view the active incident console.
 
 ## 8. Project Timeline & Milestones
 
+> 💡 **Interactive Trackers & Timelines**:
+> * 🖼️ [**Chronological Project Timeline & Key Milestones**](chronological_timeline.html) (`chronological_timeline.html`): High-fidelity 5-phase schedule slide showing current status at **Checkpoint 1 (Week 5)** and bridging toward **Checkpoint 2 (Week 7)** with team transition deliverables.
+> * 📅 [**Weekly Milestone Gantt Chart**](timeline_gantt.html) (`timeline_gantt.html`): Tracks task deliverables, weekly schedule (Weeks 1–14), and individual team progress (Khoi, Siddik, Aayush).
+> * ⚡ [**Functional Characteristics Timeline & Evaluation Matrix**](functional_timeline.html) (`functional_timeline.html`): Evaluates OmniGuard by functional capability (VerifyEye Ingress, SpectraC2, Streaming, Neo4j Graph, Ollama LLM Triage, SOC Console) with maturity scores, status tags, and team notes.
+
 | Phase | Duration | Focus Area | Deliverables |
 |---|---|---|---|
 | **Phase 1** | Weeks 1–3 | Architecture & Infrastructure | Provision IBM LinuxONE & AWS environments; configure Kafka/Redis queues; author Flipper Zero DuckyScripts and Sliver C2 listeners. |
