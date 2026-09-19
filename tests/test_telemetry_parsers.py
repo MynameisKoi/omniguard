@@ -10,11 +10,8 @@ telemetry_dir = os.path.join(repo_root, "telemetry-pipeline")
 if telemetry_dir not in sys.path:
     sys.path.insert(0, telemetry_dir)
 
-import importlib
-zeek_mod = importlib.import_module("zeek-scripts.conn_parser")
-suricata_mod = importlib.import_module("suricata.eve_parser")
-ZeekLogParser = zeek_mod.ZeekLogParser
-SuricataEveParser = suricata_mod.SuricataEveParser
+from zeek_scripts.conn_parser import ZeekLogParser
+from suricata.eve_parser import SuricataEveParser
 
 
 class TestZeekParser:

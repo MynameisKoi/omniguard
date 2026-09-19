@@ -153,12 +153,12 @@ omniguard-soc/
 │   ├── crawler/                  # Playwright headless DOM parsing service (AWS ECS/Lambda)
 │   └── models/                   # YOLOv8 weights, ONNX export scripts, and pHash utilities
 ├── spectrac2-engine/             # Encrypted Network Behavioral Analytics Subsystem
-│   ├── feature-extraction/       # IAT calculation, FFT, and spectral power density scripts
+│   ├── feature_extraction/       # IAT calculation, FFT, and spectral power density scripts
 │   ├── inference/                # Isolation Forest and LSTM model definitions & checkpoints
 │   ├── linuxone/                 # IBM LinuxONE (s390x) deployment manifests & Dockerfiles
 │   └── service/                  # FastAPI microservice exposing flow classification APIs
 ├── telemetry-pipeline/           # Streaming Ingestion & Parsing
-│   ├── zeek-scripts/             # Custom Zeek policy definitions & conn/ssl log extractors
+│   ├── zeek_scripts/             # Custom Zeek policy definitions & conn/ssl log extractors
 │   ├── suricata/                 # Suricata rulesets & EVE.json parsers
 │   └── kafka-consumers/          # Message serialization, Redis queue workers, & normalizers
 ├── graph-triage-core/            # Neo4j Entity Resolution & Local LLM Synthesis

@@ -57,5 +57,5 @@ curl -s http://localhost:8000/health | jq .
 ## Big-Endian vs Little-Endian Architecture Considerations
 
 * `s390x` is a **Big-Endian** architecture, unlike x86_64 and aarch64 which are Little-Endian.
-* All FFT and signal processing implementations in `spectrac2-engine/feature-extraction/` rely on native IEEE 754 floating point arrays with endianness handled automatically by NumPy and SciPy.
+* All FFT and signal processing implementations in `spectrac2-engine/feature_extraction/` rely on native IEEE 754 floating point arrays with endianness handled automatically by NumPy and SciPy.
 * Custom binary network protocol decoders should explicitly specify `>` (Big-Endian) or `<` (Little-Endian) when unpacking raw network packet headers using Python's `struct` module.
