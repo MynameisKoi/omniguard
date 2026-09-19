@@ -747,8 +747,6 @@ real user data
 large unnecessary datasets
 ```
 
-A `.gitignore` file should be added as the project grows.
-
 ---
 
 ## 17. Current Status
@@ -792,4 +790,3 @@ OmniGuard Integration
 
 This project is developed as a senior capstone project for educational and defensive cybersecurity research purposes.
 
-If this repository is later made public, the team should add an appropriate license and review the repository for sensitive information before publication.
