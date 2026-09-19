@@ -39,6 +39,18 @@ class AlertCreate(BaseModel):
         description="source IP address, it becomes an IP node",
         examples=["10.0.0.42"],
     )
+    dst_ip: str| None = Field(
+        None,
+        description="destination IP, the C2 listener; becomes an IP node.",
+        examples=["198.51.100.42"]
+    )
+    confidence: float | None = Field(
+        None, 
+        description="detector confidence, 0.0-1.0.",
+        ge=0.0,
+        le=1.0,
+        examples=[0.633]
+    )
     domain: str | None = Field(
         None,
         description="domain involved; becomes a Domain node",

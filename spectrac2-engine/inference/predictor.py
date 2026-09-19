@@ -137,8 +137,10 @@ class SpectraC2Predictor:
                 "host": meta.get("host", "HOST-UNKNOWN"),
                 "user": meta.get("user"),
                 "src_ip": meta.get("src_ip"),
+                "dst_ip": meta.get("dst_ip"),
                 "domain": meta.get("domain"),
                 "mitre_technique": "T1071",
+                "confidence": round(ensemble_score, 4),
                 "status": "new",
                 "description": desc,
             }
