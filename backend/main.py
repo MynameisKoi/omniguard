@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from models import Alert, AlertCreate
 from db import database
 
+from config import CORS_ORIGINS
+
 from fastapi.middleware.cors import CORSMiddleware
 
 # getting the collection
@@ -12,7 +14,7 @@ app = FastAPI(title="OmniGuard SOC API")
 
 app.add_middleware(
     CORSMiddleware, 
-    allow_origins=["http://localhost:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]

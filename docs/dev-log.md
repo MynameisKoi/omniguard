@@ -4,6 +4,20 @@ My notes while building the OmniGuard dashboard + backend + frontend + MongoDB. 
 
 ---
 
+## Mon, Sept 22 2026
+
+Backend cleanup
+
+- Added `config.py` — one place that loads `.env` and holds every setting
+- `db.py` and `main.py` read from it now instead of calling `os.getenv` themselves
+- Added `graph.py` with the Neo4j driver, `verify_connectivity()` passes
+- Neo4j password lives in `.env`, gitignored
+
+Next: `ingest_alert()` so alerts go into the graph from POST /alerts, then a
+graph endpoint for the frontend.
+
+---
+
 ## Fri, Sept 18 2026
 Worked on a lot of things
 
