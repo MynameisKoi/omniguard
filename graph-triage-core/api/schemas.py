@@ -57,6 +57,12 @@ class SpectraC2AlertInput(BaseModel):
     mean_jitter: float = Field(
         ..., ge=0.0, description="Mean absolute timing jitter in seconds"
     )
+    pid: Optional[int] = Field(
+        None, description="Originating process PID if endpoint telemetry is available"
+    )
+    process_name: Optional[str] = Field(
+        None, description="Originating binary executable name"
+    )
 
     @field_validator("severity", mode="before")
     @classmethod

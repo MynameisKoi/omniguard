@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "OmniGuard SOC Telemetry & Graph Schemas",
-  "description": "Standardized data schemas for VerifyEye (ingress phishing), SpectraC2 (beaconing egress), and Neo4j graph entity correlation.",
-  "version": "1.0.0",
+  "description": "Standardized data schemas for VerifyEye (ingress phishing), SpectraC2 (beaconing egress), and Neo4j graph entity correlation with Tier 2 nodes (Process, URL) and Tier 3 concept properties.",
+  "version": "1.1.0",
   "definitions": {
     "SeverityEnum": {
       "type": "string",
@@ -61,7 +61,7 @@
         "target_url": {
           "type": "string",
           "format": "uri",
-          "description": "Full URL of the flagged phishing website"
+          "description": "Full URL of the flagged phishing website (materialized into URL node in Neo4j)"
         },
         "domain": {
           "type": "string",
@@ -156,7 +156,8 @@
           "type": "string"
         },
         "service": {
-          "type": "string"
+          "type": "string",
+          "description": "Detected application service layer (e.g., 'ssl', 'ssh', 'http')"
         },
         "sni": {
           "type": ["string", "null"]
@@ -177,148 +178,234 @@
         "mean_jitter": {
           "type": "number",
           "description": "Timing jitter delta in seconds"
+        },
+        "pid": {
+          "type": ["integer", "null"],
+          "description": "Originating process PID if endpoint EDR telemetry is available"
+        },
+        "process_name": {
+          "type": ["string", "null"],
+          "description": "Originating process binary name (e.g. 'sliver-client.exe', 'powershell.exe')"
         }
       }
     }
   },
   "neo4j_graph_schema": {
-    "description": "Graph topology model for Neo4j entity resolution, shortest path discovery, and blast radius calculation.",
+    "description": "Neo4j property graph topology. Incorporates 7 primary nodes (Tier 1 core + Tier 2 Process & URL) with Tier 3 concepts represented cleanly as node and edge properties.",
     "nodes": {
       "Host": {
+        "description": "Physical or virtual machine endpoint (Asset and Network Segment concepts embedded as properties).",
         "primary_key": "host_id",
         "properties": {
-          "host_id": "STRING (unique identifier, e.g. 'HOST-CORP-42')",
-          "hostname": "STRING",
-          "ip": "STRING",
-          "os": "STRING (optional, e.g. 'Windows 11 Enterprise')",
+          "host_id": "STRING (unique identifier, e.g. 'HOST-CORP-WKSTN-10')",
+          "hostname": "STRING (e.g. 'WKSTN-FIN-10')",
+          "ip": "STRING (primary assigned IP)",
+          "os": "STRING ('Windows 11 Enterprise', 'Ubuntu 22.04 LTS')",
           "status": "STRING ('ACTIVE', 'COMPROMISED', 'ISOLATED')",
-          "last_seen": "FLOAT (epoch timestamp)"
+          "last_seen": "FLOAT (epoch timestamp)",
+          "is_critical_asset": "BOOLEAN (Tier 3 Asset concept: flags high-value targets)",
+          "asset_tier": "STRING (Tier 3 Asset concept: 'tier-1-dc', 'tier-2-server', 'workstation')",
+          "subnet": "STRING (Tier 3 Network Segment concept: e.g. '10.0.1.0/24')",
+          "vlan": "INTEGER (Tier 3 Network Segment concept: e.g. 10)",
+          "network_zone": "STRING (Tier 3 Network Segment concept: 'DMZ', 'INTERNAL', 'PCI_ZONE')",
+          "cve_list": "LIST<STRING> (Tier 3 Vulnerability concept: known unpatched CVEs on this host, e.g. ['CVE-2024-21413'])",
+          "cloud_provider": "STRING (Tier 3 Cloud Resource concept: 'aws', 'azure', 'gcp', 'on-prem')",
+          "cloud_region": "STRING (Tier 3 Cloud Resource concept: e.g. 'us-east-1')",
+          "installed_services": "LIST<STRING> (Tier 3 Service/Application concept: e.g. ['ssh', 'rdp', 'nginx'])"
         }
       },
       "User": {
+        "description": "Identity principal (Account concept embedded as properties).",
         "primary_key": "username",
         "properties": {
-          "username": "STRING (e.g. 'jdoe')",
-          "email": "STRING",
-          "department": "STRING",
-          "privilege_level": "STRING ('standard', 'admin', 'domain_admin')"
+          "username": "STRING (unique username, e.g. 'maharjan')",
+          "email": "STRING (e.g. 'maharjan@corp.internal')",
+          "department": "STRING (e.g. 'Finance', 'Engineering')",
+          "account_type": "STRING (Tier 3 Account concept: 'ActiveDirectory', 'Local', 'Okta_SaaS')",
+          "privilege_level": "STRING ('standard', 'admin', 'domain_admin')",
+          "is_service_account": "BOOLEAN (Tier 3 Account concept: true for automated identities)"
         }
       },
       "IP": {
+        "description": "Internal or external IPv4/IPv6 network endpoint.",
         "primary_key": "address",
         "properties": {
-          "address": "STRING (IPv4 or IPv6)",
-          "is_internal": "BOOLEAN",
-          "asn": "STRING (optional, e.g. 'AS16509 Amazon')",
-          "country": "STRING"
+          "address": "STRING (e.g. '10.0.1.42', '198.51.100.44')",
+          "is_internal": "BOOLEAN (true for RFC1918 internal addresses)",
+          "asn": "STRING (Autonomous System Number, e.g. 'AS16509 Amazon.com')",
+          "country": "STRING (GeoIP country code, e.g. 'US', 'NL')",
+          "subnet": "STRING (Tier 3 Network Segment concept: CIDR prefix, e.g. '10.0.1.0/24')",
+          "cloud_provider": "STRING (Tier 3 Cloud Resource concept: 'aws', 'cloudflare', 'digitalocean', 'on-prem')"
         }
       },
       "Domain": {
+        "description": "Fully Qualified Domain Name queried via DNS or TLS SNI.",
         "primary_key": "domain_name",
         "properties": {
-          "domain_name": "STRING (e.g. 'evil-microsoft-login.com')",
-          "tld": "STRING",
-          "brand_impersonated": "STRING",
-          "reputation_score": "FLOAT (0.0 to 1.0)",
-          "is_sinkholed": "BOOLEAN"
+          "domain_name": "STRING (e.g. 'evil-microsoft-login.com', 'cdn-profile-update.org')",
+          "tld": "STRING (e.g. 'com', 'org', 'xyz')",
+          "brand_impersonated": "STRING (e.g. 'Microsoft 365', 'Okta')",
+          "reputation_score": "FLOAT (0.0 to 1.0; 1.0 = malicious)",
+          "is_sinkholed": "BOOLEAN (true if internal DNS has redirected to sinkhole)"
+        }
+      },
+      "URL": {
+        "description": "Tier 2 Node: Explicit web resource link intercepted by VerifyEye. Links disparate hosts attacked with the same lure.",
+        "primary_key": "url",
+        "properties": {
+          "url": "STRING (full normalized target URL, e.g. 'https://evil-microsoft-login.com/auth/login.php')",
+          "path": "STRING (URL path component, e.g. '/auth/login.php')",
+          "action_endpoint": "STRING (form submission harvesting URL, e.g. 'https://evil-microsoft-login.com/api/v1/harvest')",
+          "brand_target": "STRING (brand target flagged by YOLOv8, e.g. 'Microsoft 365')",
+          "is_phishing": "BOOLEAN (true if confirmed malicious)",
+          "first_seen": "FLOAT (epoch timestamp)"
         }
       },
       "Process": {
+        "description": "Tier 2 Node: Running execution unit on a host (File/Payload concept embedded as sha256 property). Crucial for Stage 3 lateral movement and process injection.",
         "primary_key": "process_id",
         "properties": {
-          "process_id": "STRING (host_id + pid)",
-          "process_name": "STRING (e.g. 'powershell.exe', 'sliver-client.exe')",
-          "pid": "INTEGER",
-          "command_line": "STRING",
-          "sha256": "STRING"
+          "process_id": "STRING (composite unique key: host_id + ':' + pid, e.g. 'HOST-CORP-WKSTN-10:4920')",
+          "name": "STRING (executable binary name, e.g. 'powershell.exe', 'sliver-agent.exe', 'lsass.exe')",
+          "pid": "INTEGER (OS process ID)",
+          "parent_pid": "INTEGER (PPID of parent execution process)",
+          "command_line": "STRING (full invoked command-line arguments)",
+          "sha256": "STRING (Tier 3 File/Payload concept: cryptographic hash of binary file)",
+          "file_path": "STRING (Tier 3 File concept: path on disk, e.g. 'C:\\Windows\\Temp\\sliver.exe')",
+          "user": "STRING (user account security context under which process executed)",
+          "started_at": "FLOAT (epoch timestamp)",
+          "status": "STRING ('RUNNING', 'TERMINATED', 'KILLED_BY_SOC')"
         }
       },
       "Alert": {
+        "description": "Correlated high-confidence security event emitted by VerifyEye, SpectraC2, or EDR.",
         "primary_key": "alert_id",
         "properties": {
           "alert_id": "STRING (UUID)",
           "source": "STRING ('verifyeye' | 'spectrac2' | 'manual')",
-          "event_type": "STRING",
+          "event_type": "STRING ('phishing_page_detected', 'c2_beacon_detected')",
           "severity": "STRING ('LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL')",
-          "confidence": "FLOAT",
-          "mitre_technique": "STRING",
-          "timestamp": "FLOAT",
+          "confidence": "FLOAT (0.0 to 1.0)",
+          "mitre_technique": "STRING ('T1566.002', 'T1071', 'T1056')",
+          "timestamp": "FLOAT (epoch timestamp)",
           "status": "STRING ('new' | 'triaged' | 'resolved')",
-          "description": "STRING"
+          "description": "STRING (executive threat narrative)"
         }
       }
     },
     "relationships": [
       {
+        "type": "TARGETS_HOST",
+        "from": "Alert",
+        "to": "Host",
+        "description": "Direct alert attribution to affected physical/virtual host"
+      },
+      {
+        "type": "TARGETS_URL",
+        "from": "Alert",
+        "to": "URL",
+        "description": "VerifyEye alert pinpointing specific phishing URL"
+      },
+      {
+        "type": "INDICATES_DOMAIN",
+        "from": "Alert",
+        "to": "Domain",
+        "description": "Alert flagging malicious domain infrastructure"
+      },
+      {
+        "type": "INDICATES_IP",
+        "from": "Alert",
+        "to": "IP",
+        "description": "Alert flagging external command-and-control IP"
+      },
+      {
+        "type": "INVOLVES_USER",
+        "from": "Alert",
+        "to": "User",
+        "description": "Alert attributing compromise to specific user identity"
+      },
+      {
+        "type": "BELONGS_TO",
+        "from": "URL",
+        "to": "Domain",
+        "description": "Hierarchical link connecting specific URL path to its parent Domain node"
+      },
+      {
+        "type": "ACCESSED_URL",
+        "from": "Host",
+        "to": "URL",
+        "properties": { "timestamp": "FLOAT", "browser": "STRING" },
+        "description": "Host browser navigated to URL. Multi-host links reveal enterprise campaign breadth."
+      },
+      {
         "type": "RESOLVED_DOMAIN",
         "from": "Host",
         "to": "Domain",
         "properties": { "timestamp": "FLOAT", "query_type": "STRING" },
-        "description": "Host queried DNS for this external domain"
+        "description": "Host performed DNS resolution for domain"
       },
       {
         "type": "COMMUNICATED_WITH",
         "from": "Host",
         "to": "IP",
-        "properties": { "port": "INTEGER", "proto": "STRING", "beacon_interval": "FLOAT", "jitter": "FLOAT", "timestamp": "FLOAT" },
-        "description": "Network flow observed between host and target IP"
+        "properties": {
+          "port": "INTEGER (destination port, e.g. 443)",
+          "proto": "STRING ('tcp', 'udp')",
+          "service": "STRING (Tier 3 Service concept: 'ssl', 'ssh', 'rdp', 'http')",
+          "beacon_interval": "FLOAT (FFT dominant period in seconds)",
+          "mean_jitter": "FLOAT (timing delta jitter in seconds)",
+          "timestamp": "FLOAT"
+        },
+        "description": "Network connection established from host to external IP"
       },
       {
         "type": "LOGGED_INTO",
         "from": "User",
         "to": "Host",
-        "properties": { "timestamp": "FLOAT", "auth_type": "STRING" },
-        "description": "User logged in or authenticated on host"
-      },
-      {
-        "type": "HOSTS_DOMAIN",
-        "from": "IP",
-        "to": "Domain",
-        "properties": { "first_seen": "FLOAT", "last_seen": "FLOAT" },
-        "description": "IP address serves the specified domain"
+        "properties": { "timestamp": "FLOAT", "auth_type": "STRING ('Kerberos', 'NTLM', 'SSH')" },
+        "description": "User identity authenticated on machine"
       },
       {
         "type": "SPAWNED_PROCESS",
         "from": "Host",
         "to": "Process",
         "properties": { "timestamp": "FLOAT" },
-        "description": "Host execution tree spawned process"
+        "description": "Host operating system spawned execution process"
       },
       {
-        "type": "TARGETS_HOST",
-        "from": "Alert",
-        "to": "Host",
-        "description": "Direct link from incoming security alert to affected Host"
-      },
-      {
-        "type": "INDICATES_DOMAIN",
-        "from": "Alert",
-        "to": "Domain",
-        "description": "Link from phishing or C2 alert to malicious domain"
-      },
-      {
-        "type": "INDICATES_IP",
-        "from": "Alert",
+        "type": "INITIATED_FLOW",
+        "from": "Process",
         "to": "IP",
-        "description": "Link from network alert to malicious or destination IP"
+        "properties": { "port": "INTEGER", "proto": "STRING", "timestamp": "FLOAT" },
+        "description": "Specific process established network egress connection to external IP"
       },
       {
-        "type": "INVOLVES_USER",
-        "from": "Alert",
-        "to": "User",
-        "description": "Link from alert to victim or compromised account"
+        "type": "INJECTED_INTO",
+        "from": "Process",
+        "to": "Process",
+        "properties": { "technique": "STRING ('Process Injection', 'LSASS Dump')", "timestamp": "FLOAT" },
+        "description": "Malicious process performed memory injection into another process (Stage 3 lateral movement)"
+      },
+      {
+        "type": "HOSTS_DOMAIN",
+        "from": "IP",
+        "to": "Domain",
+        "properties": { "first_seen": "FLOAT", "last_seen": "FLOAT" },
+        "description": "External IP address resolves to or serves specified Domain"
       }
     ],
     "sample_cypher_queries": {
       "create_constraints": [
-        "CREATE CONSTRAINT IF NOT EXISTS FOR (h:Host) REQUIRE h.host_id IS UNIQUE;",
-        "CREATE CONSTRAINT IF NOT EXISTS FOR (u:User) REQUIRE u.username IS UNIQUE;",
-        "CREATE CONSTRAINT IF NOT EXISTS FOR (i:IP) REQUIRE i.address IS UNIQUE;",
-        "CREATE CONSTRAINT IF NOT EXISTS FOR (d:Domain) REQUIRE d.domain_name IS UNIQUE;",
-        "CREATE CONSTRAINT IF NOT EXISTS FOR (a:Alert) REQUIRE a.alert_id IS UNIQUE;"
-      ],
-      "ingest_verifyeye_alert": "MERGE (a:Alert {alert_id: $alert_id})\nON CREATE SET a.source = $source,\n              a.event_type = $event_type,\n              a.severity = $severity,\n              a.confidence = $confidence,\n              a.mitre_technique = $mitre_technique,\n              a.timestamp = $timestamp,\n              a.status = 'new',\n              a.description = $description\nMERGE (h:Host {host_id: $host_id})\nON CREATE SET h.hostname = $host_id, h.status = 'ACTIVE'\nMERGE (a)-[:TARGETS_HOST]->(h)\n\nFOREACH (_ IN CASE WHEN $user IS NOT NULL THEN [1] ELSE [] END |\n    MERGE (u:User {username: $user})\n    MERGE (a)-[:INVOLVES_USER]->(u)\n    MERGE (u)-[:LOGGED_INTO {timestamp: $timestamp}]->(h)\n)\n\nFOREACH (_ IN CASE WHEN $domain IS NOT NULL THEN [1] ELSE [] END |\n    MERGE (d:Domain {domain_name: $domain})\n    ON CREATE SET d.brand_impersonated = $brand_target,\n                  d.reputation_score = 0.95,\n                  d.is_sinkholed = false\n    MERGE (a)-[:INDICATES_DOMAIN]->(d)\n    MERGE (h)-[:RESOLVED_DOMAIN {timestamp: $timestamp}]->(d)\n)\n\nFOREACH (_ IN CASE WHEN $src_ip IS NOT NULL THEN [1] ELSE [] END |\n    MERGE (i:IP {address: $src_ip})\n    MERGE (h)-[:HAS_IP]->(i)\n);",
-      "ingest_spectrac2_alert": "MERGE (a:Alert {alert_id: $alert_id})\nON CREATE SET a.source = $source,\n              a.event_type = $event_type,\n              a.severity = $severity,\n              a.confidence = $confidence,\n              a.mitre_technique = $mitre_technique,\n              a.timestamp = $timestamp,\n              a.status = 'new',\n              a.description = 'Periodic C2 beaconing detected via FFT/LSTM spectral inference'\nMERGE (src_host:Host {host_id: $host_id})\nON CREATE SET src_host.status = 'ACTIVE'\nMERGE (a)-[:TARGETS_HOST]->(src_host)\n\nMERGE (dst_ip:IP {address: $dst_ip})\nON CREATE SET dst_ip.is_internal = false\nMERGE (a)-[:INDICATES_IP]->(dst_ip)\n\nMERGE (src_host)-[r:COMMUNICATED_WITH {port: $dst_port, proto: $proto}]->(dst_ip)\nSET r.beacon_interval = $beacon_interval,\n    r.mean_jitter = $mean_jitter,\n    r.timestamp = $timestamp\n\nFOREACH (_ IN CASE WHEN $sni IS NOT NULL THEN [1] ELSE [] END |\n    MERGE (d:Domain {domain_name: $sni})\n    MERGE (a)-[:INDICATES_DOMAIN]->(d)\n    MERGE (dst_ip)-[:HOSTS_DOMAIN]->(d)\n    MERGE (src_host)-[:RESOLVED_DOMAIN {timestamp: $timestamp}]->(d)\n);"
+        "CREATE CONSTRAINT unique_host_id IF NOT EXISTS FOR (h:Host) REQUIRE h.host_id IS UNIQUE;",
+        "CREATE CONSTRAINT unique_username IF NOT EXISTS FOR (u:User) REQUIRE u.username IS UNIQUE;",
+        "CREATE CONSTRAINT unique_ip_address IF NOT EXISTS FOR (i:IP) REQUIRE i.address IS UNIQUE;",
+        "CREATE CONSTRAINT unique_domain_name IF NOT EXISTS FOR (d:Domain) REQUIRE d.domain_name IS UNIQUE;",
+        "CREATE CONSTRAINT unique_url IF NOT EXISTS FOR (url:URL) REQUIRE url.url IS UNIQUE;",
+        "CREATE CONSTRAINT unique_process_id IF NOT EXISTS FOR (p:Process) REQUIRE p.process_id IS UNIQUE;",
+        "CREATE CONSTRAINT unique_alert_id IF NOT EXISTS FOR (a:Alert) REQUIRE a.alert_id IS UNIQUE;",
+        "CREATE INDEX alert_timestamp_idx IF NOT EXISTS FOR (a:Alert) ON (a.timestamp);",
+        "CREATE INDEX host_subnet_idx IF NOT EXISTS FOR (h:Host) ON (h.subnet);"
+      ]
     }
   },
   "sample_payloads": {
@@ -360,7 +447,9 @@
       "mitre_technique": "T1071",
       "confidence": 0.9782,
       "beacon_interval": 30.125,
-      "mean_jitter": 2.45
+      "mean_jitter": 2.45,
+      "pid": 4920,
+      "process_name": "sliver-agent.exe"
     }
   }
 }
