@@ -222,3 +222,35 @@ class TestGraphCoreAlertEndpoint:
         }
         response = graph_client.post("/api/v1/alerts", json=invalid_payload)
         assert response.status_code == 422
+
+    def test_post_valid_verifyeye_alert(self):
+        verifyeye_payload = {
+            "source": "verifyeye",
+            "event_type": "phishing_page_detected",
+            "severity": "CRITICAL",
+            "timestamp": 1700000010.0,
+            "host_id": "HOST-CORP-WKSTN-10",
+            "user": "maharjan",
+            "src_ip": "10.0.1.42",
+            "target_url": "https://evil-microsoft-login.com/auth/login.php",
+            "domain": "evil-microsoft-login.com",
+            "action_endpoint": "https://evil-microsoft-login.com/api/v1/harvest",
+            "brand_target": "Microsoft 365",
+            "confidence": 0.985,
+            "phash_distance": 2.0,
+            "input_frozen": True,
+            "mitre_technique": "T1566.002",
+            "description": "Visual impersonation of Microsoft 365 login portal intercepted.",
+        }
+        response = graph_client.post("/api/v1/alerts", json=verifyeye_payload)
+        assert response.status_code == 202
+        data = response.json()
+        assert data["status"] == "accepted"
+        assert "alert_id" in data
+        assert data["timestamp"] == 1700000010.0
+
+        # Verify alert appears in buffer
+        get_resp = graph_client.get("/api/v1/alerts")
+        assert get_resp.status_code == 200
+        alerts = get_resp.json()
+        assert any(a.get("source") == "verifyeye" and a.get("brand_target") == "Microsoft 365" for a in alerts)

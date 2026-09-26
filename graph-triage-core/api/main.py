@@ -24,7 +24,7 @@ core_dir = os.path.dirname(api_dir)
 if core_dir not in sys.path:
     sys.path.insert(0, core_dir)
 
-from api.schemas import SpectraC2AlertInput, AlertIngestResponse
+from api.schemas import SpectraC2AlertInput, VerifyEyeAlertInput, UnifiedAlertInput, AlertIngestResponse
 
 try:
     import redis
@@ -122,20 +122,27 @@ def health_check() -> Dict[str, Any]:
 
 
 @app.post("/api/v1/alerts", response_model=AlertIngestResponse, status_code=status.HTTP_202_ACCEPTED)
-def ingest_alert(alert_input: SpectraC2AlertInput) -> AlertIngestResponse:
-    """Ingests, logs, and queues a SpectraC2 beaconing alert for graph resolution."""
+def ingest_alert(alert_input: UnifiedAlertInput) -> AlertIngestResponse:
+    """Ingests, logs, and queues a SpectraC2 or VerifyEye alert for graph resolution."""
     alert_id = str(uuid.uuid4())
     alert_data = alert_input.model_dump()
     alert_data["alert_id"] = alert_id
     alert_data["ingested_at"] = time.time()
 
     # Log structured alert payload
-    logger.warning(
-        f"🚨 [INGESTED ALERT] ID: {alert_id} | Host: {alert_data['host_id']} | "
-        f"Target: {alert_data.get('sni') or alert_data['dst_ip']}:{alert_data['dst_port']} | "
-        f"Severity: {alert_data['severity']} | Conf: {alert_data['confidence']:.1%} | "
-        f"Interval: {alert_data['beacon_interval']}s | Jitter: {alert_data['mean_jitter']}s"
-    )
+    if alert_data.get("source") == "verifyeye":
+        logger.warning(
+            f"🚨 [INGESTED ALERT] Source: VerifyEye | ID: {alert_id} | Host: {alert_data.get('host_id')} | "
+            f"Brand: {alert_data.get('brand_target')} | Domain: {alert_data.get('domain')} | "
+            f"Severity: {alert_data.get('severity')} | Conf: {alert_data.get('confidence', 0.0):.1%}"
+        )
+    else:
+        logger.warning(
+            f"🚨 [INGESTED ALERT] Source: SpectraC2 | ID: {alert_id} | Host: {alert_data.get('host_id')} | "
+            f"Target: {alert_data.get('sni') or alert_data.get('dst_ip')}:{alert_data.get('dst_port')} | "
+            f"Severity: {alert_data.get('severity')} | Conf: {alert_data.get('confidence', 0.0):.1%} | "
+            f"Interval: {alert_data.get('beacon_interval')}s | Jitter: {alert_data.get('mean_jitter')}s"
+        )
 
     client = get_redis_client()
     buffered_in = "memory"

@@ -1,0 +1,366 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OmniGuard SOC Telemetry & Graph Schemas",
+  "description": "Standardized data schemas for VerifyEye (ingress phishing), SpectraC2 (beaconing egress), and Neo4j graph entity correlation.",
+  "version": "1.0.0",
+  "definitions": {
+    "SeverityEnum": {
+      "type": "string",
+      "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL", "low", "medium", "high", "critical"],
+      "description": "Triage priority level for analysts"
+    },
+    "VerifyEyeAlert": {
+      "type": "object",
+      "description": "Alert payload emitted by VerifyEye Chrome Extension / Ingress crawler when phishing or brand impersonation is detected.",
+      "required": [
+        "source",
+        "event_type",
+        "severity",
+        "timestamp",
+        "host_id",
+        "target_url",
+        "domain",
+        "brand_target",
+        "confidence"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "const": "verifyeye",
+          "description": "Identification of the originating subsystem"
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "phishing_page_detected",
+            "credential_harvesting_attempt",
+            "brand_impersonation",
+            "malicious_dom_manipulation"
+          ],
+          "description": "Threat event classification"
+        },
+        "severity": {
+          "$ref": "#/definitions/SeverityEnum"
+        },
+        "timestamp": {
+          "type": "number",
+          "description": "Epoch timestamp (seconds with microsecond precision) of detection"
+        },
+        "host_id": {
+          "type": "string",
+          "description": "Unique identifier / hostname of endpoint device (Host node in Neo4j)"
+        },
+        "user": {
+          "type": ["string", "null"],
+          "description": "Logged-in user account identifier, if available (User node in Neo4j)"
+        },
+        "src_ip": {
+          "type": ["string", "null"],
+          "description": "Local / egress IP address of the client machine"
+        },
+        "target_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Full URL of the flagged phishing website"
+        },
+        "domain": {
+          "type": "string",
+          "description": "Fully Qualified Domain Name (FQDN) being visited (Domain node in Neo4j)"
+        },
+        "action_endpoint": {
+          "type": ["string", "null"],
+          "description": "Form action URL where intercepted credentials would be submitted"
+        },
+        "brand_target": {
+          "type": "string",
+          "description": "Corporate brand identified by YOLOv8/pHash (e.g., 'Microsoft 365', 'Okta', 'Google Workspace')"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Object detection model confidence score (0.0 to 1.0)"
+        },
+        "phash_distance": {
+          "type": ["number", "null"],
+          "description": "Hamming distance of visual perceptual hash against authentic brand template"
+        },
+        "input_frozen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether client-side script successfully locked input fields and blocked form submission"
+        },
+        "mitre_technique": {
+          "type": "string",
+          "default": "T1566.002",
+          "description": "Mapped MITRE ATT&CK technique code (e.g. T1566.002 Spearphishing Link, T1056 Input Capture)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Analyst-readable threat narrative summary"
+        },
+        "raw_metadata": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Optional telemetry details (DOM tree signature, bounding box coordinates, TLS certificate issuer)"
+        }
+      }
+    },
+    "SpectraC2Alert": {
+      "type": "object",
+      "description": "Alert payload emitted by SpectraC2 beacon detector on encrypted network traffic.",
+      "required": [
+        "source",
+        "event_type",
+        "severity",
+        "timestamp",
+        "host_id",
+        "src_ip",
+        "dst_ip",
+        "dst_port",
+        "proto",
+        "confidence",
+        "beacon_interval",
+        "mean_jitter"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "const": "spectrac2"
+        },
+        "event_type": {
+          "type": "string",
+          "enum": ["c2_beacon_detected", "covert_channel_exfiltration", "abnormal_cadence"]
+        },
+        "severity": {
+          "$ref": "#/definitions/SeverityEnum"
+        },
+        "timestamp": {
+          "type": "number"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "src_ip": {
+          "type": "string"
+        },
+        "dst_ip": {
+          "type": "string"
+        },
+        "dst_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "proto": {
+          "type": "string"
+        },
+        "service": {
+          "type": "string"
+        },
+        "sni": {
+          "type": ["string", "null"]
+        },
+        "mitre_technique": {
+          "type": "string",
+          "default": "T1071"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "beacon_interval": {
+          "type": "number",
+          "description": "Dominant periodicity in seconds computed via FFT power spectral density"
+        },
+        "mean_jitter": {
+          "type": "number",
+          "description": "Timing jitter delta in seconds"
+        }
+      }
+    }
+  },
+  "neo4j_graph_schema": {
+    "description": "Graph topology model for Neo4j entity resolution, shortest path discovery, and blast radius calculation.",
+    "nodes": {
+      "Host": {
+        "primary_key": "host_id",
+        "properties": {
+          "host_id": "STRING (unique identifier, e.g. 'HOST-CORP-42')",
+          "hostname": "STRING",
+          "ip": "STRING",
+          "os": "STRING (optional, e.g. 'Windows 11 Enterprise')",
+          "status": "STRING ('ACTIVE', 'COMPROMISED', 'ISOLATED')",
+          "last_seen": "FLOAT (epoch timestamp)"
+        }
+      },
+      "User": {
+        "primary_key": "username",
+        "properties": {
+          "username": "STRING (e.g. 'jdoe')",
+          "email": "STRING",
+          "department": "STRING",
+          "privilege_level": "STRING ('standard', 'admin', 'domain_admin')"
+        }
+      },
+      "IP": {
+        "primary_key": "address",
+        "properties": {
+          "address": "STRING (IPv4 or IPv6)",
+          "is_internal": "BOOLEAN",
+          "asn": "STRING (optional, e.g. 'AS16509 Amazon')",
+          "country": "STRING"
+        }
+      },
+      "Domain": {
+        "primary_key": "domain_name",
+        "properties": {
+          "domain_name": "STRING (e.g. 'evil-microsoft-login.com')",
+          "tld": "STRING",
+          "brand_impersonated": "STRING",
+          "reputation_score": "FLOAT (0.0 to 1.0)",
+          "is_sinkholed": "BOOLEAN"
+        }
+      },
+      "Process": {
+        "primary_key": "process_id",
+        "properties": {
+          "process_id": "STRING (host_id + pid)",
+          "process_name": "STRING (e.g. 'powershell.exe', 'sliver-client.exe')",
+          "pid": "INTEGER",
+          "command_line": "STRING",
+          "sha256": "STRING"
+        }
+      },
+      "Alert": {
+        "primary_key": "alert_id",
+        "properties": {
+          "alert_id": "STRING (UUID)",
+          "source": "STRING ('verifyeye' | 'spectrac2' | 'manual')",
+          "event_type": "STRING",
+          "severity": "STRING ('LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL')",
+          "confidence": "FLOAT",
+          "mitre_technique": "STRING",
+          "timestamp": "FLOAT",
+          "status": "STRING ('new' | 'triaged' | 'resolved')",
+          "description": "STRING"
+        }
+      }
+    },
+    "relationships": [
+      {
+        "type": "RESOLVED_DOMAIN",
+        "from": "Host",
+        "to": "Domain",
+        "properties": { "timestamp": "FLOAT", "query_type": "STRING" },
+        "description": "Host queried DNS for this external domain"
+      },
+      {
+        "type": "COMMUNICATED_WITH",
+        "from": "Host",
+        "to": "IP",
+        "properties": { "port": "INTEGER", "proto": "STRING", "beacon_interval": "FLOAT", "jitter": "FLOAT", "timestamp": "FLOAT" },
+        "description": "Network flow observed between host and target IP"
+      },
+      {
+        "type": "LOGGED_INTO",
+        "from": "User",
+        "to": "Host",
+        "properties": { "timestamp": "FLOAT", "auth_type": "STRING" },
+        "description": "User logged in or authenticated on host"
+      },
+      {
+        "type": "HOSTS_DOMAIN",
+        "from": "IP",
+        "to": "Domain",
+        "properties": { "first_seen": "FLOAT", "last_seen": "FLOAT" },
+        "description": "IP address serves the specified domain"
+      },
+      {
+        "type": "SPAWNED_PROCESS",
+        "from": "Host",
+        "to": "Process",
+        "properties": { "timestamp": "FLOAT" },
+        "description": "Host execution tree spawned process"
+      },
+      {
+        "type": "TARGETS_HOST",
+        "from": "Alert",
+        "to": "Host",
+        "description": "Direct link from incoming security alert to affected Host"
+      },
+      {
+        "type": "INDICATES_DOMAIN",
+        "from": "Alert",
+        "to": "Domain",
+        "description": "Link from phishing or C2 alert to malicious domain"
+      },
+      {
+        "type": "INDICATES_IP",
+        "from": "Alert",
+        "to": "IP",
+        "description": "Link from network alert to malicious or destination IP"
+      },
+      {
+        "type": "INVOLVES_USER",
+        "from": "Alert",
+        "to": "User",
+        "description": "Link from alert to victim or compromised account"
+      }
+    ],
+    "sample_cypher_queries": {
+      "create_constraints": [
+        "CREATE CONSTRAINT IF NOT EXISTS FOR (h:Host) REQUIRE h.host_id IS UNIQUE;",
+        "CREATE CONSTRAINT IF NOT EXISTS FOR (u:User) REQUIRE u.username IS UNIQUE;",
+        "CREATE CONSTRAINT IF NOT EXISTS FOR (i:IP) REQUIRE i.address IS UNIQUE;",
+        "CREATE CONSTRAINT IF NOT EXISTS FOR (d:Domain) REQUIRE d.domain_name IS UNIQUE;",
+        "CREATE CONSTRAINT IF NOT EXISTS FOR (a:Alert) REQUIRE a.alert_id IS UNIQUE;"
+      ],
+      "ingest_verifyeye_alert": "MERGE (a:Alert {alert_id: $alert_id})\nON CREATE SET a.source = $source,\n              a.event_type = $event_type,\n              a.severity = $severity,\n              a.confidence = $confidence,\n              a.mitre_technique = $mitre_technique,\n              a.timestamp = $timestamp,\n              a.status = 'new',\n              a.description = $description\nMERGE (h:Host {host_id: $host_id})\nON CREATE SET h.hostname = $host_id, h.status = 'ACTIVE'\nMERGE (a)-[:TARGETS_HOST]->(h)\n\nFOREACH (_ IN CASE WHEN $user IS NOT NULL THEN [1] ELSE [] END |\n    MERGE (u:User {username: $user})\n    MERGE (a)-[:INVOLVES_USER]->(u)\n    MERGE (u)-[:LOGGED_INTO {timestamp: $timestamp}]->(h)\n)\n\nFOREACH (_ IN CASE WHEN $domain IS NOT NULL THEN [1] ELSE [] END |\n    MERGE (d:Domain {domain_name: $domain})\n    ON CREATE SET d.brand_impersonated = $brand_target,\n                  d.reputation_score = 0.95,\n                  d.is_sinkholed = false\n    MERGE (a)-[:INDICATES_DOMAIN]->(d)\n    MERGE (h)-[:RESOLVED_DOMAIN {timestamp: $timestamp}]->(d)\n)\n\nFOREACH (_ IN CASE WHEN $src_ip IS NOT NULL THEN [1] ELSE [] END |\n    MERGE (i:IP {address: $src_ip})\n    MERGE (h)-[:HAS_IP]->(i)\n);",
+      "ingest_spectrac2_alert": "MERGE (a:Alert {alert_id: $alert_id})\nON CREATE SET a.source = $source,\n              a.event_type = $event_type,\n              a.severity = $severity,\n              a.confidence = $confidence,\n              a.mitre_technique = $mitre_technique,\n              a.timestamp = $timestamp,\n              a.status = 'new',\n              a.description = 'Periodic C2 beaconing detected via FFT/LSTM spectral inference'\nMERGE (src_host:Host {host_id: $host_id})\nON CREATE SET src_host.status = 'ACTIVE'\nMERGE (a)-[:TARGETS_HOST]->(src_host)\n\nMERGE (dst_ip:IP {address: $dst_ip})\nON CREATE SET dst_ip.is_internal = false\nMERGE (a)-[:INDICATES_IP]->(dst_ip)\n\nMERGE (src_host)-[r:COMMUNICATED_WITH {port: $dst_port, proto: $proto}]->(dst_ip)\nSET r.beacon_interval = $beacon_interval,\n    r.mean_jitter = $mean_jitter,\n    r.timestamp = $timestamp\n\nFOREACH (_ IN CASE WHEN $sni IS NOT NULL THEN [1] ELSE [] END |\n    MERGE (d:Domain {domain_name: $sni})\n    MERGE (a)-[:INDICATES_DOMAIN]->(d)\n    MERGE (dst_ip)-[:HOSTS_DOMAIN]->(d)\n    MERGE (src_host)-[:RESOLVED_DOMAIN {timestamp: $timestamp}]->(d)\n);"
+    }
+  },
+  "sample_payloads": {
+    "verifyeye_payload": {
+      "source": "verifyeye",
+      "event_type": "phishing_page_detected",
+      "severity": "CRITICAL",
+      "timestamp": 1758880442.124,
+      "host_id": "HOST-CORP-WKSTN-10",
+      "user": "maharjan",
+      "src_ip": "10.0.1.42",
+      "target_url": "https://evil-microsoft-login.com/auth/login.php",
+      "domain": "evil-microsoft-login.com",
+      "action_endpoint": "https://evil-microsoft-login.com/api/v1/harvest",
+      "brand_target": "Microsoft 365",
+      "confidence": 0.985,
+      "phash_distance": 2,
+      "input_frozen": true,
+      "mitre_technique": "T1566.002",
+      "description": "VerifyEye intercepted zero-hour credential theft page visually impersonating Microsoft 365. Keystroke inputs frozen.",
+      "raw_metadata": {
+        "dom_elements_frozen": 3,
+        "yolo_bounding_box": [120, 45, 260, 95],
+        "browser": "Chrome/128.0.0.0 (Windows NT 10.0; Win64; x64)"
+      }
+    },
+    "spectrac2_payload": {
+      "source": "spectrac2",
+      "event_type": "c2_beacon_detected",
+      "severity": "CRITICAL",
+      "timestamp": 1758880455.892,
+      "host_id": "HOST-CORP-WKSTN-10",
+      "src_ip": "10.0.1.42",
+      "dst_ip": "198.51.100.44",
+      "dst_port": 443,
+      "proto": "tcp",
+      "service": "ssl",
+      "sni": "cdn-profile-update.org",
+      "mitre_technique": "T1071",
+      "confidence": 0.9782,
+      "beacon_interval": 30.125,
+      "mean_jitter": 2.45
+    }
+  }
+}
