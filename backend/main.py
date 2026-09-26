@@ -1,6 +1,7 @@
 from fastapi import FastAPI 
 from models import Alert, AlertCreate
 from db import database
+from graph import ingest_alert
 
 from config import CORS_ORIGINS
 
@@ -30,6 +31,9 @@ def get_health():
 def create_alert(payload: AlertCreate) -> Alert:
     alert = Alert(**payload.model_dump())
     alerts_collection.insert_one(alert.model_dump())
+
+    # now creating the graph in neo4j as well
+    ingest_alert(alert)
 
     return alert
 
