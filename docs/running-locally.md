@@ -38,6 +38,25 @@ cd frontend
 npm install
 ```
 
+**Neo4j** is a desktop app:
+
+```bash
+brew install --cask neo4j-desktop
+```
+
+Open it, make a project, add a **Local DBMS** inside it, set a password and
+write it down. Hit Start and wait for Active.
+
+Then make `backend/.env` — it's gitignored because it holds that password:
+
+```
+NEO4J_URI=neo4j://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=whatever-you-set
+```
+
+Mongo needs nothing in there; `config.py` falls back to localhost.
+
 You only do all of that once.
 
 ---
@@ -61,6 +80,24 @@ brew services start mongodb-community
 
 Database is `omniguard`, collection is `alerts`. Data files live in
 `/opt/homebrew/var/mongodb`.
+
+### Neo4j
+
+No CLI for the desktop version — open the app and click Start on the DBMS.
+
+```bash
+open "/Applications/Neo4j Desktop 2.app"
+```
+
+Browser at http://localhost:7474 for running Cypher by hand. The backend uses
+port 7687.
+
+Check both databases without opening anything:
+
+```bash
+(nc -z localhost 27017 && echo "mongo up") || echo "mongo down"
+(nc -z localhost 7687 && echo "neo4j up") || echo "neo4j down"
+```
 
 ### Backend — terminal tab 1
 
