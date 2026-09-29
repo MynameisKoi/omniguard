@@ -70,6 +70,50 @@ class AlertCreate(BaseModel):
         description="human-readable summary shown to the analyst",
         examples=["Credential harvesting page impersonating Microsoft 365 login"],
     )
+    dst_port: int | None = Field(
+        None, 
+        description="destination port of the connection",
+        ge=1,
+        le=65535,
+        examples=[433]
+    )
+    beacon_interval: float| None = Field(
+        None, 
+        description="dominant beacon period in seconds, from SpectraC2's FFT",
+        ge=0.0,
+        examples=[60.0]
+    )
+    mean_jitter: float | None = Field(
+        None, 
+        description="mean timing jitter in seconds",
+        ge=0.0,
+        examples=[18.2]
+    )
+    process_name: str | None = Field(
+        None, 
+        description="originating process binary; becomes a Process node",
+        examples=["sliver-agent.exe"]
+    )
+    pid: int | None = Field(
+        None, 
+        description="OS process id; combined with host it keys the Process node",
+        examples=[4920]
+    )
+    target_url: str | None = Field(
+        None, 
+        description="full URL of the phishing page; becomes a URL node",
+        examples=["https://evil-microsoft-login.com/auth/login.php"]
+    )
+    action_endpoint: str | None = Field(
+        None,
+        description="where the credential form would submit; off-domain actions are the phishing signal",
+        examples=["https://evil-microsoft-login.com/api/v1/harvest"],
+    )
+    brand_target: str | None = Field(
+        None,
+        description="brand the page impersonates, from VerifyEye logo detection",
+        examples=["Microsoft 365"],
+    )
 
 # now creating a Alert class that will inherit from AlertCreate
 # we will create unique ids and then the timestamp for that alert
