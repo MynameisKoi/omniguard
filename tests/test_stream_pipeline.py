@@ -3,7 +3,10 @@
 Tests:
 1. Zeek and Suricata Kafka producer serialization and fallback queuing.
 2. TelemetryStreamConsumer sliding window evaluation and standardized alert schema formatting.
-3. Asynchronous httpx dispatch and Graph-Triage Core API alert ingestion and buffering.
+
+The Graph-Triage Core endpoint tests were removed: alert ingestion is
+consolidated onto backend/ (POST /alerts), so there is one API and one
+contract. See docs/graph-schema.md.
 """
 
 import io
@@ -13,14 +16,12 @@ import queue
 import sys
 import time
 import pytest
-from fastapi.testclient import TestClient
 
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 telemetry_dir = os.path.join(repo_root, "telemetry-pipeline")
-graph_dir = os.path.join(repo_root, "graph-triage-core")
 engine_dir = os.path.join(repo_root, "spectrac2-engine")
 
-for p in (telemetry_dir, graph_dir, engine_dir):
+for p in (telemetry_dir, engine_dir):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -34,11 +35,6 @@ ZeekKafkaProducer = zeek_mod.ZeekKafkaProducer
 SuricataEveParser = suricata_mod.SuricataEveParser
 SuricataKafkaProducer = suricata_mod.SuricataKafkaProducer
 TelemetryStreamConsumer = consumer_mod.TelemetryStreamConsumer
-
-from api.main import app as graph_core_app
-from api.schemas import SpectraC2AlertInput
-
-graph_client = TestClient(graph_core_app)
 
 
 class TestKafkaTelemetryProducers:
@@ -161,96 +157,3 @@ class TestStreamConsumerAndAlertSchema:
         assert 0.0 <= alert["confidence"] <= 1.0
         assert alert["beacon_interval"] > 0.0
         assert alert["mean_jitter"] >= 0.0
-
-
-class TestGraphCoreAlertEndpoint:
-    def test_health_check(self):
-        response = graph_client.get("/health")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "ok"
-        assert data["service"] == "graph-triage-core"
-        assert "redis_connected" in data
-        assert "pending_alerts_count" in data
-
-    def test_post_valid_alert(self):
-        alert_payload = {
-            "source": "spectrac2",
-            "event_type": "c2_beacon_detected",
-            "severity": "CRITICAL",
-            "timestamp": 1700000000.0,
-            "host_id": "ENDPOINT-SEC-01",
-            "src_ip": "10.20.30.40",
-            "dst_ip": "198.51.100.99",
-            "dst_port": 443,
-            "proto": "tcp",
-            "service": "ssl",
-            "sni": "c2-exfil-node.org",
-            "mitre_technique": "T1071",
-            "confidence": 0.965,
-            "beacon_interval": 10.0,
-            "mean_jitter": 0.45,
-        }
-        response = graph_client.post("/api/v1/alerts", json=alert_payload)
-        assert response.status_code == 202
-        data = response.json()
-        assert data["status"] == "accepted"
-        assert "alert_id" in data
-        assert data["timestamp"] == 1700000000.0
-        assert data["buffered_in"] in ("redis", "memory")
-
-        # Verify alert can be queried from buffer
-        get_resp = graph_client.get("/api/v1/alerts")
-        assert get_resp.status_code == 200
-        alerts = get_resp.json()
-        assert any(a.get("host_id") == "ENDPOINT-SEC-01" for a in alerts)
-
-    def test_post_invalid_alert_confidence(self):
-        # Confidence > 1.0 should fail Pydantic validation
-        invalid_payload = {
-            "source": "spectrac2",
-            "event_type": "c2_beacon_detected",
-            "severity": "CRITICAL",
-            "timestamp": 1700000000.0,
-            "host_id": "ENDPOINT-SEC-01",
-            "src_ip": "10.20.30.40",
-            "dst_ip": "198.51.100.99",
-            "dst_port": 443,
-            "confidence": 1.5,  # Invalid
-            "beacon_interval": 10.0,
-            "mean_jitter": 0.45,
-        }
-        response = graph_client.post("/api/v1/alerts", json=invalid_payload)
-        assert response.status_code == 422
-
-    def test_post_valid_verifyeye_alert(self):
-        verifyeye_payload = {
-            "source": "verifyeye",
-            "event_type": "phishing_page_detected",
-            "severity": "CRITICAL",
-            "timestamp": 1700000010.0,
-            "host_id": "HOST-CORP-WKSTN-10",
-            "user": "maharjan",
-            "src_ip": "10.0.1.42",
-            "target_url": "https://evil-microsoft-login.com/auth/login.php",
-            "domain": "evil-microsoft-login.com",
-            "action_endpoint": "https://evil-microsoft-login.com/api/v1/harvest",
-            "brand_target": "Microsoft 365",
-            "confidence": 0.985,
-            "phash_distance": 2.0,
-            "input_frozen": True,
-            "mitre_technique": "T1566.002",
-            "description": "Visual impersonation of Microsoft 365 login portal intercepted.",
-        }
-        response = graph_client.post("/api/v1/alerts", json=verifyeye_payload)
-        assert response.status_code == 202
-        data = response.json()
-        assert data["status"] == "accepted"
-        assert "alert_id" in data
-        assert data["timestamp"] == 1700000010.0
-
-        # Verify alert appears in buffer
-        get_resp = graph_client.get("/api/v1/alerts")
-        assert get_resp.status_code == 200
-        alerts = get_resp.json()
-        assert any(a.get("source") == "verifyeye" and a.get("brand_target") == "Microsoft 365" for a in alerts)
