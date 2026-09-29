@@ -1,0 +1,59 @@
+# ==============================================================================
+# SpectraC2 Engine - IBM LinuxONE (s390x) Production Containerfile
+# ==============================================================================
+# Architecture: linux/s390x (IBM zSystems / LinuxONE III & 4)
+# Optimization: IBM z15/z16 Vector Facility (SIMD) & OpenBLAS enterprise math
+
+FROM --platform=linux/s390x python:3.11-slim-bookworm AS builder
+
+# Install native compilation toolchain for s390x architecture
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gfortran \
+    libopenblas-dev \
+    liblapack-dev \
+    pkg-config \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+COPY spectrac2-engine/requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# Final minimal deployment image
+FROM --platform=linux/s390x python:3.11-slim-bookworm
+
+LABEL maintainer="OmniGuard SOC Team" \
+      platform="IBM LinuxONE (s390x)" \
+      subsystem="SpectraC2 Encrypted Beaconing Inference Engine"
+
+# Install runtime OpenBLAS for high-throughput FFT operations
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libopenblas0 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed Python packages from builder stage
+COPY --from=builder /install /usr/local
+
+WORKDIR /app
+
+# Copy SpectraC2 source code and pre-trained weights
+COPY spectrac2-engine/ /app/spectrac2-engine/
+
+# Environment tuning for IBM zSystems s390x
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    OPENBLAS_NUM_THREADS=4 \
+    OMP_NUM_THREADS=4 \
+    MKL_NUM_THREADS=4 \
+    PORT=8000
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Launch FastAPI microservice via Uvicorn
+CMD ["uvicorn", "spectrac2-engine.service.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,8 @@
+# Graph-Triage Core Dependencies
+fastapi>=0.100.0
+uvicorn>=0.23.0
+pydantic>=2.0.0
+redis>=5.0.0
+httpx>=0.24.0
+neo4j>=5.0.0
+networkx>=3.0.0
