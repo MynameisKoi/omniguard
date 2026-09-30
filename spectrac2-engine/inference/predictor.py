@@ -17,11 +17,8 @@ engine_root = os.path.dirname(current_dir)
 if engine_root not in sys.path:
     sys.path.insert(0, engine_root)
 
-import importlib
-temporal_mod = importlib.import_module("feature-extraction.temporal")
-spectral_mod = importlib.import_module("feature-extraction.spectral")
-TemporalFeatureExtractor = temporal_mod.TemporalFeatureExtractor
-SpectralFeatureExtractor = spectral_mod.SpectralFeatureExtractor
+from feature_extraction.temporal import TemporalFeatureExtractor
+from feature_extraction.spectral import SpectralFeatureExtractor
 
 from inference.lstm_model import LSTMBeaconClassifier
 from inference.isolation_forest import FlowIsolationForest
@@ -140,8 +137,10 @@ class SpectraC2Predictor:
                 "host": meta.get("host", "HOST-UNKNOWN"),
                 "user": meta.get("user"),
                 "src_ip": meta.get("src_ip"),
+                "dst_ip": meta.get("dst_ip"),
                 "domain": meta.get("domain"),
                 "mitre_technique": "T1071",
+                "confidence": round(ensemble_score, 4),
                 "status": "new",
                 "description": desc,
             }

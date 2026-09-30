@@ -1,0 +1,1540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OmniGuard SOC - Chronological Project Timeline & Key Milestones</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #040914;
+      --bg-slide: #071526;
+      --bg-card: #0a1b33;
+      --bg-card-hover: #0e2444;
+      --bg-card-active: #0c203d;
+      
+      --cyan: #00e5ff;
+      --cyan-dim: #00bcd4;
+      --cyan-glow: rgba(0, 229, 255, 0.35);
+      --cyan-soft: rgba(0, 229, 255, 0.12);
+      
+      --amber: #f59e0b;
+      --amber-glow: rgba(245, 158, 11, 0.35);
+      --amber-soft: rgba(245, 158, 11, 0.12);
+      
+      --green: #10b981;
+      --green-glow: rgba(16, 185, 129, 0.35);
+      --green-soft: rgba(16, 185, 129, 0.12);
+      
+      --purple: #a855f7;
+      --purple-glow: rgba(168, 85, 247, 0.35);
+      
+      --text-main: #f0f6fc;
+      --text-muted: #8b9bb4;
+      --text-dim: #54657e;
+      --text-bright: #ffffff;
+      
+      --border-card: rgba(56, 189, 248, 0.18);
+      --border-active: rgba(0, 229, 255, 0.6);
+      --border-target: rgba(245, 158, 11, 0.7);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      min-height: 100vh;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(ellipse 90% 50% at 50% -10%, rgba(0, 229, 255, 0.12), transparent),
+        radial-gradient(circle at 10% 85%, rgba(16, 185, 129, 0.06), transparent),
+        radial-gradient(circle at 90% 85%, rgba(245, 158, 11, 0.06), transparent);
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--bg-base);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1a2c48;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #274169;
+    }
+
+    /* Outer Wrapper */
+    .viewport-wrapper {
+      max-width: 1720px;
+      margin: 0 auto;
+      padding: 24px 32px 64px;
+    }
+
+    /* Top Global Navigation Bar */
+    .top-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      margin-bottom: 24px;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .nav-brand-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(0, 229, 255, 0.2), rgba(16, 185, 129, 0.2));
+      border: 1px solid var(--cyan);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      box-shadow: 0 0 16px var(--cyan-glow);
+    }
+    .nav-brand-text h2 {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #fff;
+    }
+    .nav-brand-text p {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+    .btn-secondary {
+      background: rgba(15, 28, 50, 0.8);
+      color: var(--text-main);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+    }
+    .btn-secondary:hover {
+      background: rgba(22, 42, 75, 0.9);
+      border-color: var(--cyan);
+      color: #fff;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      color: #fff;
+      border: 1px solid rgba(0, 229, 255, 0.4);
+      box-shadow: 0 0 15px var(--cyan-glow);
+    }
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #0369a1, #0284c7);
+      box-shadow: 0 0 20px var(--cyan-glow);
+    }
+
+    .view-toggle {
+      display: flex;
+      background: rgba(10, 22, 40, 0.9);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 8px;
+      padding: 3px;
+    }
+    .toggle-btn {
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .toggle-btn.active {
+      background: var(--cyan);
+      color: #040914;
+      font-weight: 700;
+      box-shadow: 0 0 12px var(--cyan-glow);
+    }
+
+    /* Live Checkpoint Banner Alert */
+    .checkpoint-status-banner {
+      background: linear-gradient(90deg, rgba(16, 185, 129, 0.12), rgba(0, 229, 255, 0.15) 35%, rgba(245, 158, 11, 0.15) 75%, rgba(10, 27, 51, 0.6));
+      border: 1px solid rgba(0, 229, 255, 0.3);
+      border-radius: 12px;
+      padding: 14px 22px;
+      margin-bottom: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .banner-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .radar-pulse-ring {
+      position: relative;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .radar-pulse-ring .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan);
+    }
+    .radar-pulse-ring .wave {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      border: 2px solid var(--cyan);
+      animation: pulseWave 2s infinite ease-out;
+      opacity: 0.8;
+    }
+    @keyframes pulseWave {
+      0% { transform: scale(0.5); opacity: 1; }
+      100% { transform: scale(1.8); opacity: 0; }
+    }
+
+    .banner-text h3 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .banner-text p {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .banner-badges {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .status-pill {
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      letter-spacing: 0.02em;
+    }
+    .status-pill.current {
+      background: rgba(0, 229, 255, 0.16);
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+      box-shadow: 0 0 12px var(--cyan-glow);
+    }
+    .status-pill.target {
+      background: rgba(245, 158, 11, 0.16);
+      border: 1px solid var(--amber);
+      color: var(--amber);
+      box-shadow: 0 0 12px var(--amber-glow);
+    }
+    .status-pill.delta {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+    }
+
+    /* ========================================================
+       SLIDE CANVAS (HIGH-FIDELITY MATCH TO REFERENCE IMAGE)
+       ======================================================== */
+    .slide-canvas {
+      background: var(--bg-slide);
+      border: 1px solid rgba(56, 189, 248, 0.22);
+      border-radius: 18px;
+      padding: 48px 56px 60px;
+      box-shadow: 0 12px 48px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 32px;
+      transition: all 0.3s ease;
+    }
+
+    /* Subtle background grid pattern like in modern slide deck */
+    .slide-canvas::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-image: 
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    /* Slide Header */
+    .slide-header {
+      margin-bottom: 48px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .slide-category-box {
+      display: inline-block;
+      padding: 5px 14px;
+      border: 1.5px solid var(--cyan);
+      color: var(--cyan);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-family: 'JetBrains Mono', monospace;
+      margin-bottom: 14px;
+      box-shadow: 0 0 12px var(--cyan-glow);
+      background: rgba(0, 229, 255, 0.04);
+      border-radius: 2px;
+    }
+
+    .slide-title {
+      font-family: 'Cinzel', Georgia, serif;
+      font-size: 38px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: -0.01em;
+      line-height: 1.15;
+      margin-bottom: 10px;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+    }
+
+    .slide-subtitle {
+      font-size: 16px;
+      color: #94a8c5;
+      font-style: italic;
+      font-weight: 400;
+    }
+
+    /* ========================================================
+       5-NODE TIMELINE TRACK & CONNECTING RAIL
+       ======================================================== */
+    .timeline-track-wrapper {
+      position: relative;
+      z-index: 2;
+      margin-bottom: 28px;
+    }
+
+    /* Node Column Headers (Phase & Weeks) */
+    .track-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 20px;
+      text-align: center;
+      margin-bottom: 14px;
+    }
+
+    .track-header-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+    }
+
+    .phase-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #d1e2f7;
+      margin-bottom: 4px;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .phase-weeks {
+      font-size: 12px;
+      color: #7b91b0;
+      font-weight: 500;
+    }
+
+    /* Checkpoint Indicator Badges above Nodes */
+    .checkpoint-tag {
+      margin-top: 6px;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    .checkpoint-tag.cp1 {
+      background: rgba(0, 229, 255, 0.2);
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+      box-shadow: 0 0 12px var(--cyan-glow);
+      animation: pulseBorder 2s infinite ease-in-out;
+    }
+    @keyframes pulseBorder {
+      0%, 100% { box-shadow: 0 0 8px var(--cyan-glow); }
+      50% { box-shadow: 0 0 18px rgba(0, 229, 255, 0.7); }
+    }
+
+    .checkpoint-tag.cp2 {
+      background: rgba(245, 158, 11, 0.2);
+      border: 1px solid var(--amber);
+      color: var(--amber);
+      box-shadow: 0 0 12px var(--amber-glow);
+    }
+
+    /* Connecting Line Rail & Circle Nodes */
+    .rail-container {
+      position: relative;
+      height: 52px;
+      margin: 8px 0 28px;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      align-items: center;
+    }
+
+    /* Horizontal Track Lines */
+    .rail-line-bg {
+      position: absolute;
+      top: 50%;
+      left: calc(10% + 20px);
+      right: calc(10% + 20px);
+      height: 3px;
+      background: rgba(56, 189, 248, 0.2);
+      transform: translateY(-50%);
+      z-index: 1;
+    }
+
+    /* Active Progress Rail Fill up to Phase 2 (Week 5) */
+    .rail-line-progress {
+      position: absolute;
+      top: 50%;
+      left: calc(10% + 20px);
+      width: calc(25% + 15px); /* reaches past node 2 toward node 3 */
+      height: 3px;
+      background: linear-gradient(90deg, #10b981, var(--cyan) 75%, var(--amber));
+      transform: translateY(-50%);
+      z-index: 2;
+      box-shadow: 0 0 10px var(--cyan);
+    }
+
+    /* Dashed Bridge from Week 5 to Week 7 */
+    .rail-line-bridge {
+      position: absolute;
+      top: 50%;
+      left: calc(35% + 25px);
+      width: calc(20%);
+      height: 3px;
+      background: repeating-linear-gradient(90deg, var(--amber), var(--amber) 6px, transparent 6px, transparent 12px);
+      transform: translateY(-50%);
+      z-index: 2;
+    }
+
+    .node-anchor {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      position: relative;
+      z-index: 3;
+    }
+
+    .timeline-node {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: var(--cyan);
+      color: #051429;
+      font-weight: 800;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 18px var(--cyan-glow);
+      transition: all 0.25s ease;
+      cursor: pointer;
+      position: relative;
+    }
+    .timeline-node:hover {
+      transform: scale(1.12);
+      box-shadow: 0 0 24px var(--cyan);
+    }
+
+    /* Node 1: Completed */
+    .node-anchor:nth-child(1) .timeline-node {
+      background: #10b981;
+      color: #041410;
+      box-shadow: 0 0 16px var(--green-glow);
+    }
+
+    /* Node 2: Current (Checkpoint 1 - Week 5) */
+    .node-anchor:nth-child(2) .timeline-node {
+      background: var(--cyan);
+      color: #051429;
+      box-shadow: 0 0 22px var(--cyan-glow);
+      border: 3px solid #ffffff;
+    }
+    .node-anchor:nth-child(2)::before {
+      content: '';
+      position: absolute;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      border: 2px solid var(--cyan);
+      animation: pulseWave 2s infinite ease-out;
+    }
+
+    /* Node 3: Target (Checkpoint 2 - Week 7) */
+    .node-anchor:nth-child(3) .timeline-node {
+      background: linear-gradient(135deg, var(--cyan), var(--amber));
+      color: #051429;
+      border: 2px dashed var(--amber);
+      box-shadow: 0 0 18px var(--amber-glow);
+    }
+
+    /* Nodes 4 & 5: Planned */
+    .node-anchor:nth-child(4) .timeline-node,
+    .node-anchor:nth-child(5) .timeline-node {
+      background: #0d264a;
+      color: var(--cyan);
+      border: 2px solid var(--cyan);
+      box-shadow: 0 0 12px rgba(0, 229, 255, 0.2);
+    }
+
+    /* ========================================================
+       5 PHASE CARDS (MATCHING THE BLUE CARDS IN REFERENCE)
+       ======================================================== */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 20px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .phase-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 24px 20px 22px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 290px;
+      transition: all 0.25s ease;
+      position: relative;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+
+    .phase-card:hover {
+      background: var(--bg-card-hover);
+      transform: translateY(-4px);
+      border-color: var(--cyan);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(0, 229, 255, 0.2);
+    }
+
+    /* Phase 1: Completed styling */
+    .phase-card.phase-1 {
+      border-top: 3px solid #10b981;
+    }
+
+    /* Phase 2: Active Checkpoint 1 styling */
+    .phase-card.phase-2 {
+      border: 1.5px solid var(--border-active);
+      border-top: 4px solid var(--cyan);
+      background: linear-gradient(180deg, rgba(0, 229, 255, 0.08), rgba(10, 27, 51, 0.95) 40%);
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(0, 229, 255, 0.15);
+    }
+
+    /* Phase 3: Target Checkpoint 2 styling */
+    .phase-card.phase-3 {
+      border: 1.5px solid var(--border-target);
+      border-top: 4px solid var(--amber);
+      background: linear-gradient(180deg, rgba(245, 158, 11, 0.08), rgba(10, 27, 51, 0.95) 40%);
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), 0 0 20px rgba(245, 158, 11, 0.12);
+    }
+
+    .card-top {
+      margin-bottom: 16px;
+    }
+
+    .card-title {
+      font-family: 'Cinzel', Georgia, serif;
+      font-size: 17px;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.35;
+      margin-bottom: 14px;
+    }
+
+    .card-body-text {
+      font-size: 13px;
+      color: #9bb1cf;
+      line-height: 1.6;
+      font-weight: 400;
+    }
+
+    .card-expected-box {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 12px;
+      color: #7d96b8;
+      line-height: 1.5;
+    }
+
+    .card-expected-box strong {
+      color: #d8e5f5;
+      font-weight: 600;
+      display: block;
+      margin-bottom: 3px;
+      font-size: 11.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    /* Interactive Checkpoint Badge inside Card */
+    .card-milestone-flag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+    .card-milestone-flag.cp1 {
+      background: rgba(0, 229, 255, 0.15);
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+    }
+    .card-milestone-flag.cp2 {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid var(--amber);
+      color: var(--amber);
+    }
+    .card-milestone-flag.done {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid var(--green);
+      color: var(--green);
+    }
+
+    /* ========================================================
+       WEEK-BY-WEEK 14-WEEK PROGRESS SCRUBBER
+       ======================================================== */
+    .week-scrubber-section {
+      background: rgba(10, 24, 46, 0.7);
+      border: 1px solid rgba(56, 189, 248, 0.15);
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 32px;
+    }
+
+    .scrubber-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .scrubber-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--cyan);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .week-cells-row {
+      display: grid;
+      grid-template-columns: repeat(14, 1fr);
+      gap: 8px;
+    }
+
+    .week-cell {
+      background: rgba(15, 30, 55, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 10px 6px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+    .week-cell:hover {
+      background: rgba(25, 48, 85, 0.8);
+      border-color: var(--cyan);
+    }
+
+    .week-cell .w-num {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .week-cell .w-phase {
+      font-size: 9px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    /* Past Weeks (1, 2, 3, 4) */
+    .week-cell.completed {
+      background: rgba(16, 185, 129, 0.08);
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+    .week-cell.completed .w-num {
+      color: #10b981;
+    }
+
+    /* Week 5: Current Checkpoint 1 */
+    .week-cell.current-cp1 {
+      background: rgba(0, 229, 255, 0.18);
+      border: 2px solid var(--cyan);
+      box-shadow: 0 0 16px var(--cyan-glow);
+      transform: scale(1.04);
+    }
+    .week-cell.current-cp1 .w-num {
+      color: #ffffff;
+      font-weight: 800;
+    }
+    .week-cell.current-cp1::after {
+      content: 'CP1';
+      position: absolute;
+      bottom: -18px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 9px;
+      font-weight: 800;
+      color: var(--cyan);
+      background: #071526;
+      border: 1px solid var(--cyan);
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+
+    /* Week 7: Checkpoint 2 Target */
+    .week-cell.target-cp2 {
+      background: rgba(245, 158, 11, 0.18);
+      border: 2px dashed var(--amber);
+      box-shadow: 0 0 16px var(--amber-glow);
+      transform: scale(1.04);
+    }
+    .week-cell.target-cp2 .w-num {
+      color: var(--amber);
+      font-weight: 800;
+    }
+    .week-cell.target-cp2::after {
+      content: 'CP2';
+      position: absolute;
+      bottom: -18px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 9px;
+      font-weight: 800;
+      color: var(--amber);
+      background: #071526;
+      border: 1px solid var(--amber);
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+
+    /* ========================================================
+       CHECKPOINT TRANSITION BRIDGE: WEEK 5 ➔ WEEK 7
+       ======================================================== */
+    .bridge-section {
+      background: linear-gradient(180deg, #091a33, #071527);
+      border: 1px solid rgba(0, 229, 255, 0.25);
+      border-radius: 16px;
+      padding: 32px 36px;
+      margin-bottom: 32px;
+      box-shadow: 0 10px 36px rgba(0, 0, 0, 0.45);
+    }
+
+    .bridge-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .bridge-header-left h2 {
+      font-family: 'Cinzel', serif;
+      font-size: 22px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .bridge-header-left p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .bridge-arrow-icon {
+      color: var(--amber);
+      font-size: 18px;
+      animation: bounceRight 1.5s infinite;
+    }
+    @keyframes bounceRight {
+      0%, 100% { transform: translateX(0); }
+      50% { transform: translateX(6px); }
+    }
+
+    .bridge-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+    }
+
+    .member-column {
+      background: rgba(13, 29, 53, 0.7);
+      border: 1px solid rgba(56, 189, 248, 0.16);
+      border-radius: 12px;
+      padding: 18px 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .member-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .member-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 14px;
+      color: #040914;
+    }
+    .avatar-khoi { background: #38bdf8; }
+    .avatar-rahim { background: #10b981; }
+    .avatar-abu { background: #a855f7; color: #fff; }
+    .avatar-aayush { background: #f59e0b; }
+
+    .member-title h4 {
+      font-size: 15px;
+      color: #fff;
+      font-weight: 700;
+    }
+    .member-title span {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .checkpoint-compare-box {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .cp-state-card {
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+    }
+    .cp-state-card.present {
+      background: rgba(0, 229, 255, 0.08);
+      border-left: 3px solid var(--cyan);
+    }
+    .cp-state-card.next {
+      background: rgba(245, 158, 11, 0.08);
+      border-left: 3px solid var(--amber);
+    }
+
+    .cp-state-tag {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .cp-state-card.present .cp-state-tag { color: var(--cyan); }
+    .cp-state-card.next .cp-state-tag { color: var(--amber); }
+
+    .cp-checklist {
+      list-style: none;
+      margin-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .cp-checklist li {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      color: #c2d4ea;
+      line-height: 1.4;
+      font-size: 11.5px;
+    }
+    .cp-checklist input[type="checkbox"] {
+      margin-top: 2px;
+      accent-color: var(--cyan);
+      cursor: pointer;
+    }
+
+    /* Print & Slide-only overrides */
+    @media print {
+      body {
+        background: #071526;
+        color: #fff;
+      }
+      .top-nav, .checkpoint-status-banner, .btn {
+        display: none !important;
+      }
+      .slide-canvas {
+        border: none;
+        box-shadow: none;
+        padding: 20px;
+      }
+    }
+
+    @media (max-width: 1280px) {
+      .cards-grid, .track-grid, .rail-container {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .rail-line-bg, .rail-line-progress, .rail-line-bridge {
+        display: none;
+      }
+      .bridge-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="viewport-wrapper">
+    
+    <!-- Global Navigation Header -->
+    <nav class="top-nav">
+      <div class="nav-brand">
+        <div class="nav-brand-logo">🛡️</div>
+        <div class="nav-brand-text">
+          <h2>OmniGuard SOC — Project Schedule</h2>
+          <p>Multi-Modal Threat Defense, Jitter-Invariant C2 & Graph Triage</p>
+        </div>
+      </div>
+      <div class="nav-actions">
+        <div class="view-toggle">
+          <button class="toggle-btn active" id="viewSlideBtn" onclick="switchView('slide')">🖼️ Slide View</button>
+          <button class="toggle-btn" id="viewBridgeBtn" onclick="switchView('bridge')">🌉 CP1 ➔ CP2 Bridge</button>
+          <button class="toggle-btn" id="viewAllBtn" onclick="switchView('all')">📑 Full View</button>
+        </div>
+        <a href="presentations/OmniGuard_Checkpoint1_Presentation.pdf" target="_blank" class="btn btn-secondary" title="Open Checkpoint 1 Presentation Deck (PDF)">
+          <span>📊</span> CP1 Slides (PDF)
+        </a>
+        <a href="presentations/OmniGuard_Senior_Capstone_Proposal.pdf" target="_blank" class="btn btn-secondary" title="Open Senior Capstone Proposal Presentation (PDF)">
+          <span>📜</span> Proposal (PDF)
+        </a>
+        <a href="functional_timeline.html" class="btn btn-secondary" title="View Functional Characteristics Matrix">
+          <span>⚡</span> Functional Matrix
+        </a>
+        <a href="timeline_gantt.html" class="btn btn-secondary" title="View Weekly Gantt Milestone Chart">
+          <span>📅</span> Gantt Chart
+        </a>
+        <button class="btn btn-primary" onclick="window.print()" title="Print slide or save as PDF">
+          <span>🖨️</span> Print Slide
+        </button>
+      </div>
+    </nav>
+
+    <!-- Checkpoint 1 (Week 5) ➔ Checkpoint 2 (Week 7) Status Banner -->
+    <div class="checkpoint-status-banner">
+      <div class="banner-left">
+        <div class="radar-pulse-ring">
+          <div class="wave"></div>
+          <div class="dot"></div>
+        </div>
+        <div class="banner-text">
+          <h3>
+            Current Position: Checkpoint 1 (Week 5) Completed
+            <span style="color: var(--amber); font-weight: 500;">➔ Next Milestone: Checkpoint 2 (Week 7)</span>
+          </h3>
+          <p>Phase 2 core threat detection models active. Bridging to Phase 3 attack correlation & blast radius triage.</p>
+        </div>
+      </div>
+      <div class="banner-badges">
+        <div class="status-pill current">
+          <span>📍</span> YOU ARE HERE: Week 5
+        </div>
+        <div class="status-pill target">
+          <span>🎯</span> TARGET: Week 7 (CP 2)
+        </div>
+        <div class="status-pill delta">
+          <span>⏳</span> Delta: 2 Weeks
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================================
+         THE HIGH-FIDELITY SLIDE CANVAS
+         ======================================================== -->
+    <main class="slide-canvas" id="slideSection">
+      
+      <!-- Slide Header (Matching exact style from reference) -->
+      <header class="slide-header">
+        <div class="slide-category-box">SCHEDULE</div>
+        <h1 class="slide-title">Project Timeline & Key Milestones</h1>
+        <p class="slide-subtitle">5-phase agile schedule — 12–14 weeks</p>
+      </header>
+
+      <!-- 5-Node Rail Track -->
+      <section class="timeline-track-wrapper">
+        
+        <!-- Headers above nodes -->
+        <div class="track-grid">
+          
+          <!-- Phase 1 Header -->
+          <div class="track-header-col">
+            <span class="phase-label">PHASE 1</span>
+            <span class="phase-weeks">Weeks 1–3</span>
+            <span class="checkpoint-tag" style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #10b981;">✓ Done</span>
+          </div>
+
+          <!-- Phase 2 Header (Checkpoint 1 Location) -->
+          <div class="track-header-col">
+            <span class="phase-label">PHASE 2</span>
+            <span class="phase-weeks">Weeks 4–6</span>
+            <span class="checkpoint-tag cp1">📍 CP 1 (Week 5)</span>
+          </div>
+
+          <!-- Phase 3 Header (Checkpoint 2 Location) -->
+          <div class="track-header-col">
+            <span class="phase-label">PHASE 3</span>
+            <span class="phase-weeks">Weeks 7–9</span>
+            <span class="checkpoint-tag cp2">🎯 CP 2 (Week 7)</span>
+          </div>
+
+          <!-- Phase 4 Header -->
+          <div class="track-header-col">
+            <span class="phase-label">PHASE 4</span>
+            <span class="phase-weeks">Weeks 10–12</span>
+            <span class="phase-weeks" style="font-size: 10px; margin-top: 6px;">Planned</span>
+          </div>
+
+          <!-- Phase 5 Header -->
+          <div class="track-header-col">
+            <span class="phase-label">PHASE 5</span>
+            <span class="phase-weeks">Weeks 13–14</span>
+            <span class="phase-weeks" style="font-size: 10px; margin-top: 6px;">Showcase</span>
+          </div>
+
+        </div>
+
+        <!-- Horizontal Rail Lines with 5 Circles -->
+        <div class="rail-container">
+          <div class="rail-line-bg"></div>
+          <div class="rail-line-progress"></div>
+          <div class="rail-line-bridge"></div>
+
+          <!-- Node 1 -->
+          <div class="node-anchor">
+            <div class="timeline-node" title="Phase 1 (Weeks 1-3) Completed">1</div>
+          </div>
+
+          <!-- Node 2 (Checkpoint 1) -->
+          <div class="node-anchor">
+            <div class="timeline-node" title="Phase 2 (Weeks 4-6) - Current Checkpoint 1 at Week 5">2</div>
+          </div>
+
+          <!-- Node 3 (Checkpoint 2) -->
+          <div class="node-anchor">
+            <div class="timeline-node" title="Phase 3 (Weeks 7-9) - Target Checkpoint 2 at Week 7">3</div>
+          </div>
+
+          <!-- Node 4 -->
+          <div class="node-anchor">
+            <div class="timeline-node" title="Phase 4 (Weeks 10-12) - Dashboard & Browser Protection">4</div>
+          </div>
+
+          <!-- Node 5 -->
+          <div class="node-anchor">
+            <div class="timeline-node" title="Phase 5 (Weeks 13-14) - Testing & Final Demonstration">5</div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- 5 Phase Content Cards -->
+      <section class="cards-grid">
+        
+        <!-- CARD 1 -->
+        <div class="phase-card phase-1">
+          <div class="card-top">
+            <div class="card-milestone-flag done">✓ Completed (W1–W3)</div>
+            <h3 class="card-title">Infrastructure & Data Collection</h3>
+            <p class="card-body-text">
+              Set up the LinuxONE/AWS infrastructure, Kafka and Redis, network telemetry, and testing environment
+            </p>
+          </div>
+          <div class="card-expected-box">
+            <strong>Expected Result:</strong>
+            Working foundation for collecting security data
+          </div>
+        </div>
+
+        <!-- CARD 2: CURRENT (CHECKPOINT 1) -->
+        <div class="phase-card phase-2">
+          <div class="card-top">
+            <div class="card-milestone-flag cp1">📍 Active: Checkpoint 1 (W5)</div>
+            <h3 class="card-title">Detection & AI Development</h3>
+            <p class="card-body-text">
+              Develop the phishing/visual detection system, DOM analyzer, C2 analytics, and initial attack-graph structure
+            </p>
+          </div>
+          <div class="card-expected-box">
+            <strong>Expected Result:</strong>
+            Initial threat-detection components (VerifyEye baseline, SpectraC2 FFT spectral features, Kafka streaming)
+          </div>
+        </div>
+
+        <!-- CARD 3: TARGET (CHECKPOINT 2) -->
+        <div class="phase-card phase-3">
+          <div class="card-top">
+            <div class="card-milestone-flag cp2">🎯 Next Target: Checkpoint 2 (W7)</div>
+            <h3 class="card-title">Attack Correlation & AI Triage</h3>
+            <p class="card-body-text">
+              Connect security events into an attack graph and develop the local AI triage system
+            </p>
+          </div>
+          <div class="card-expected-box">
+            <strong>Expected Result:</strong>
+            Ability to connect events and summarize incidents (Neo4j multi-entity traversal, Dijkstra blast radius, local Ollama triage)
+          </div>
+        </div>
+
+        <!-- CARD 4 -->
+        <div class="phase-card">
+          <div class="card-top">
+            <div class="card-milestone-flag" style="background: rgba(255,255,255,0.06); color: var(--text-muted); border: 1px solid rgba(255,255,255,0.1);">Weeks 10–12</div>
+            <h3 class="card-title">Dashboard & Browser Protection</h3>
+            <p class="card-body-text">
+              Build the SOC dashboard, Chrome extension, visualizations, and real-time alert streaming
+            </p>
+          </div>
+          <div class="card-expected-box">
+            <strong>Expected Result:</strong>
+            Usable interface for security analysts (React Flow attack canvas, FFT heatmaps, 1-click quarantine)
+          </div>
+        </div>
+
+        <!-- CARD 5 -->
+        <div class="phase-card">
+          <div class="card-top">
+            <div class="card-milestone-flag" style="background: rgba(255,255,255,0.06); color: var(--text-muted); border: 1px solid rgba(255,255,255,0.1);">Weeks 13–14</div>
+            <h3 class="card-title">Testing & Final Demonstration</h3>
+            <p class="card-body-text">
+              Run end-to-end attack scenarios, test the complete system, measure performance, and prepare the final demonstration
+            </p>
+          </div>
+          <div class="card-expected-box">
+            <strong>Expected Result:</strong>
+            Complete OmniGuard SOC demonstration with &gt;95% precision benchmark on APT intrusion replay
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+
+    <!-- ========================================================
+         14-WEEK PROGRESS SCRUBBER
+         ======================================================== -->
+    <section class="week-scrubber-section" id="scrubberSection">
+      <div class="scrubber-header">
+        <div class="scrubber-title">
+          <span>⏱️</span> 14-Week Capstone Trajectory
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted);">
+          Showing current position at <strong style="color: var(--cyan);">Week 5</strong> transitioning into <strong style="color: var(--amber);">Week 7</strong>
+        </div>
+      </div>
+
+      <div class="week-cells-row">
+        <!-- Week 1 -->
+        <div class="week-cell completed" title="Week 1: Environment & Architecture setup">
+          <div class="w-num">W1</div>
+          <div class="w-phase">Phase 1</div>
+        </div>
+        <!-- Week 2 -->
+        <div class="week-cell completed" title="Week 2: Kafka, Redis, & Zeek baseline">
+          <div class="w-num">W2</div>
+          <div class="w-phase">Phase 1</div>
+        </div>
+        <!-- Week 3 -->
+        <div class="week-cell completed" title="Week 3: Threat harness & Flipper USB tests">
+          <div class="w-num">W3</div>
+          <div class="w-phase">Phase 1</div>
+        </div>
+        <!-- Week 4 -->
+        <div class="week-cell completed" title="Week 4: Model prototyping & Flow parser">
+          <div class="w-num">W4</div>
+          <div class="w-phase">Phase 2</div>
+        </div>
+        <!-- Week 5: CURRENT -->
+        <div class="week-cell current-cp1" title="Week 5: CHECKPOINT 1 COMPLETED">
+          <div class="w-num">W5 📍</div>
+          <div class="w-phase" style="color: var(--cyan); font-weight: 700;">Phase 2</div>
+        </div>
+        <!-- Week 6 -->
+        <div class="week-cell" style="border-color: rgba(245, 158, 11, 0.4);" title="Week 6: Model fine-tuning & Graph Schemas">
+          <div class="w-num" style="color: var(--amber);">W6 ➔</div>
+          <div class="w-phase">Phase 2</div>
+        </div>
+        <!-- Week 7: TARGET CP2 -->
+        <div class="week-cell target-cp2" title="Week 7: CHECKPOINT 2 TARGET">
+          <div class="w-num">W7 🎯</div>
+          <div class="w-phase" style="color: var(--amber); font-weight: 700;">Phase 3</div>
+        </div>
+        <!-- Week 8 -->
+        <div class="week-cell" title="Week 8: NetworkX algorithms & Local Ollama">
+          <div class="w-num">W8</div>
+          <div class="w-phase">Phase 3</div>
+        </div>
+        <!-- Week 9 -->
+        <div class="week-cell" title="Week 9: Correlation benchmarks & LinuxONE packaging">
+          <div class="w-num">W9</div>
+          <div class="w-phase">Phase 3</div>
+        </div>
+        <!-- Week 10 -->
+        <div class="week-cell" title="Week 10: Chrome MV3 extension & React Flow canvas">
+          <div class="w-num">W10</div>
+          <div class="w-phase">Phase 4</div>
+        </div>
+        <!-- Week 11 -->
+        <div class="week-cell" title="Week 11: Real-time WebSockets & FFT heatmaps">
+          <div class="w-num">W11</div>
+          <div class="w-phase">Phase 4</div>
+        </div>
+        <!-- Week 12 -->
+        <div class="week-cell" title="Week 12: Integrated containment controls">
+          <div class="w-num">W12</div>
+          <div class="w-phase">Phase 4</div>
+        </div>
+        <!-- Week 13 -->
+        <div class="week-cell" title="Week 13: Full APT kill-chain simulation">
+          <div class="w-num">W13</div>
+          <div class="w-phase">Phase 5</div>
+        </div>
+        <!-- Week 14 -->
+        <div class="week-cell" title="Week 14: Final Capstone Presentation & Demo">
+          <div class="w-num">W14 🏆</div>
+          <div class="w-phase">Phase 5</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         CHECKPOINT 1 ➔ CHECKPOINT 2 TEAM BRIDGE
+         ======================================================== -->
+    <section class="bridge-section" id="bridgeSection">
+      
+      <div class="bridge-header">
+        <div class="bridge-header-left">
+          <h2>
+            <span>Week 5 (Checkpoint 1)</span> 
+            <span class="bridge-arrow-icon">➔</span> 
+            <span style="color: var(--amber);">Week 7 (Checkpoint 2) Transition Roadmap</span>
+          </h2>
+          <p>Detailed deliverables and team ownership required to advance from initial threat models to live graph correlation & triage.</p>
+        </div>
+        <div style="font-size: 12px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace;">
+          TEAM OMNIGUARD: KHOI • RAHIM • AAYUSH • ABU
+        </div>
+      </div>
+
+      <div class="bridge-grid">
+        
+        <!-- MEMBER 1: KHOI -->
+        <div class="member-column">
+          <div>
+            <div class="member-head">
+              <div class="member-avatar avatar-khoi">K</div>
+              <div class="member-title">
+                <h4>Khoi</h4>
+                <span>SpectraC2 &amp; Telemetry Pipeline</span>
+              </div>
+            </div>
+
+            <div class="checkpoint-compare-box">
+              <div class="cp-state-card present">
+                <div class="cp-state-tag">📍 Checkpoint 1 (W5) — Done</div>
+                <ul class="cp-checklist">
+                  <li><input type="checkbox" checked disabled> SpectraC2 flow-metadata engine (IAT &amp; symmetry)</li>
+                  <li><input type="checkbox" checked disabled> Dual-domain FFT/PSD spectral feature extractors</li>
+                  <li><input type="checkbox" checked disabled> PyTorch BeaconLSTM &amp; Isolation Forest (98.1% prec)</li>
+                  <li><input type="checkbox" checked disabled> Zeek/Suricata streaming parsers &amp; Kafka bridge</li>
+                </ul>
+              </div>
+
+              <div class="cp-state-card next">
+                <div class="cp-state-tag">🎯 Checkpoint 2 (W7) — Deliverables</div>
+                <ul class="cp-checklist" id="tasksKhoi">
+                  <li><input type="checkbox" id="k_task1" onchange="saveTaskState()"> Wire stream_consumer.py → FastAPI live predictor</li>
+                  <li><input type="checkbox" id="k_task2" onchange="saveTaskState()"> Deploy inference on LinuxONE (Dockerfile.s390x)</li>
+                  <li><input type="checkbox" id="k_task3" onchange="saveTaskState()"> Benchmark LSTM / Isolation Forest vs jitter flows (&gt;95%)</li>
+                  <li><input type="checkbox" id="k_task4" onchange="saveTaskState()"> Feed verified C2 detections to Neo4j via Kafka</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MEMBER 2: RAHIM -->
+        <div class="member-column">
+          <div>
+            <div class="member-head">
+              <div class="member-avatar avatar-rahim">R</div>
+              <div class="member-title">
+                <h4>Rahim</h4>
+                <span>VerifyEye Ingress &amp; Adversary Emulation</span>
+              </div>
+            </div>
+
+            <div class="checkpoint-compare-box">
+              <div class="cp-state-card present">
+                <div class="cp-state-tag">📍 Checkpoint 1 (W5) — Done</div>
+                <ul class="cp-checklist">
+                  <li><input type="checkbox" checked disabled> Playwright headless DOM crawler &amp; form scanner</li>
+                  <li><input type="checkbox" checked disabled> Zero false-positive pairing logic for credential forms</li>
+                  <li><input type="checkbox" checked disabled> Flipper Zero BadUSB injection DuckyScripts</li>
+                  <li><input type="checkbox" checked disabled> Sliver C2 listeners for captive-portal simulation</li>
+                </ul>
+              </div>
+
+              <div class="cp-state-card next">
+                <div class="cp-state-tag">🎯 Checkpoint 2 (W7) — Deliverables</div>
+                <ul class="cp-checklist" id="tasksRahim">
+                  <li><input type="checkbox" id="r_task1" onchange="saveTaskState()"> Add cross-origin form-action validation</li>
+                  <li><input type="checkbox" id="r_task2" onchange="saveTaskState()"> Train &amp; quantize YOLOv8, export to ONNX runtime</li>
+                  <li><input type="checkbox" id="r_task3" onchange="saveTaskState()"> Favicon pHash visual comparison &amp; layout matcher</li>
+                  <li><input type="checkbox" id="r_task4" onchange="saveTaskState()"> Chrome MV3 extension real-time form locking</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MEMBER 3: ABU -->
+        <div class="member-column">
+          <div>
+            <div class="member-head">
+              <div class="member-avatar avatar-abu">Ab</div>
+              <div class="member-title">
+                <h4>Abu</h4>
+                <span>Graph Correlation &amp; Air-Gapped LLM</span>
+              </div>
+            </div>
+
+            <div class="checkpoint-compare-box">
+              <div class="cp-state-card present">
+                <div class="cp-state-tag">📍 Checkpoint 1 (W5) — Done</div>
+                <ul class="cp-checklist">
+                  <li><input type="checkbox" checked disabled> Neo4j schema (Host, User, IP, Process, Domain)</li>
+                  <li><input type="checkbox" checked disabled> Cypher relationships (CONNECTED_TO, SPAWNED, etc)</li>
+                  <li><input type="checkbox" checked disabled> ShortestPath (2 hops) &amp; Blast Radius (4 hosts) query</li>
+                  <li><input type="checkbox" checked disabled> Query time benchmark: 547 ms for attack path</li>
+                </ul>
+              </div>
+
+              <div class="cp-state-card next">
+                <div class="cp-state-tag">🎯 Checkpoint 2 (W7) — Deliverables</div>
+                <ul class="cp-checklist" id="tasksAbu">
+                  <li><input type="checkbox" id="ab_task1" onchange="saveTaskState()"> Deploy local Ollama (Llama-3-Cyber) triage engine</li>
+                  <li><input type="checkbox" id="ab_task2" onchange="saveTaskState()"> Author structured JSON prompts with MITRE ATT&amp;CK tags</li>
+                  <li><input type="checkbox" id="ab_task3" onchange="saveTaskState()"> Centrality &amp; lateral path discovery in NetworkX</li>
+                  <li><input type="checkbox" id="ab_task4" onchange="saveTaskState()"> Automated incident summary &amp; remediation drafting</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MEMBER 4: AAYUSH -->
+        <div class="member-column">
+          <div>
+            <div class="member-head">
+              <div class="member-avatar avatar-aayush">Aa</div>
+              <div class="member-title">
+                <h4>Aayush</h4>
+                <span>Unified Dashboard &amp; Platform</span>
+              </div>
+            </div>
+
+            <div class="checkpoint-compare-box">
+              <div class="cp-state-card present">
+                <div class="cp-state-tag">📍 Checkpoint 1 (W5) — Done</div>
+                <ul class="cp-checklist">
+                  <li><input type="checkbox" checked disabled> FastAPI Alert service (GET/POST /alerts, Pydantic v2)</li>
+                  <li><input type="checkbox" checked disabled> MongoDB local alert persistence (zero-cloud-egress)</li>
+                  <li><input type="checkbox" checked disabled> Vite + React dashboard live alert stream &amp; count</li>
+                  <li><input type="checkbox" checked disabled> 4 fields mapped directly to Neo4j node types</li>
+                </ul>
+              </div>
+
+              <div class="cp-state-card next">
+                <div class="cp-state-tag">🎯 Checkpoint 2 (W7) — Deliverables</div>
+                <ul class="cp-checklist" id="tasksAayush">
+                  <li><input type="checkbox" id="a_task1" onchange="saveTaskState()"> Build entity-resolution ingestion (api/main.py)</li>
+                  <li><input type="checkbox" id="a_task2" onchange="saveTaskState()"> React Flow / D3 interactive attack graph canvas</li>
+                  <li><input type="checkbox" id="a_task3" onchange="saveTaskState()"> Sub-second WebSocket streaming across all engines</li>
+                  <li><input type="checkbox" id="a_task4" onchange="saveTaskState()"> Multi-pane layout &amp; AWS ECS/Lambda deployment setup</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+  </div>
+
+  <script>
+    // LocalStorage persistence for Checkpoint 2 preparation checkboxes
+    const STORAGE_KEY = 'omniguard_chronological_timeline_cp2_tasks_v1';
+
+    function loadTaskState() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const state = JSON.parse(saved);
+          Object.keys(state).forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.checked = !!state[id];
+          });
+        }
+      } catch (e) {
+        console.error("Error loading task state", e);
+      }
+    }
+
+    function saveTaskState() {
+      try {
+        const taskIds = [
+          'k_task1', 'k_task2', 'k_task3', 'k_task4',
+          'r_task1', 'r_task2', 'r_task3', 'r_task4',
+          'ab_task1', 'ab_task2', 'ab_task3', 'ab_task4',
+          'a_task1', 'a_task2', 'a_task3', 'a_task4'
+        ];
+        const state = {};
+        taskIds.forEach(id => {
+          const el = document.getElementById(id);
+          if (el) state[id] = el.checked;
+        });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (e) {
+        console.error("Error saving task state", e);
+      }
+    }
+
+    // View Switching logic
+    function switchView(mode) {
+      const slide = document.getElementById('slideSection');
+      const bridge = document.getElementById('bridgeSection');
+      const scrubber = document.getElementById('scrubberSection');
+      
+      const btnSlide = document.getElementById('viewSlideBtn');
+      const btnBridge = document.getElementById('viewBridgeBtn');
+      const btnAll = document.getElementById('viewAllBtn');
+
+      [btnSlide, btnBridge, btnAll].forEach(b => b.classList.remove('active'));
+
+      if (mode === 'slide') {
+        btnSlide.classList.add('active');
+        slide.style.display = 'block';
+        scrubber.style.display = 'block';
+        bridge.style.display = 'none';
+      } else if (mode === 'bridge') {
+        btnBridge.classList.add('active');
+        slide.style.display = 'none';
+        scrubber.style.display = 'block';
+        bridge.style.display = 'block';
+      } else {
+        btnAll.classList.add('active');
+        slide.style.display = 'block';
+        scrubber.style.display = 'block';
+        bridge.style.display = 'block';
+      }
+    }
+
+    // Initialize on load
+    window.addEventListener('DOMContentLoaded', () => {
+      loadTaskState();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,1861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OmniGuard SOC - Interactive Project Timeline & Gantt Chart</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #06090f;
+      --bg-surface: #0b111e;
+      --bg-card: rgba(15, 23, 42, 0.7);
+      --bg-card-hover: rgba(30, 41, 59, 0.8);
+      --border-subtle: rgba(56, 189, 248, 0.12);
+      --border-focus: rgba(56, 189, 248, 0.4);
+      --border-grid: rgba(255, 255, 255, 0.05);
+      
+      --cyan: #38bdf8;
+      --cyan-glow: rgba(56, 189, 248, 0.25);
+      --green: #10b981;
+      --green-glow: rgba(16, 185, 129, 0.25);
+      --purple: #a855f7;
+      --purple-glow: rgba(168, 85, 247, 0.25);
+      --amber: #f59e0b;
+      --amber-glow: rgba(245, 158, 11, 0.25);
+      --rose: #f43f5e;
+      
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --track-khoi: #38bdf8;
+      --track-siddik: #f59e0b;
+      --track-aayush: #a855f7;
+      --track-team: #10b981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      min-height: 100vh;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(56, 189, 248, 0.15), transparent),
+        radial-gradient(circle at 15% 85%, rgba(168, 85, 247, 0.08), transparent),
+        radial-gradient(circle at 85% 20%, rgba(16, 185, 129, 0.08), transparent);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--bg-base);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+
+    /* Container */
+    .app-container {
+      max-width: 1680px;
+      margin: 0 auto;
+      padding: 24px 32px 64px;
+    }
+
+    /* Top Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 24px;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .badge-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.2));
+      border: 1px solid var(--border-focus);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      box-shadow: 0 0 20px var(--cyan-glow);
+    }
+
+    .title-area h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .title-area h1 span.tag {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--cyan);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      font-weight: 600;
+    }
+
+    .title-area p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn {
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      border: 1px solid transparent;
+      font-family: inherit;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      color: #fff;
+      border-color: rgba(56, 189, 248, 0.4);
+      box-shadow: 0 2px 10px var(--cyan-glow);
+    }
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #0369a1, #075985);
+      box-shadow: 0 0 16px var(--cyan-glow);
+    }
+
+    .btn-secondary {
+      background: rgba(30, 41, 59, 0.6);
+      color: var(--text-main);
+      border-color: rgba(148, 163, 184, 0.2);
+    }
+    .btn-secondary:hover {
+      background: rgba(51, 65, 85, 0.8);
+      border-color: var(--cyan);
+    }
+
+    /* Overview Cards Bar */
+    .overview-grid {
+      display: grid;
+      grid-template-columns: 280px 1fr 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    @media (max-width: 1200px) {
+      .overview-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+    @media (max-width: 640px) {
+      .overview-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      backdrop-filter: blur(12px);
+      border-radius: 14px;
+      padding: 16px 20px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+    .card:hover {
+      border-color: var(--border-focus);
+      transform: translateY(-1px);
+    }
+
+    /* Overall Completion Card */
+    .overall-card {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .ring-container {
+      position: relative;
+      width: 68px;
+      height: 68px;
+      flex-shrink: 0;
+    }
+
+    .ring-svg {
+      width: 68px;
+      height: 68px;
+      transform: rotate(-90deg);
+    }
+
+    .ring-circle-bg {
+      fill: none;
+      stroke: rgba(255, 255, 255, 0.08);
+      stroke-width: 6;
+    }
+
+    .ring-circle {
+      fill: none;
+      stroke: var(--green);
+      stroke-width: 6;
+      stroke-linecap: round;
+      stroke-dasharray: 188.5;
+      stroke-dashoffset: 188.5;
+      transition: stroke-dashoffset 0.6s ease;
+      filter: drop-shadow(0 0 6px var(--green-glow));
+    }
+
+    .ring-text {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text-main);
+    }
+
+    .overall-meta h3 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .overall-meta p {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* Track/Person Progress Cards */
+    .track-card .track-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .track-title {
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .track-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .dot-khoi { background: var(--track-khoi); box-shadow: 0 0 8px var(--cyan-glow); }
+    .dot-siddik { background: var(--track-siddik); box-shadow: 0 0 8px var(--amber-glow); }
+    .dot-aayush { background: var(--track-aayush); box-shadow: 0 0 8px var(--purple-glow); }
+
+    .track-role {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-weight: 400;
+      margin-bottom: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 7px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.5s ease;
+    }
+    .fill-khoi { background: linear-gradient(90deg, #0284c7, var(--cyan)); }
+    .fill-siddik { background: linear-gradient(90deg, #d97706, var(--amber)); }
+    .fill-aayush { background: linear-gradient(90deg, #7c3aed, var(--purple)); }
+
+    .track-stats {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Controls & Filter Bar */
+    .controls-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 12px 18px;
+      margin-bottom: 24px;
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .filter-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+      font-weight: 700;
+    }
+
+    .pill-btn {
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+      transition: all 0.2s ease;
+    }
+    .pill-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+    }
+    .pill-btn.active {
+      background: rgba(56, 189, 248, 0.18);
+      border-color: var(--cyan);
+      color: var(--cyan);
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    }
+
+    .search-box {
+      position: relative;
+    }
+    .search-input {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      padding: 6px 12px 6px 30px;
+      border-radius: 8px;
+      font-size: 12px;
+      width: 220px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-input:focus {
+      border-color: var(--cyan);
+    }
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 12px;
+      color: var(--text-dim);
+      pointer-events: none;
+    }
+
+    .view-toggle {
+      display: flex;
+      background: rgba(15, 23, 42, 0.8);
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+    }
+    .view-btn {
+      padding: 5px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      transition: all 0.15s;
+    }
+    .view-btn.active {
+      background: var(--cyan);
+      color: #06090f;
+    }
+
+    /* Week Indicator / Current Week Slider */
+    .week-stepper {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+    }
+    .week-stepper label {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .week-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--green);
+      background: rgba(16, 185, 129, 0.12);
+      padding: 2px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .week-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 110px;
+      height: 5px;
+      border-radius: 3px;
+      background: #1e293b;
+      outline: none;
+    }
+    .week-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--green);
+      cursor: pointer;
+      box-shadow: 0 0 8px var(--green-glow);
+    }
+
+    /* Gantt Chart Section */
+    .gantt-wrapper {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 32px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .gantt-header {
+      display: grid;
+      grid-template-columns: 340px 120px repeat(14, 1fr);
+      background: #090e1a;
+      border-bottom: 1px solid var(--border-subtle);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .gh-col {
+      padding: 12px 10px;
+      text-align: center;
+      border-right: 1px solid var(--border-grid);
+    }
+    .gh-col.task-title-col {
+      text-align: left;
+      padding-left: 20px;
+    }
+    .gh-col.owner-col {
+      text-align: left;
+    }
+    .gh-col.current-week-col {
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--green);
+      font-weight: 700;
+      position: relative;
+    }
+    .gh-col.current-week-col::after {
+      content: 'NOW';
+      position: absolute;
+      top: 1px;
+      right: 2px;
+      font-size: 8px;
+      background: var(--green);
+      color: #06090f;
+      padding: 0 3px;
+      border-radius: 2px;
+    }
+
+    /* Gantt Phase Group */
+    .phase-group {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .phase-banner {
+      background: rgba(15, 23, 42, 0.9);
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-left: 4px solid var(--cyan);
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s;
+    }
+    .phase-banner:hover {
+      background: rgba(30, 41, 59, 0.9);
+    }
+
+    .phase-banner-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .phase-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-muted);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .phase-banner-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-muted);
+    }
+
+    .phase-prog-badge {
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--cyan);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+    }
+    .phase-prog-badge.complete {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--green);
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+
+    /* Gantt Row */
+    .gantt-row {
+      display: grid;
+      grid-template-columns: 340px 120px repeat(14, 1fr);
+      align-items: center;
+      border-bottom: 1px solid var(--border-grid);
+      font-size: 12px;
+      transition: background 0.15s;
+      position: relative;
+    }
+    .gantt-row:hover {
+      background: rgba(30, 41, 59, 0.4);
+    }
+    .gantt-row.completed {
+      opacity: 0.75;
+    }
+
+    .task-cell {
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-right: 1px solid var(--border-grid);
+    }
+
+    .task-checkbox {
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 5px;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      background: rgba(15, 23, 42, 0.6);
+      cursor: pointer;
+      position: relative;
+      flex-shrink: 0;
+      transition: all 0.2s;
+    }
+    .task-checkbox:hover {
+      border-color: var(--cyan);
+      box-shadow: 0 0 6px var(--cyan-glow);
+    }
+    .task-checkbox:checked {
+      background: var(--green);
+      border-color: var(--green);
+      box-shadow: 0 0 8px var(--green-glow);
+    }
+    .task-checkbox:checked::after {
+      content: '✓';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 12px;
+      color: #06090f;
+      font-weight: 800;
+    }
+
+    .task-text {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .task-text:hover {
+      color: var(--cyan);
+    }
+    .gantt-row.completed .task-text {
+      text-decoration: line-through;
+      color: var(--text-dim);
+    }
+
+    .owner-cell {
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-right: 1px solid var(--border-grid);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .owner-pill {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .pill-khoi { background: rgba(56, 189, 248, 0.15); color: var(--cyan); border: 1px solid rgba(56, 189, 248, 0.25); }
+    .pill-siddik { background: rgba(245, 158, 11, 0.15); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.25); }
+    .pill-aayush { background: rgba(168, 85, 247, 0.15); color: var(--purple); border: 1px solid rgba(168, 85, 247, 0.25); }
+    .pill-team { background: rgba(16, 185, 129, 0.15); color: var(--green); border: 1px solid rgba(16, 185, 129, 0.25); }
+
+    /* Timeline Grid Area */
+    .timeline-grid {
+      grid-column: 3 / span 14;
+      display: grid;
+      grid-template-columns: repeat(14, 1fr);
+      height: 100%;
+      position: relative;
+      align-items: center;
+      padding: 6px 0;
+    }
+
+    .week-col-bg {
+      height: 100%;
+      border-right: 1px solid var(--border-grid);
+    }
+    .week-col-bg.is-current {
+      background: rgba(16, 185, 129, 0.05);
+    }
+
+    /* Gantt Bar */
+    .gantt-bar {
+      position: absolute;
+      height: 22px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      font-size: 10px;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+      color: #fff;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      z-index: 2;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+    .gantt-bar:hover {
+      transform: translateY(-1px) scaleY(1.08);
+      filter: brightness(1.15);
+      z-index: 5;
+    }
+    .gantt-bar.bar-khoi {
+      background: linear-gradient(90deg, rgba(2, 132, 199, 0.85), rgba(56, 189, 248, 0.85));
+      border: 1px solid rgba(56, 189, 248, 0.5);
+    }
+    .gantt-bar.bar-siddik {
+      background: linear-gradient(90deg, rgba(217, 119, 6, 0.85), rgba(245, 158, 11, 0.85));
+      border: 1px solid rgba(245, 158, 11, 0.5);
+    }
+    .gantt-bar.bar-aayush {
+      background: linear-gradient(90deg, rgba(124, 58, 237, 0.85), rgba(168, 85, 247, 0.85));
+      border: 1px solid rgba(168, 85, 247, 0.5);
+    }
+    .gantt-bar.bar-team {
+      background: linear-gradient(90deg, rgba(5, 150, 105, 0.85), rgba(16, 185, 129, 0.85));
+      border: 1px solid rgba(16, 185, 129, 0.5);
+    }
+    .gantt-bar.completed-bar {
+      filter: grayscale(0.2);
+    }
+    .gantt-bar.completed-bar::after {
+      content: ' ✓';
+      font-weight: 800;
+    }
+
+    /* Modal / Drawer for Task Details */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(6px);
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal-card {
+      background: #0d1527;
+      border: 1px solid var(--border-focus);
+      border-radius: 16px;
+      max-width: 600px;
+      width: 100%;
+      padding: 24px 28px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px var(--cyan-glow);
+      position: relative;
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 18px;
+      right: 20px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 20px;
+      cursor: pointer;
+    }
+    .modal-close:hover {
+      color: var(--rose);
+    }
+
+    .modal-header {
+      margin-bottom: 16px;
+    }
+    .modal-header h2 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .modal-pills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .modal-body {
+      display: flex;
+      flex-col: column;
+      gap: 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-muted);
+    }
+
+    .modal-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--cyan);
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .modal-tech-list {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .tech-pill {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 2px 8px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      color: var(--text-main);
+    }
+
+    /* Footer Note */
+    footer {
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    /* Print styling */
+    @media print {
+      body {
+        background: #fff;
+        color: #000;
+      }
+      .controls-bar, .header-actions {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+    
+    <!-- Top Header -->
+    <header>
+      <div class="header-left">
+        <div class="badge-icon">🛡️</div>
+        <div class="title-area">
+          <h1>
+            OmniGuard SOC <span class="tag">CAPSTONE TIMELINE</span>
+          </h1>
+          <p>Multi-Modal Threat Defense, Jitter-Invariant C2 Analytics & Graph Triage (12–14 Weeks Execution Plan)</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="chronological_timeline.html" class="btn btn-secondary" title="Switch to Chronological Slide & Milestone Timeline">
+          <span>🖼️</span> Slide Timeline
+        </a>
+        <a href="functional_timeline.html" class="btn btn-secondary" title="Switch to Functional Characteristics & Architecture Timeline">
+          <span>⚡</span> Functional Matrix
+        </a>
+        <a href="presentations/OmniGuard_Checkpoint1_Presentation.pdf" target="_blank" class="btn btn-secondary" title="Open Checkpoint 1 Presentation Deck (PDF)">
+          <span>📊</span> CP1 Slides (PDF)
+        </a>
+        <button class="btn btn-secondary" id="exportBtn" title="Export current progress to JSON">
+          <span>📥</span> Export JSON
+        </button>
+        <button class="btn btn-secondary" id="importBtn" title="Import progress from JSON">
+          <span>📤</span> Import JSON
+        </button>
+        <input type="file" id="importFileInput" style="display: none;" accept=".json" />
+        <button class="btn btn-secondary" id="resetBtn" title="Reset all checkboxes to initial defaults">
+          <span>🔄</span> Reset
+        </button>
+        <button class="btn btn-primary" onclick="window.print()" title="Print or save as PDF">
+          <span>🖨️</span> Print / PDF
+        </button>
+      </div>
+    </header>
+
+    <!-- Overview Progress Cards -->
+    <div class="overview-grid">
+      
+      <!-- Overall Project Ring Card -->
+      <div class="card overall-card">
+        <div class="ring-container">
+          <svg class="ring-svg">
+            <circle class="ring-circle-bg" cx="34" cy="34" r="30"></circle>
+            <circle class="ring-circle" id="overallRing" cx="34" cy="34" r="30"></circle>
+          </svg>
+          <div class="ring-text" id="overallPercent">0%</div>
+        </div>
+        <div class="overall-meta">
+          <h3>Overall Completion</h3>
+          <p id="overallTaskCount">0 of 28 tasks completed</p>
+          <div style="font-size: 11px; color: var(--green); margin-top: 4px; font-weight: 600;" id="milestoneIndicator">
+            Target: Dec 2026 Showcase
+          </div>
+        </div>
+      </div>
+
+      <!-- Khoi Track Card -->
+      <div class="card track-card">
+        <div class="track-header">
+          <div class="track-title">
+            <span class="track-dot dot-khoi"></span> Khoi Duong
+          </div>
+          <span class="track-stats" id="statsKhoi">0%</span>
+        </div>
+        <div class="track-role">SpectraC2 Encrypted C2 & Telemetry Pipeline</div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill fill-khoi" id="fillKhoi" style="width: 0%;"></div>
+        </div>
+        <div class="track-stats">
+          <span id="countKhoi">0/9 tasks</span>
+          <span>LinuxONE / PyTorch</span>
+        </div>
+      </div>
+
+      <!-- Siddik Track Card -->
+      <div class="card track-card">
+        <div class="track-header">
+          <div class="track-title">
+            <span class="track-dot dot-siddik"></span> Abu Bakar Siddik
+          </div>
+          <span class="track-stats" id="statsSiddik">0%</span>
+        </div>
+        <div class="track-role">VerifyEye Ingress & Adversary Emulation</div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill fill-siddik" id="fillSiddik" style="width: 0%;"></div>
+        </div>
+        <div class="track-stats">
+          <span id="countSiddik">0/8 tasks</span>
+          <span>YOLOv8 / Flipper Zero</span>
+        </div>
+      </div>
+
+      <!-- Aayush Track Card -->
+      <div class="card track-card">
+        <div class="track-header">
+          <div class="track-title">
+            <span class="track-dot dot-aayush"></span> Aayush Maharjan
+          </div>
+          <span class="track-stats" id="statsAayush">0%</span>
+        </div>
+        <div class="track-role">SOC Dashboard & Graph Triage Core</div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill fill-aayush" id="fillAayush" style="width: 0%;"></div>
+        </div>
+        <div class="track-stats">
+          <span id="countAayush">0/9 tasks</span>
+          <span>Neo4j / Ollama / React</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Controls & Filter Bar -->
+    <div class="controls-bar">
+      
+      <!-- Track / Person Filter -->
+      <div class="filter-group">
+        <span class="filter-label">Filter:</span>
+        <button class="pill-btn active" data-filter="all">All Tracks</button>
+        <button class="pill-btn" data-filter="khoi">Khoi (SpectraC2)</button>
+        <button class="pill-btn" data-filter="siddik">Siddik (VerifyEye)</button>
+        <button class="pill-btn" data-filter="aayush">Aayush (Dashboard/Graph)</button>
+        <button class="pill-btn" data-filter="team">Team Showcase</button>
+      </div>
+
+      <!-- Search Box -->
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" class="search-input" id="searchInput" placeholder="Search tasks, tech, or MITRE..." />
+      </div>
+
+      <!-- Week Stepper / Current Week Slider -->
+      <div class="week-stepper">
+        <label>Current Timeline:</label>
+        <span class="week-badge" id="currentWeekDisplay">Week 4</span>
+        <input type="range" class="week-slider" id="weekSlider" min="1" max="14" value="4" />
+      </div>
+
+    </div>
+
+    <!-- Gantt Chart Container -->
+    <div class="gantt-wrapper">
+      
+      <!-- Timeline Header -->
+      <div class="gantt-header" id="ganttHeader">
+        <div class="gh-col task-title-col">Work Breakdown & Deliverables</div>
+        <div class="gh-col owner-col">Lead / Track</div>
+        <div class="gh-col" data-week="1">W1</div>
+        <div class="gh-col" data-week="2">W2</div>
+        <div class="gh-col" data-week="3">W3</div>
+        <div class="gh-col" data-week="4">W4</div>
+        <div class="gh-col" data-week="5">W5</div>
+        <div class="gh-col" data-week="6">W6</div>
+        <div class="gh-col" data-week="7">W7</div>
+        <div class="gh-col" data-week="8">W8</div>
+        <div class="gh-col" data-week="9">W9</div>
+        <div class="gh-col" data-week="10">W10</div>
+        <div class="gh-col" data-week="11">W11</div>
+        <div class="gh-col" data-week="12">W12</div>
+        <div class="gh-col" data-week="13">W13</div>
+        <div class="gh-col" data-week="14">W14</div>
+      </div>
+
+      <!-- Phases & Tasks Rows Container (Injected by JS) -->
+      <div id="ganttBody"></div>
+
+    </div>
+
+    <!-- Footer Note -->
+    <footer>
+      OmniGuard SOC Autonomous Multi-Modal Threat Defense System • Capstone Timeline Tracker • Changes persist automatically to browser local storage.
+    </footer>
+
+  </div>
+
+  <!-- Task Detail Modal -->
+  <div class="modal-backdrop" id="taskModal">
+    <div class="modal-card">
+      <button class="modal-close" id="modalCloseBtn">&times;</button>
+      <div class="modal-header">
+        <h2 id="modalTitle">Task Title</h2>
+        <div class="modal-pills">
+          <span class="owner-pill" id="modalOwnerPill">Owner</span>
+          <span class="phase-tag" id="modalPhaseTag">Phase</span>
+          <span class="phase-tag" id="modalWeeksTag">Weeks</span>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div>
+          <div class="modal-section-title">Objective & Deliverable</div>
+          <p id="modalDescription">Description</p>
+        </div>
+        <div>
+          <div class="modal-section-title">Key Technologies & Artifacts</div>
+          <div class="modal-tech-list" id="modalTechList"></div>
+        </div>
+        <div>
+          <div class="modal-section-title">Acceptance / Verification Criteria</div>
+          <p id="modalCriteria">Criteria</p>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="modalCheckbox" class="task-checkbox" />
+            <span style="font-weight: 600; color: var(--text-main);">Mark task as completed</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Project Data Structure straight from Proposal & README
+    const TIMELINE_DATA = [
+      {
+        phaseId: 1,
+        title: "Phase 1: Architecture, Ingestion & Hardware Setup",
+        tag: "Checkpoint 1",
+        weeks: "Weeks 1–3",
+        startWeek: 1,
+        endWeek: 3,
+        tasks: [
+          {
+            id: "t1_1",
+            title: "Provision IBM LinuxONE s390x & AWS compute environments",
+            owner: "Khoi Duong",
+            track: "khoi",
+            startWeek: 1,
+            endWeek: 2,
+            tech: ["IBM LinuxONE", "s390x", "AWS EC2/ECS", "Ubuntu Linux"],
+            description: "Set up mainframe LinuxONE s390x environment for high-throughput encrypted flow analytics and AWS staging instances.",
+            criteria: "Active shell access, Docker installed on s390x, and s390x architecture flags validated."
+          },
+          {
+            id: "t1_2",
+            title: "Deploy Kafka message queues & Redis backpressure buffer",
+            owner: "Khoi Duong",
+            track: "khoi",
+            startWeek: 2,
+            endWeek: 3,
+            tech: ["Apache Kafka", "Redis", "Docker Compose"],
+            description: "Establish message broker architecture to stream Zeek and Suricata events without packet drop.",
+            criteria: "Dockerized Kafka/Zookeeper cluster receiving test producer streams with backpressure buffering."
+          },
+          {
+            id: "t1_3",
+            title: "Configure Zeek & Suricata telemetry stream parsers",
+            owner: "Khoi Duong",
+            track: "khoi",
+            startWeek: 2,
+            endWeek: 3,
+            tech: ["Zeek (conn.log)", "Suricata (EVE.json)", "Python", "Scapy"],
+            description: "Implement high-performance stream parsers converting network logs into standardized flow event schemas.",
+            criteria: "conn_parser.py and eve_parser.py unit tests passing with 100% field normalization."
+          },
+          {
+            id: "t1_4",
+            title: "Author Flipper Zero BadUSB / DuckyScript injection payloads",
+            owner: "Abu Bakar Siddik",
+            track: "siddik",
+            startWeek: 1,
+            endWeek: 2,
+            tech: ["Flipper Zero", "DuckyScript", "Sub-GHz", "BadUSB"],
+            description: "Develop automated hardware keystroke injection scripts simulating zero-hour credential portal launch.",
+            criteria: "BadUSB payload launches target browser URL in <3 seconds without requiring administrative prompt."
+          },
+          {
+            id: "t1_5",
+            title: "Configure Sliver C2 listeners & in-memory reverse-shell beacons",
+            owner: "Abu Bakar Siddik",
+            track: "siddik",
+            startWeek: 2,
+            endWeek: 3,
+            tech: ["Sliver C2", "HTTPS Listener", "Timing Jitter", "TLS 1.3"],
+            description: "Deploy external AWS C2 server with configurable 10%–50% timing jitter profile for beaconing simulation.",
+            criteria: "Implant establishes TLS 1.3 reverse shell to AWS listener with randomized sleep intervals."
+          },
+          {
+            id: "t1_6",
+            title: "Scaffold initial FastAPI alert backend & React dashboard",
+            owner: "Aayush Maharjan",
+            track: "aayush",
+            startWeek: 1,
+            endWeek: 3,
+            tech: ["FastAPI", "React.js", "Vite", "CORS"],
+            description: "Create the baseline frontend and REST API scaffolding to verify end-to-end alert transmission.",
+            criteria: "GET /api/alerts returns schema-validated JSON consumed and displayed on React UI."
+          }
+        ]
+      },
+      {
+        phaseId: 2,
+        title: "Phase 2: AI Modeling, DOM Analyzers & Graph Core",
+        tag: "Checkpoint 2 (Current Focus)",
+        weeks: "Weeks 4–6",
+        startWeek: 4,
+        endWeek: 6,
+        tasks: [
+          {
+            id: "t2_1",
+            title: "Build Playwright headless DOM crawler for zero-hour phishing",
+            owner: "Abu Bakar Siddik",
+            track: "siddik",
+            startWeek: 4,
+            endWeek: 5,
+            tech: ["Playwright", "Headless Chromium", "DOM Parser", "Python"],
+            description: "Automate real-time full-page snapshots, DOM tree scraping, and cross-origin form action validation.",
+            criteria: "Crawler extracts full DOM and form submission target URLs in <400ms per URL."
+          },
+          {
+            id: "t2_2",
+            title: "Curate brand logo dataset & train/quantize YOLOv8 model",
+            owner: "Abu Bakar Siddik",
+            track: "siddik",
+            startWeek: 4,
+            endWeek: 6,
+            tech: ["YOLOv8", "PyTorch", "ONNX Runtime", "Microsoft/Okta/Google"],
+            description: "Train lightweight YOLOv8 logo detector for target corporate login brands with sub-500ms inference.",
+            criteria: "Model achieves >92% mAP on logo bounding boxes with ONNX export."
+          },
+          {
+            id: "t2_3",
+            title: "Implement Perceptual Hashing (pHash) visual matcher",
+            owner: "Abu Bakar Siddik",
+            track: "siddik",
+            startWeek: 5,
+            endWeek: 6,
+            tech: ["pHash", "OpenCV", "Hamming Distance", "Python"],
+            description: "Compute visual hashes for site icons and brand assets to detect visual spoofing before DOM submit.",
+            criteria: "pHash matches altered/scaled brand assets with Hamming distance thresholding in <50ms."
+          },
+          {
+            id: "t2_4",
+            title: "Implement FFT spectral feature extraction & Power Spectral Density",
+            owner: "Khoi Duong",
+            track: "khoi",
+            startWeek: 4,
+            endWeek: 5,
+            tech: ["NumPy", "SciPy (FFT/PSD)", "Inter-Arrival Time (IAT)", "Jitter"],
+            description: "Extract inter-packet arrival time deltas and compute Fast Fourier Transform frequency spectra to detect hidden periodicity.",
+            criteria: "spectral.py and temporal.py mathematically isolate periodic spikes even with 30% timing jitter."
+          },
+          {
+            id: "t2_5",
+            title: "Train BiLSTM beaconing classifier & Isolation Forest anomaly detector",
+            owner: "Khoi Duong",
+            track: "khoi",
+            startWeek: 4,
+            endWeek: 6,
+            tech: ["PyTorch (LSTM)", "Scikit-Learn (Isolation Forest)", "Joblib"],
+            description: "Train multi-layer sequence model on flow features to distinguish C2 beacons from legitimate web browsing.",
+            criteria: "Achieve >95% precision on encrypted C2 flow test dataset (models saved as .pt and .joblib)."
+          },
+          {
+            id: "t2_6",
+            title: "Deploy IBM LinuxONE (s390x) inference microservice container",
+            owner: "Khoi Duong",
+            track: "khoi",
+            startWeek: 5,
+            endWeek: 6,
+            tech: ["FastAPI", "Docker s390x", "IBM LinuxONE", "REST API"],
+            description: "Containerize SpectraC2 engine for s390x architecture with /predict endpoint for real-time flow evaluation.",
+            criteria: "FastAPI server running inside s390x container successfully processes batch inference requests."
+          },
+          {
+            id: "t2_7",
+            title: "Define Neo4j Cypher schema & uniqueness constraints",
+            owner: "Aayush Maharjan",
+            track: "aayush",
+            startWeek: 4,
+            endWeek: 5,
+            tech: ["Neo4j", "Cypher", "Property Graph", "Docker"],
+            description: "Establish graph database entity model for Host, User, IP, Process, and Domain with index constraints.",
+            criteria: "Neo4j container boots with schema indexes on Host.ip, User.name, and Process.hash."
+          },
+          {
+            id: "t2_8",
+            title: "Implement automated entity resolution for streaming alerts",
+            owner: "Aayush Maharjan",
+            track: "aayush",
+            startWeek: 5,
+            endWeek: 6,
+            tech: ["Python", "Neo4j Driver", "Entity Resolution", "REST Ingest"],
+            description: "Ingest normalized alert payloads and merge graph nodes/edges dynamically without duplicates.",
+            criteria: "Alerts from SpectraC2 and VerifyEye upsert connected graph nodes in Neo4j seamlessly."
+          },
+          {
+            id: "t2_9",
+            title: "Upgrade React dashboard with React Flow graph canvas scaffolding",
+            owner: "Aayush Maharjan",
+            track: "aayush",
+            startWeek: 5,
+            endWeek: 6,
+            tech: ["React.js", "React Flow", "Tailwind CSS", "Vite"],
+            description: "Evolve dashboard from simple table into interactive node graph canvas ready for attack path display.",
+            criteria: "Interactive node canvas renders sample attack graph with zoom, pan, and node inspector panels."
+          }
+        ]
+      },
+      {
+        phaseId: 3,
+        title: "Phase 3: Graph Algorithms & Local LLM Triage",
+        tag: "Checkpoint 3",
+        weeks: "Weeks 7–9",
+        startWeek: 7,
+        endWeek: 9,
+        tasks: [
+          {
+            id: "t3_1",
+            title: "Implement NetworkX / Cypher shortest-path & blast radius calculation",
+            owner: "Aayush Maharjan",
+            track: "aayush",
+            startWeek: 7,
+            endWeek: 8,
+            tech: ["NetworkX", "Dijkstra", "Blast Radius Algorithm", "Python"],
+            description: "Traverse multi-hop relationships from compromised ingress hosts to calculate risk scores and blast radius.",
+            criteria: "Graph engine calculates 3-hop compromised radius and centrality scores in <200ms."
+          },
+          {
+            id: "t3_2",
+            title: "Deploy on-premise Ollama runtime with Llama-3-Cyber / Mistral",
+            owner: "Aayush Maharjan",
+            track: "aayush",
+            startWeek: 7,
+            endWeek: 8,
+            tech: ["Ollama", "Llama-3-Cyber", "Mistral", "Air-Gapped"],
+            description: "Configure local LLM runtime ensuring zero-cloud-egress data sovereignty for sensitive SOC logs.",
+            criteria: "Local LLM generates incident assessments without any external network egress."
+          },
+          {
+            id: "t3_3",
+            title: "Engineer structured Pydantic JSON schema prompt pipelines",
+            owner: "Aayush Maharjan",
+            track: "aayush",
+            startWeek: 8,
+            endWeek: 9,
+            tech: ["LangChain", "Pydantic", "Structured Outputs", "JSON Schema"],
+            description: "Convert graph paths into rigorous JSON output (MITRE tactics, executive narrative, mitigation steps).",
+            criteria: "100% valid JSON responses conforming strictly to Pydantic incident schema across 50 test prompts."
+          },
+          {
+            id: "t3_4",
+            title: "Wire MITRE ATT&CK matrix dynamic technique tagging",
+            owner: "Aayush Maharjan",
+            track: "aayush",
+            startWeek: 8,
+            endWeek: 9,
+            tech: ["MITRE ATT&CK v15", "T1566", "T1071", "TA0008"],
+            description: "Map graph attack paths directly to MITRE kill chain tactics and techniques.",
+            criteria: "Ingress, C2, and Lateral Movement stages properly tagged with corresponding ATT&CK technique IDs."
+          },
+          {
+            id: "t3_5",
+            title: "Benchmark inference throughput & memory on IBM LinuxONE s390x",
+            owner: "Khoi Duong",
+            track: "khoi",
+            startWeek: 8,
+            endWeek: 9,
+            tech: ["IBM LinuxONE", "s390x Benchmarks", "Throughput Testing"],
+            description: "Profile CPU/memory utilization and flow evaluation latency under 10,000+ simulated concurrent flows.",
+            criteria: "Sub-50ms inference per flow with zero memory leaks over 24-hour stress run."
+          },
+          {
+            id: "t3_6",
+            title: "Validate zero-cloud-egress compliance and network isolation",
+            owner: "Khoi Duong",
+            track: "khoi",
+            startWeek: 9,
+            endWeek: 9,
+            tech: ["Network Isolation", "Firewall Rules", "Audit Logging"],
+            description: "Ensure no confidential threat telemetry or graph data leaves the enterprise boundary.",
+            criteria: "Packet capture verifies zero outbound DNS or HTTP requests from the LLM or graph triage nodes."
+          }
+        ]
+      },
+      {
+        phaseId: 4,
+        title: "Phase 4: Unified Dashboard & Client Extension",
+        tag: "Checkpoint 4",
+        weeks: "Weeks 10–12",
+        startWeek: 10,
+        endWeek: 12,
+        tasks: [
+          {
+            id: "t4_1",
+            title: "Develop Chrome Extension (Manifest V3) for DOM inspection",
+            owner: "Abu Bakar Siddik",
+            track: "siddik",
+            startWeek: 10,
+            endWeek: 11,
+            tech: ["Chrome MV3", "Content Scripts", "DOM Locking", "JavaScript"],
+            description: "Browser extension that intercepts form inputs, highlights visual bounding boxes, and prevents credential leak.",
+            criteria: "Extension freezes form submit buttons on zero-hour phishing sites with user alert overlay."
+          },
+          {
+            id: "t4_2",
+            title: "Build interactive React Flow attack graph topology canvas",
+            owner: "Aayush Maharjan",
+            track: "aayush",
+            startWeek: 10,
+            endWeek: 11,
+            tech: ["React Flow", "Custom Nodes", "D3 Graph", "Edge Highlighting"],
+            description: "Interactive visualizer displaying active host compromise paths, pivot nodes, and blast radiuses.",
+            criteria: "Clicking graph nodes reveals entity details, associated alerts, and blast radius highlighting."
+          },
+          {
+            id: "t4_3",
+            title: "Implement D3.js / Recharts FFT periodicity heatmaps",
+            owner: "Khoi Duong",
+            track: "khoi",
+            startWeek: 11,
+            endWeek: 12,
+            tech: ["D3.js", "Recharts", "Heatmaps", "Power Spectra"],
+            description: "Visual component rendering frequency domain FFT peaks, power spectral densities, and beacon intervals.",
+            criteria: "Interactive chart highlights anomalous harmonic spikes corresponding to detected C2 beaconing."
+          },
+          {
+            id: "t4_4",
+            title: "Integrate WebSocket bi-directional streaming for live sub-second alerts",
+            owner: "Aayush Maharjan",
+            track: "aayush",
+            startWeek: 11,
+            endWeek: 12,
+            tech: ["WebSockets", "FastAPI WebSocket", "React State"],
+            description: "Push new threat alerts and updated graph nodes to analyst consoles without polling or page refreshes.",
+            criteria: "Live alert displayed on UI in <200ms from the time of Kafka ingestion."
+          },
+          {
+            id: "t4_5",
+            title: "Implement 1-click mitigation actions (firewall block & host quarantine)",
+            owner: "Aayush Maharjan",
+            track: "aayush",
+            startWeek: 12,
+            endWeek: 12,
+            tech: ["REST API", "Host Isolation", "Firewall Directives"],
+            description: "Provide analyst buttons to execute suggested containment actions directly from LLM triage output.",
+            criteria: "Clicking 'Quarantine Host' pushes mock isolation command and updates node status in graph canvas."
+          }
+        ]
+      },
+      {
+        phaseId: 5,
+        title: "Phase 5: End-to-End Replay, Benchmarking & Showcase",
+        tag: "Final Capstone Showcase",
+        weeks: "Weeks 13–14",
+        startWeek: 13,
+        endWeek: 14,
+        tasks: [
+          {
+            id: "t5_1",
+            title: "Execute multi-stage intrusion replay (Flipper Zero → Sliver C2 → Graph Triage)",
+            owner: "All / Lead: Siddik",
+            track: "team",
+            startWeek: 13,
+            endWeek: 13,
+            tech: ["Full Kill-Chain Replay", "BadUSB", "Sliver C2", "Neo4j"],
+            description: "Run complete live demo: BadUSB credential theft → C2 reverse shell → Lateral movement → Instant SOC triage.",
+            criteria: "Full end-to-end replay successfully executes live across all 3 subsystems in under 5 minutes."
+          },
+          {
+            id: "t5_2",
+            title: "Benchmark detection accuracy (>95% precision on encrypted C2 flows)",
+            owner: "All / Lead: Khoi",
+            track: "team",
+            startWeek: 13,
+            endWeek: 14,
+            tech: ["ROC/AUC", "Confusion Matrix", "Precision/Recall"],
+            description: "Compile empirical validation metrics over 200+ attack and benign flow samples.",
+            criteria: "Precision >95% and false positive rate <2% documented across test suites."
+          },
+          {
+            id: "t5_3",
+            title: "Measure MTTR reduction (hours down to sub-second triage)",
+            owner: "All / Lead: Aayush",
+            track: "team",
+            startWeek: 13,
+            endWeek: 14,
+            tech: ["MTTD / MTTR Metrics", "Benchmark Analysis"],
+            description: "Compare manual multi-log query investigation time against autonomous graph LLM triage time.",
+            criteria: "Demonstrate >90% reduction in analyst time required to identify root cause and blast radius."
+          },
+          {
+            id: "t5_4",
+            title: "Finalize architecture whitepaper & technical documentation",
+            owner: "All / Team",
+            track: "team",
+            startWeek: 13,
+            endWeek: 14,
+            tech: ["Technical Whitepaper", "Architecture Diagrams", "API Docs"],
+            description: "Assemble comprehensive capstone report, IEEE format citations, and deployment manuals.",
+            criteria: "Complete, polished documentation published in repository."
+          },
+          {
+            id: "t5_5",
+            title: "Deliver Final Capstone Presentation & Live SOC Showcase",
+            owner: "All / Team",
+            track: "team",
+            startWeek: 14,
+            endWeek: 14,
+            tech: ["Live Demo", "Slide Deck", "Video Showcase"],
+            description: "Present unified capstone project defense to faculty and industry evaluators.",
+            criteria: "Successful live showcase presentation delivered."
+          }
+        ]
+      }
+    ];
+
+    // State Management
+    const STORAGE_KEY = 'omniguard_capstone_timeline_state_v1';
+    let appState = {
+      completedTasks: {}, // { [taskId]: boolean }
+      currentWeek: 4,
+      filterTrack: 'all',
+      searchQuery: '',
+      collapsedPhases: {}
+    };
+
+    // Pre-populate completed tasks based on current repository progress!
+    // (Khoi has finished Phase 1 and core Phase 2 models; Siddik & Aayush have finished Phase 1 basics)
+    const DEFAULT_COMPLETED = {
+      t1_1: true, // Provisioned LinuxONE & AWS
+      t1_2: true, // Kafka & Redis deployed
+      t1_3: true, // Zeek & Suricata parsers implemented
+      t1_4: true, // Flipper Zero scripts authored
+      t1_5: true, // Sliver C2 listeners configured
+      t1_6: true, // FastAPI backend & Vite frontend scaffolded
+      t2_4: true, // FFT spectral feature extraction implemented
+      t2_5: true  // LSTM & Isolation Forest trained
+    };
+
+    function loadState() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          appState = { ...appState, ...JSON.parse(saved) };
+        } catch (e) {
+          console.error("Failed to parse saved state", e);
+        }
+      } else {
+        appState.completedTasks = { ...DEFAULT_COMPLETED };
+      }
+    }
+
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+    }
+
+    // Calculations
+    function calculateMetrics() {
+      let totalTasks = 0;
+      let completedCount = 0;
+
+      let khoiTotal = 0, khoiDone = 0;
+      let siddikTotal = 0, siddikDone = 0;
+      let aayushTotal = 0, aayushDone = 0;
+
+      TIMELINE_DATA.forEach(phase => {
+        phase.tasks.forEach(task => {
+          totalTasks++;
+          const isDone = !!appState.completedTasks[task.id];
+          if (isDone) completedCount++;
+
+          if (task.track === 'khoi') {
+            khoiTotal++;
+            if (isDone) khoiDone++;
+          } else if (task.track === 'siddik') {
+            siddikTotal++;
+            if (isDone) siddikDone++;
+          } else if (task.track === 'aayush') {
+            aayushTotal++;
+            if (isDone) aayushDone++;
+          }
+        });
+      });
+
+      const overallPercent = totalTasks ? Math.round((completedCount / totalTasks) * 100) : 0;
+      const khoiPercent = khoiTotal ? Math.round((khoiDone / khoiTotal) * 100) : 0;
+      const siddikPercent = siddikTotal ? Math.round((siddikDone / siddikTotal) * 100) : 0;
+      const aayushPercent = aayushTotal ? Math.round((aayushDone / aayushTotal) * 100) : 0;
+
+      // Update Overall Ring
+      const ring = document.getElementById('overallRing');
+      const circumference = 2 * Math.PI * 30; // ~188.5
+      const offset = circumference - (overallPercent / 100) * circumference;
+      ring.style.strokeDashoffset = offset;
+      document.getElementById('overallPercent').textContent = `${overallPercent}%`;
+      document.getElementById('overallTaskCount').textContent = `${completedCount} of ${totalTasks} tasks completed`;
+
+      // Update Individual Tracks
+      document.getElementById('statsKhoi').textContent = `${khoiPercent}%`;
+      document.getElementById('fillKhoi').style.width = `${khoiPercent}%`;
+      document.getElementById('countKhoi').textContent = `${khoiDone}/${khoiTotal} tasks`;
+
+      document.getElementById('statsSiddik').textContent = `${siddikPercent}%`;
+      document.getElementById('fillSiddik').style.width = `${siddikPercent}%`;
+      document.getElementById('countSiddik').textContent = `${siddikDone}/${siddikTotal} tasks`;
+
+      document.getElementById('statsAayush').textContent = `${aayushPercent}%`;
+      document.getElementById('fillAayush').style.width = `${aayushPercent}%`;
+      document.getElementById('countAayush').textContent = `${aayushDone}/${aayushTotal} tasks`;
+    }
+
+    // Render Gantt Chart
+    function renderGantt() {
+      const container = document.getElementById('ganttBody');
+      container.innerHTML = '';
+
+      // Update current week headers highlight
+      document.querySelectorAll('.gh-col[data-week]').forEach(col => {
+        const w = parseInt(col.getAttribute('data-week'), 10);
+        if (w === appState.currentWeek) {
+          col.classList.add('current-week-col');
+        } else {
+          col.classList.remove('current-week-col');
+        }
+      });
+
+      TIMELINE_DATA.forEach(phase => {
+        // Filter tasks
+        const filteredTasks = phase.tasks.filter(task => {
+          // Track filter
+          if (appState.filterTrack !== 'all' && task.track !== appState.filterTrack) {
+            return false;
+          }
+          // Search filter
+          if (appState.searchQuery) {
+            const q = appState.searchQuery.toLowerCase();
+            const text = `${task.title} ${task.owner} ${task.tech.join(' ')} ${task.description}`.toLowerCase();
+            if (!text.includes(q)) return false;
+          }
+          return true;
+        });
+
+        // Skip phase if no matching tasks
+        if (filteredTasks.length === 0) return;
+
+        // Phase calculations
+        const phaseDoneCount = phase.tasks.filter(t => !!appState.completedTasks[t.id]).length;
+        const phaseTotal = phase.tasks.length;
+        const phasePercent = Math.round((phaseDoneCount / phaseTotal) * 100);
+
+        const phaseGroup = document.createElement('div');
+        phaseGroup.className = 'phase-group';
+
+        const isCollapsed = !!appState.collapsedPhases[phase.phaseId];
+
+        // Banner
+        const banner = document.createElement('div');
+        banner.className = 'phase-banner';
+        banner.innerHTML = `
+          <div class="phase-banner-title">
+            <span>${isCollapsed ? '▶' : '▼'}</span>
+            <span>${phase.title}</span>
+            <span class="phase-tag">${phase.tag}</span>
+          </div>
+          <div class="phase-banner-right">
+            <span>${phase.weeks}</span>
+            <span class="phase-prog-badge ${phasePercent === 100 ? 'complete' : ''}">${phaseDoneCount}/${phaseTotal} Done (${phasePercent}%)</span>
+          </div>
+        `;
+        banner.onclick = () => {
+          appState.collapsedPhases[phase.phaseId] = !isCollapsed;
+          saveState();
+          renderGantt();
+        };
+        phaseGroup.appendChild(banner);
+
+        // Tasks Container
+        if (!isCollapsed) {
+          filteredTasks.forEach(task => {
+            const isCompleted = !!appState.completedTasks[task.id];
+
+            const row = document.createElement('div');
+            row.className = `gantt-row ${isCompleted ? 'completed' : ''}`;
+
+            // 1. Task Column with Checkbox
+            const taskCell = document.createElement('div');
+            taskCell.className = 'task-cell';
+            
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.className = 'task-checkbox';
+            chk.checked = isCompleted;
+            chk.onclick = (e) => {
+              e.stopPropagation();
+              toggleTask(task.id, chk.checked);
+            };
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'task-text';
+            textSpan.textContent = task.title;
+            textSpan.title = `${task.title} (Click for details)`;
+            textSpan.onclick = () => openTaskModal(task);
+
+            taskCell.appendChild(chk);
+            taskCell.appendChild(textSpan);
+            row.appendChild(taskCell);
+
+            // 2. Owner Column
+            const ownerCell = document.createElement('div');
+            ownerCell.className = 'owner-cell';
+            const pillClass = `pill-${task.track}`;
+            ownerCell.innerHTML = `<span class="owner-pill ${pillClass}">${task.owner}</span>`;
+            row.appendChild(ownerCell);
+
+            // 3. 14-Week Timeline Grid
+            const grid = document.createElement('div');
+            grid.className = 'timeline-grid';
+
+            for (let w = 1; w <= 14; w++) {
+              const bg = document.createElement('div');
+              bg.className = `week-col-bg ${w === appState.currentWeek ? 'is-current' : ''}`;
+              grid.appendChild(bg);
+            }
+
+            // Gantt Bar Element
+            // Position: (startWeek - 1) / 14 * 100%
+            // Width: (endWeek - startWeek + 1) / 14 * 100%
+            const bar = document.createElement('div');
+            const leftPct = ((task.startWeek - 1) / 14) * 100;
+            const widthPct = ((task.endWeek - task.startWeek + 1) / 14) * 100;
+            const barClass = `bar-${task.track} ${isCompleted ? 'completed-bar' : ''}`;
+
+            bar.className = `gantt-bar ${barClass}`;
+            bar.style.left = `calc(${leftPct}% + 4px)`;
+            bar.style.width = `calc(${widthPct}% - 8px)`;
+            bar.textContent = `W${task.startWeek}–W${task.endWeek} ${isCompleted ? '• Done' : ''}`;
+            bar.title = `${task.title} (Weeks ${task.startWeek}–${task.endWeek}) - Click for details`;
+            bar.onclick = () => openTaskModal(task);
+
+            grid.appendChild(bar);
+            row.appendChild(grid);
+
+            phaseGroup.appendChild(row);
+          });
+        }
+
+        container.appendChild(phaseGroup);
+      });
+
+      calculateMetrics();
+    }
+
+    // Toggle Task
+    function toggleTask(taskId, isChecked) {
+      if (isChecked) {
+        appState.completedTasks[taskId] = true;
+      } else {
+        delete appState.completedTasks[taskId];
+      }
+      saveState();
+      renderGantt();
+    }
+
+    // Modal Details Logic
+    let activeModalTask = null;
+    function openTaskModal(task) {
+      activeModalTask = task;
+      const modal = document.getElementById('taskModal');
+      document.getElementById('modalTitle').textContent = task.title;
+      
+      const ownerPill = document.getElementById('modalOwnerPill');
+      ownerPill.textContent = task.owner;
+      ownerPill.className = `owner-pill pill-${task.track}`;
+
+      document.getElementById('modalPhaseTag').textContent = `Phase ${task.id.split('_')[0].replace('t', '')}`;
+      document.getElementById('modalWeeksTag').textContent = `Weeks ${task.startWeek}–${task.endWeek}`;
+      document.getElementById('modalDescription').textContent = task.description;
+      document.getElementById('modalCriteria').textContent = task.criteria;
+
+      const techList = document.getElementById('modalTechList');
+      techList.innerHTML = '';
+      task.tech.forEach(t => {
+        const span = document.createElement('span');
+        span.className = 'tech-pill';
+        span.textContent = t;
+        techList.appendChild(span);
+      });
+
+      const chk = document.getElementById('modalCheckbox');
+      chk.checked = !!appState.completedTasks[task.id];
+      chk.onchange = () => {
+        toggleTask(task.id, chk.checked);
+      };
+
+      modal.classList.add('open');
+    }
+
+    function closeTaskModal() {
+      document.getElementById('taskModal').classList.remove('open');
+      activeModalTask = null;
+    }
+
+    // Event Listeners
+    document.addEventListener('DOMContentLoaded', () => {
+      loadState();
+
+      // Track Filter buttons
+      document.querySelectorAll('.pill-btn[data-filter]').forEach(btn => {
+        btn.onclick = () => {
+          document.querySelectorAll('.pill-btn[data-filter]').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          appState.filterTrack = btn.getAttribute('data-filter');
+          saveState();
+          renderGantt();
+        };
+      });
+
+      // Search input
+      const search = document.getElementById('searchInput');
+      search.oninput = (e) => {
+        appState.searchQuery = e.target.value;
+        renderGantt();
+      };
+
+      // Current Week slider
+      const slider = document.getElementById('weekSlider');
+      const weekDisplay = document.getElementById('currentWeekDisplay');
+      slider.value = appState.currentWeek || 4;
+      weekDisplay.textContent = `Week ${slider.value}`;
+      slider.oninput = (e) => {
+        appState.currentWeek = parseInt(e.target.value, 10);
+        weekDisplay.textContent = `Week ${appState.currentWeek}`;
+        saveState();
+        renderGantt();
+      };
+
+      // Reset Button
+      document.getElementById('resetBtn').onclick = () => {
+        if (confirm("Reset all task completions back to the initial default state?")) {
+          appState.completedTasks = { ...DEFAULT_COMPLETED };
+          saveState();
+          renderGantt();
+        }
+      };
+
+      // Export JSON
+      document.getElementById('exportBtn').onclick = () => {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appState, null, 2));
+        const dlAnchor = document.createElement('a');
+        dlAnchor.setAttribute("href", dataStr);
+        dlAnchor.setAttribute("download", `omniguard_timeline_progress_${new Date().toISOString().slice(0,10)}.json`);
+        dlAnchor.click();
+      };
+
+      // Import JSON
+      const importBtn = document.getElementById('importBtn');
+      const importInput = document.getElementById('importFileInput');
+      importBtn.onclick = () => importInput.click();
+      importInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const imported = JSON.parse(event.target.result);
+            if (imported && imported.completedTasks) {
+              appState = { ...appState, ...imported };
+              saveState();
+              renderGantt();
+              alert("Progress successfully imported!");
+            } else {
+              alert("Invalid JSON format for OmniGuard progress.");
+            }
+          } catch (err) {
+            alert("Error reading JSON file: " + err.message);
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      // Modal close events
+      document.getElementById('modalCloseBtn').onclick = closeTaskModal;
+      document.getElementById('taskModal').onclick = (e) => {
+        if (e.target.id === 'taskModal') closeTaskModal();
+      };
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeTaskModal();
+      });
+
+      renderGantt();
+    });
+  </script>
+</body>
+</html>
