@@ -64,14 +64,103 @@ function App() {
     const [theme, setTheme] = useState(() => {
         try { return localStorage.getItem("og-theme") || "dark" } catch { return "dark" }
     })
+    const [actionFeedback, setActionFeedback] = useState(null)
+    const [isolatedHosts, setIsolatedHosts] = useState(() => new Set())
 
-    // we will fetch the alerts from backend
+    // Initial alert load
     useEffect(() => {
         fetch("http://localhost:8000/alerts")
         .then((res) => res.json())
         .then((data) => setAlerts(data))
         .catch(err => setError(err.message))
     }, []);
+
+    // Live real-time alerts via WebSocket
+    useEffect(() => {
+        let ws;
+        let reconnectTimer;
+
+        const connectWs = () => {
+            try {
+                ws = new WebSocket("ws://localhost:8000/ws/alerts");
+                ws.onmessage = (event) => {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        if (msg.type === "new_alert" && msg.alert) {
+                            setAlerts(prev => {
+                                if (prev.some(a => a.alert_id === msg.alert.alert_id)) return prev;
+                                return [msg.alert, ...prev];
+                            });
+                        } else if (msg.type === "alert_updated" && msg.alert) {
+                            setAlerts(prev => prev.map(a => a.alert_id === msg.alert.alert_id ? msg.alert : a));
+                        }
+                    } catch (err) {
+                        console.error("Failed to parse WS payload:", err);
+                    }
+                };
+                ws.onclose = () => {
+                    reconnectTimer = setTimeout(connectWs, 3000);
+                };
+                ws.onerror = () => {
+                    ws.close();
+                };
+            } catch (err) {
+                reconnectTimer = setTimeout(connectWs, 3000);
+            }
+        };
+
+        connectWs();
+
+        return () => {
+            if (ws) ws.close();
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+        };
+    }, []);
+
+    const handleMarkTriaged = async (alertId) => {
+        try {
+            const res = await fetch(`http://localhost:8000/alerts/${alertId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status: "triaged" }),
+            });
+            if (res.ok) {
+                const updated = await res.json();
+                setAlerts(prev => prev.map(a => a.alert_id === alertId ? updated : a));
+                setActionFeedback("Alert marked as triaged ✓");
+                setTimeout(() => setActionFeedback(null), 3500);
+            } else {
+                setActionFeedback("Failed to update alert triage status");
+                setTimeout(() => setActionFeedback(null), 3500);
+            }
+        } catch (err) {
+            setActionFeedback(`Error: ${err.message}`);
+            setTimeout(() => setActionFeedback(null), 3500);
+        }
+    };
+
+    const handleIsolateHost = async (hostname) => {
+        if (!hostname) return;
+        if (!window.confirm(`Initiate network containment and isolate host '${hostname}'?`)) return;
+        try {
+            const res = await fetch(`http://localhost:8000/hosts/${hostname}/isolate`, {
+                method: "POST"
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setIsolatedHosts(prev => new Set(prev).add(hostname));
+                setActionFeedback(data.message || `Host '${hostname}' isolated successfully`);
+                setTimeout(() => setActionFeedback(null), 4500);
+            } else {
+                setActionFeedback("Failed to isolate host");
+                setTimeout(() => setActionFeedback(null), 3500);
+            }
+        } catch (err) {
+            setActionFeedback(`Error: ${err.message}`);
+            setTimeout(() => setActionFeedback(null), 3500);
+        }
+    };
+
 
     // set it on <html> so body and everything else inherit the palette
     useEffect(() => {
@@ -333,9 +422,26 @@ function App() {
                                         <KV k="Alert ID"   v={selected.alert_id} />
                                     </div>
                                     <div className="actions">
-                                        <button className="btn">Mark triaged</button>
-                                        <button className="btn danger">Isolate host</button>
+                                        <button 
+                                            className="btn" 
+                                            onClick={() => handleMarkTriaged(selected.alert_id)}
+                                            disabled={selected.status === "triaged"}
+                                        >
+                                            {selected.status === "triaged" ? "Triaged ✓" : "Mark triaged"}
+                                        </button>
+                                        <button 
+                                            className={`btn danger ${isolatedHosts.has(selected.host) ? "isolated" : ""}`}
+                                            onClick={() => handleIsolateHost(selected.host)}
+                                            disabled={isolatedHosts.has(selected.host)}
+                                        >
+                                            {isolatedHosts.has(selected.host) ? "Host Isolated ⊘" : "Isolate host"}
+                                        </button>
                                     </div>
+                                    {actionFeedback && (
+                                        <div className="action-banner">
+                                            <span>●</span> {actionFeedback}
+                                        </div>
+                                    )}
                                 </Panel>
                             </div>
                         </>
