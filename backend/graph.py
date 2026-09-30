@@ -213,3 +213,145 @@ def _write_alert(tx, alert: Alert):
 def ingest_alert(alert: Alert):
     with driver.session() as session:
         session.execute_write(_write_alert, alert)
+
+
+# ── Read functions for GET /graph ────────────────────────────────────────────
+
+def _node_to_element(node) -> dict:
+    """Convert a Neo4j node to a Cytoscape element dict."""
+    label = list(node.labels)[0]
+    props = dict(node)
+    # pick a human-readable display name based on node type
+    display = (
+        props.get("hostname")
+        or props.get("username")
+        or props.get("address")
+        or props.get("domain_name")
+        or props.get("url")
+        or props.get("process_id")
+        or props.get("id")          # Technique
+        or str(node.element_id)
+    )
+    return {
+        "data": {
+            "id": node.element_id,
+            "label": label,
+            "display": display,
+            **props,
+        }
+    }
+
+
+def _rel_to_element(rel) -> dict:
+    """Convert a Neo4j relationship to a Cytoscape element dict."""
+    props = dict(rel)
+    return {
+        "data": {
+            "id": rel.element_id,
+            "source": rel.start_node.element_id,
+            "target": rel.end_node.element_id,
+            "type": rel.type,
+            **props,
+        }
+    }
+
+
+def get_entity_graph() -> dict:
+    """
+    Return the full entity-layer graph as Cytoscape-ready {nodes, edges}.
+
+    Only entity nodes are included (Host, IP, Domain, URL, Process, User,
+    Technique). Alert nodes and REPORTED_* edges are intentionally excluded —
+    alerts are fetched separately via GET /alerts. The entity layer shows
+    standing network facts that survive any individual alert, and it stays
+    readable at volume because the number of entities grows much slower than
+    the number of alerts.
+    """
+    # The entity labels we want — everything except Alert.
+    entity_labels = ["Host", "IP", "Domain", "URL", "Process", "User", "Technique"]
+    label_match = " OR ".join(f"n:{lbl}" for lbl in entity_labels)
+
+    # Standing-fact relationships only — no REPORTED_* edges.
+    standing_types = [
+        "HAS_IP", "LOGGED_INTO", "CONNECTED_TO_DOMAIN",
+        "ACCESSED_URL", "SPAWNED_PROCESS", "BELONGS_TO",
+        "INITIATED_FLOW", "HOSTS_DOMAIN",
+    ]
+    rel_match = "|".join(standing_types)
+
+    with driver.session() as session:
+        # Collect nodes
+        node_result = session.run(
+            f"MATCH (n) WHERE {label_match} RETURN n"
+        )
+        nodes = [_node_to_element(r["n"]) for r in node_result]
+
+        # Collect standing-fact edges (both endpoints must be entity nodes)
+        edge_result = session.run(
+            f"""
+            MATCH (a)-[r:{rel_match}]->(b)
+            WHERE ({label_match.replace('n:', 'a:')})
+              AND ({label_match.replace('n:', 'b:')})
+            RETURN r, a, b
+            """,
+        )
+        edges = []
+        for r in edge_result:
+            elem = _rel_to_element(r["r"])
+            # element_id from the relationship node objects won't automatically
+            # carry the endpoint element_ids — set them explicitly from the
+            # matched nodes so Cytoscape source/target refs are correct.
+            elem["data"]["source"] = r["a"].element_id
+            elem["data"]["target"] = r["b"].element_id
+            edges.append(elem)
+
+    return {"nodes": nodes, "edges": edges}
+
+
+def get_host_subgraph(hostname: str) -> dict:
+    """
+    Return a 2-hop subgraph centred on the given hostname as {nodes, edges}.
+    Includes all nodes reachable within 2 hops via any relationship type,
+    and all edges between those nodes. Alert nodes are still excluded.
+    """
+    entity_labels = ["Host", "IP", "Domain", "URL", "Process", "User", "Technique"]
+    label_filter = " OR ".join(f"x:{lbl}" for lbl in entity_labels)
+
+    with driver.session() as session:
+        result = session.run(
+            f"""
+            MATCH (h:Host {{hostname: $hostname}})
+            MATCH path = (h)-[*1..2]-(x)
+            WHERE {label_filter}
+            WITH nodes(path) AS ns, relationships(path) AS rs
+            UNWIND ns AS n UNWIND rs AS r
+            RETURN DISTINCT n, r,
+                   startNode(r) AS src, endNode(r) AS tgt
+            """,
+            hostname=hostname,
+        )
+
+        seen_nodes: dict = {}
+        seen_edges: dict = {}
+        for row in result:
+            n = row["n"]
+            if n.element_id not in seen_nodes:
+                seen_nodes[n.element_id] = _node_to_element(n)
+            rel = row["r"]
+            if rel.element_id not in seen_edges:
+                elem = _rel_to_element(rel)
+                elem["data"]["source"] = row["src"].element_id
+                elem["data"]["target"] = row["tgt"].element_id
+                seen_edges[rel.element_id] = elem
+
+        # Always include the root Host node even if it has no edges
+        if not seen_nodes:
+            root = session.run(
+                "MATCH (h:Host {hostname: $hostname}) RETURN h",
+                hostname=hostname,
+            ).single()
+            if root:
+                n = root["h"]
+                seen_nodes[n.element_id] = _node_to_element(n)
+
+    return {"nodes": list(seen_nodes.values()), "edges": list(seen_edges.values())}
