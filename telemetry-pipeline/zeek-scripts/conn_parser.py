@@ -209,6 +209,7 @@ class ZeekKafkaProducer:
             "source": "zeek",
             "timestamp": record.ts,
             "uid": record.uid,
+            "host": record.src_ip,
             "host_id": record.src_ip,
             "src_ip": record.src_ip,
             "src_port": record.src_port,
@@ -223,9 +224,11 @@ class ZeekKafkaProducer:
             "orig_pkts": record.orig_pkts,
             "resp_pkts": record.resp_pkts,
             "conn_state": record.conn_state,
+            "domain": record.ssl_server_name,
             "sni": record.ssl_server_name,
             "flow_key": record.flow_key,
         }
+
 
         if self.is_kafka_connected and self.producer:
             try:

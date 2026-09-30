@@ -11,10 +11,11 @@ if engine_root not in sys.path:
     sys.path.insert(0, engine_root)
 
 import importlib
-temporal_mod = importlib.import_module("feature-extraction.temporal")
-spectral_mod = importlib.import_module("feature-extraction.spectral")
+temporal_mod = importlib.import_module("feature_extraction.temporal")
+spectral_mod = importlib.import_module("feature_extraction.spectral")
 TemporalFeatureExtractor = temporal_mod.TemporalFeatureExtractor
 SpectralFeatureExtractor = spectral_mod.SpectralFeatureExtractor
+
 
 
 class TestTemporalFeatureExtraction:

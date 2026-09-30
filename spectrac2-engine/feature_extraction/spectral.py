@@ -143,9 +143,10 @@ class SpectralFeatureExtractor:
             # Beacon periodicity confidence score:
             # High PAPR and low entropy indicate a sharp harmonic peak (even with 10%-50% jitter)
             # Sigmoid scaling on (PAPR / 4) * (1 - norm_entropy)
-            raw_score = (min(papr, 20.0) / 5.0) * (1.0 - 0.7 * norm_entropy)
-            periodicity_score = float(1.0 / (1.0 + np.exp(-raw_score + 2.0)))
+            raw_score = (min(papr, 20.0) / 4.0) * (1.0 - 0.5 * norm_entropy)
+            periodicity_score = float(1.0 / (1.0 + np.exp(-2.5 * (raw_score - 0.8))))
             dominant_period = float(1.0 / dominant_freq) if dominant_freq > 1e-5 else 0.0
+
         else:
             dominant_freq = 0.0
             dominant_period = 0.0

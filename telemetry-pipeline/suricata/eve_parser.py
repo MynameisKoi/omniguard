@@ -196,6 +196,7 @@ class SuricataKafkaProducer:
         payload = {
             "source": "suricata",
             "timestamp": record.timestamp,
+            "host": record.src_ip,
             "host_id": record.src_ip,
             "src_ip": record.src_ip,
             "src_port": record.src_port,
@@ -209,6 +210,7 @@ class SuricataKafkaProducer:
             "bytes_toclient": record.bytes_toclient,
             "pkts_toserver": record.pkts_toserver,
             "pkts_toclient": record.pkts_toclient,
+            "domain": record.sni,
             "sni": record.sni,
             "flow_key": record.flow_key,
         }

@@ -96,8 +96,10 @@ class TelemetryStreamConsumer:
         alert_api_url: str = "http://localhost:8000/alerts",
         min_eval_packets: int = 8,
         eval_interval_packets: int = 5,
+        engine_url: Optional[str] = None,
     ):
-        self.predictor = predictor or SpectraC2Predictor()
+        self.engine_url = engine_url
+        self.predictor = predictor or (SpectraC2Predictor() if not engine_url else None)
         self.alert_api_url = alert_api_url
         self.min_eval_packets = min_eval_packets
         self.eval_interval_packets = eval_interval_packets
@@ -155,18 +157,45 @@ class TelemetryStreamConsumer:
             "domain": flow.domain,
         }
 
-        result = self.predictor.analyze_flow(
-            timestamps=flow.timestamps,
-            packet_sizes=flow.packet_sizes,
-            directions=flow.directions,
-            flow_metadata=meta,
-        )
+        if self.engine_url:
+            try:
+                resp = httpx.post(
+                    f"{self.engine_url.rstrip('/')}/api/v1/classify-flow",
+                    json={
+                        "timestamps": flow.timestamps,
+                        "packet_sizes": flow.packet_sizes,
+                        "directions": flow.directions,
+                        "host": flow.host,
+                        "src_ip": flow.src_ip,
+                        "dst_ip": flow.dst_ip,
+                        "domain": flow.domain,
+                    },
+                    timeout=10.0,
+                )
+                resp.raise_for_status()
+                result = resp.json()
+            except Exception as e:
+                logger.error(f"Failed to query remote SpectraC2 engine at {self.engine_url}: {e}")
+                return None
+        else:
+            if not self.predictor:
+                self.predictor = SpectraC2Predictor()
+            result = self.predictor.analyze_flow(
+                timestamps=flow.timestamps,
+                packet_sizes=flow.packet_sizes,
+                directions=flow.directions,
+                flow_metadata=meta,
+            )
 
         if result["is_beacon"]:
             # Shaped to backend/models.py AlertCreate, the one alert contract.
             # alert_id and timestamp are stamped by the backend, never sent from here.
-            beacon_interval = float(round(result["spectral_metrics"]["dominant_period"], 4))
+            dominant_period = result.get("dominant_period")
+            if dominant_period is None and "spectral_metrics" in result:
+                dominant_period = result["spectral_metrics"].get("dominant_period", 0.0)
+            beacon_interval = float(round(dominant_period or 0.0, 4))
             target = flow.domain or flow.dst_ip
+
             alert = {
                 "source": "spectrac2",
                 "event_type": "c2_beacon_detected",
@@ -314,9 +343,11 @@ if __name__ == "__main__":
     parser.add_argument("--broker", type=str, default="localhost:9092", help="Kafka bootstrap broker")
     parser.add_argument("--topic", type=str, default="network-flows", help="Kafka topic")
     parser.add_argument("--api", type=str, default="http://localhost:8000/alerts", help="OmniGuard backend POST /alerts URL")
+    parser.add_argument("--engine-url", type=str, default=None, help="Remote SpectraC2 inference service URL (e.g. http://localhost:8001)")
     args = parser.parse_args()
 
-    consumer = TelemetryStreamConsumer(alert_api_url=args.api)
+    consumer = TelemetryStreamConsumer(alert_api_url=args.api, engine_url=args.engine_url)
+
 
     if args.dry_run:
         from inference.dataset_generator import SyntheticFlowGenerator

@@ -32,8 +32,9 @@ class SpectraC2Predictor:
         lstm_checkpoint: Optional[str] = None,
         iso_forest_checkpoint: Optional[str] = None,
         spectral_bin_size: float = 0.5,
-        beacon_threshold: float = 0.65,
+        beacon_threshold: float = 0.50,
     ):
+
         self.spectral_extractor = SpectralFeatureExtractor(bin_size=spectral_bin_size)
         self.beacon_threshold = beacon_threshold
 
@@ -102,9 +103,17 @@ class SpectraC2Predictor:
             else:
                 ensemble_score = (0.60 * lstm_prob) + (0.40 * spectral_metrics.periodicity_score)
         else:
-            # Fallback to spectral periodicity and low IAT coefficient of variation
+            # Fallback to spectral periodicity, Isolation Forest, and IAT consistency
             cv_confidence = max(0.0, 1.0 - min(temporal_metrics.cv_iat, 1.0))
-            ensemble_score = (0.65 * spectral_metrics.periodicity_score) + (0.35 * cv_confidence)
+            if iso_prob > 0.0:
+                if spectral_metrics.periodicity_score >= 0.50:
+                    ensemble_score = (0.60 * spectral_metrics.periodicity_score) + (0.30 * iso_prob) + (0.10 * cv_confidence)
+                else:
+                    ensemble_score = (0.45 * spectral_metrics.periodicity_score) + (0.35 * iso_prob) + (0.20 * cv_confidence)
+            else:
+                ensemble_score = (0.75 * spectral_metrics.periodicity_score) + (0.25 * cv_confidence)
+
+
 
         ensemble_score = float(np.clip(ensemble_score, 0.0, 1.0))
         # Flag beacon if ensemble score exceeds threshold or if trained LSTM is strongly confident (>= 0.80)
