@@ -4,6 +4,75 @@ My notes while building the OmniGuard dashboard + backend + frontend + MongoDB. 
 
 ---
 
+## Mon 28 – Tue 29 Sept
+
+Khoi pushed his branch and it turned out he'd built a second FastAPI service
+with its own `POST /api/v1/alerts`, plus his own alert schemas. So we had the
+same layer twice with different names for everything.
+
+Merged it in and picked it apart.
+
+Kept mine: one `AlertCreate`, lowercase severity, `host` not `host_id`,
+`domain` not `sni`, and the server stamping `alert_id` + `timestamp` so nobody
+can forge an ID or backdate an alert.
+
+Kept his: the node model. `URL` and `Process` nodes, connection detail on the
+edges, the constraints. The URL node is the good bit — it links every host that
+hit the same phishing page, which my Domain-only version couldn't show.
+
+Deleted his API. One way in.
+
+Final relationship names:
+
+```
+Alert -[:REPORTED_HOST]->       Host
+Alert -[:REPORTED_USER]->       User
+Alert -[:REPORTED_DOMAIN]->     Domain
+Alert -[:REPORTED_SRC_IP]->     IP
+Alert -[:REPORTED_DST_IP]->     IP     {port, beacon_interval, mean_jitter}
+Alert -[:MAPS_TO_TECHNIQUE]->   Technique
+Alert -[:REPORTED_URL]->        URL
+Alert -[:REPORTED_PROCESS]->    Process
+
+User  -[:LOGGED_INTO]->         Host
+Host  -[:HAS_IP]->              IP
+Host  -[:CONNECTED_TO_DOMAIN]-> Domain
+Host  -[:ACCESSED_URL]->        URL
+Host  -[:SPAWNED_PROCESS]->     Process
+URL   -[:BELONGS_TO]->          Domain
+IP    -[:HOSTS_DOMAIN]->        Domain
+Process -[:INITIATED_FLOW]->    IP
+```
+
+Skipped `INJECTED_INTO` — needs a parent and target process and we only carry
+one, so there'd be nothing to put in it.
+
+Renamed all the Alert edges to `REPORTED_*` after looking at the actual graph.
+`Alert -[FROM_SRC_IP]-> IP` reads like the alert came from that IP, which it
+didn't — an alert is an observation, not a thing that does stuff. Names that
+were fine in the file were wrong on the canvas with arrows drawn.
+
+Side effect: the two layers are now obvious at a glance. Every `REPORTED_*`
+edge is evidence from one alert; everything else is a standing fact about the
+network. Which matters for the frontend — the entity edges alone show that
+LAPTOP-10 and WORKSTATION-CORP-42 both reach 198.51.100.42, so the canvas can
+render entities only and keep alerts in a side panel. Alert nodes pile up with
+volume, entities don't.
+
+Other stuff:
+
+- `ingest_alert()` runs in one transaction now. Before, the five `session.run`
+  calls each committed separately, so a failure halfway left an Alert with no
+  User on it.
+- Alert is `MERGE`d on `alert_id` not `CREATE`d, so re-posting the same alert
+  does nothing instead of blowing up on the constraint.
+- Eight new optional fields — `dst_port`, `beacon_interval`, `mean_jitter`,
+  `process_name`, `pid`, `target_url`, `action_endpoint`, `brand_target`.
+- Repointed Khoi's consumer at `/alerts`.
+- Rewrote the JSON schema, it still said `host_id` and uppercase severity which would've sent Rahim straight into 422s.
+
+---
+
 ## Fri, Sept 25, 2026
 
 Got the graph building itself.
@@ -32,14 +101,6 @@ That second group is the important one. It sticks around after the alert and is
 what lets the next alert correlate. Siddik sent a list of ~15 node types, cut it
 down to the 6 we can actually build from the alert contract. Process, Service,
 segments etc. come later.
-
-### Stuff that tripped me up
-
-- The parameter name has to match the `$placeholder`, not the node property.
-  `{address: $src_ip}` needs `src_ip=`, not `address=`. Spent a while on this.
-- Both src and dst IPs store into `address`. If they used different property
-  names the same IP would become two nodes and the correlation disappears.
-- Never build Cypher with f-strings, use `$params`.
 
 ### Tested it
 

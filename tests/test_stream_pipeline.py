@@ -2,7 +2,8 @@
 
 Tests:
 1. Zeek and Suricata Kafka producer serialization and fallback queuing.
-2. TelemetryStreamConsumer sliding window evaluation and standardized alert schema formatting.
+2. TelemetryStreamConsumer sliding window evaluation, and that its alerts validate
+   against backend AlertCreate.
 
 The Graph-Triage Core endpoint tests were removed: alert ingestion is
 consolidated onto backend/ (POST /alerts), so there is one API and one
@@ -20,8 +21,9 @@ import pytest
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 telemetry_dir = os.path.join(repo_root, "telemetry-pipeline")
 engine_dir = os.path.join(repo_root, "spectrac2-engine")
+backend_dir = os.path.join(repo_root, "backend")
 
-for p in (telemetry_dir, engine_dir):
+for p in (telemetry_dir, engine_dir, backend_dir):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -35,6 +37,8 @@ ZeekKafkaProducer = zeek_mod.ZeekKafkaProducer
 SuricataEveParser = suricata_mod.SuricataEveParser
 SuricataKafkaProducer = suricata_mod.SuricataKafkaProducer
 TelemetryStreamConsumer = consumer_mod.TelemetryStreamConsumer
+
+from models import AlertCreate  # backend/models.py, the alert contract
 
 
 class TestKafkaTelemetryProducers:
@@ -121,38 +125,26 @@ class TestStreamConsumerAndAlertSchema:
 
         alert = consumer.recent_alerts[0]
 
-        # Verify all 14 fields required by the OmniGuard alert specification
-        required_keys = [
-            "source",
-            "event_type",
-            "severity",
-            "timestamp",
-            "host_id",
-            "src_ip",
-            "dst_ip",
-            "dst_port",
-            "proto",
-            "service",
-            "sni",
-            "mitre_technique",
-            "confidence",
-            "beacon_interval",
-            "mean_jitter",
-        ]
-        for key in required_keys:
-            assert key in alert, f"Missing required alert key: {key}"
+        # The consumer must emit exactly what backend POST /alerts accepts.
+        # Validating against AlertCreate itself means a rename on either side
+        # fails here instead of as a silent 422 at runtime.
+        AlertCreate.model_validate(alert)
+        assert set(alert) <= set(AlertCreate.model_fields), (
+            f"fields the backend would silently drop: {set(alert) - set(AlertCreate.model_fields)}"
+        )
+
+        # identity is stamped server-side, never by the producer
+        assert "alert_id" not in alert
+        assert "timestamp" not in alert
 
         assert alert["source"] == "spectrac2"
         assert alert["event_type"] == "c2_beacon_detected"
-        assert alert["severity"] in ("LOW", "MEDIUM", "HIGH", "CRITICAL")
-        assert isinstance(alert["timestamp"], float)
-        assert alert["host_id"] == "WORKSTATION-CORP-99"
+        assert alert["severity"] in ("low", "medium", "high", "critical")
+        assert alert["host"] == "WORKSTATION-CORP-99"
         assert alert["src_ip"] == "10.0.5.20"
         assert alert["dst_ip"] == "198.51.100.88"
         assert alert["dst_port"] == 443
-        assert alert["proto"] == "tcp"
-        assert alert["service"] == "ssl"
-        assert alert["sni"] == "beacon-service-domain.com"
+        assert alert["domain"] == "beacon-service-domain.com"
         assert alert["mitre_technique"] == "T1071"
         assert 0.0 <= alert["confidence"] <= 1.0
         assert alert["beacon_interval"] > 0.0

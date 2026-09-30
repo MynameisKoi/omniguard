@@ -3,7 +3,7 @@
 Ingests Zeek and Suricata flow events from Kafka topic 'network-flows'
 (with in-memory fallback queue support), maintains sliding time-windows per
 5-tuple, evaluates beacon periodicity via the SpectraC2 engine, and dispatches
-strictly formatted alerts to the Graph-Triage Core API via httpx.
+alerts to the OmniGuard backend (POST /alerts) via httpx.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ class TelemetryStreamConsumer:
     def __init__(
         self,
         predictor: Optional[SpectraC2Predictor] = None,
-        alert_api_url: str = "http://localhost:8000/api/v1/alerts",
+        alert_api_url: str = "http://localhost:8000/alerts",
         min_eval_packets: int = 8,
         eval_interval_packets: int = 5,
     ):
@@ -163,23 +163,27 @@ class TelemetryStreamConsumer:
         )
 
         if result["is_beacon"]:
-            # Format strictly according to the standardized OmniGuard alert schema
+            # Shaped to backend/models.py AlertCreate, the one alert contract.
+            # alert_id and timestamp are stamped by the backend, never sent from here.
+            beacon_interval = float(round(result["spectral_metrics"]["dominant_period"], 4))
+            target = flow.domain or flow.dst_ip
             alert = {
                 "source": "spectrac2",
                 "event_type": "c2_beacon_detected",
-                "severity": result["severity"].upper(),
-                "timestamp": float(flow.timestamps[-1] if flow.timestamps else time.time()),
-                "host_id": str(flow.host or flow.src_ip),
+                "severity": result["severity"].lower(),
+                "host": str(flow.host or flow.src_ip),
                 "src_ip": str(flow.src_ip),
                 "dst_ip": str(flow.dst_ip),
                 "dst_port": int(flow.dst_port),
-                "proto": str(flow.proto),
-                "service": str(flow.service if flow.service != "unknown" else "ssl"),
-                "sni": flow.domain if flow.domain else None,
+                "domain": flow.domain if flow.domain else None,
                 "mitre_technique": "T1071",
                 "confidence": float(round(result["threat_score"], 4)),
-                "beacon_interval": float(round(result["spectral_metrics"]["dominant_period"], 4)),
+                "beacon_interval": beacon_interval,
                 "mean_jitter": float(round(result["temporal_metrics"]["mean_jitter"], 4)),
+                "description": (
+                    f"Periodic beaconing to {target}:{flow.dst_port} "
+                    f"every ~{beacon_interval}s"
+                ),
             }
 
             alert_fingerprint = f"{flow.flow_key}:{alert['severity']}"
@@ -193,11 +197,11 @@ class TelemetryStreamConsumer:
         return None
 
     def dispatch_alert(self, alert: Dict[str, Any]) -> bool:
-        """Dispatches detected alert to Graph-Triage Core API via httpx."""
+        """Dispatches detected alert to the OmniGuard backend (POST /alerts) via httpx."""
         logger.warning(
-            f"🚨 [C2 BEACON DETECTED] Host: {alert['host_id']} | "
+            f"🚨 [C2 BEACON DETECTED] Host: {alert['host']} | "
             f"Severity: {alert['severity']} | "
-            f"Target: {alert.get('sni') or alert.get('dst_ip')}:{alert['dst_port']} | "
+            f"Target: {alert.get('domain') or alert.get('dst_ip')}:{alert['dst_port']} | "
             f"Interval: ~{alert['beacon_interval']}s | Jitter: {alert['mean_jitter']}s | "
             f"Confidence: {alert['confidence']:.1%}"
         )
@@ -206,13 +210,13 @@ class TelemetryStreamConsumer:
             with httpx.Client(timeout=0.5) as client:
                 resp = client.post(self.alert_api_url, json=alert)
                 if resp.status_code in (200, 201, 202):
-                    logger.info(f"✅ Alert accepted by Graph Core: {resp.json().get('alert_id', 'ok')}")
+                    logger.info(f"✅ Alert accepted by backend: {resp.json().get('alert_id', 'ok')}")
                     return True
                 else:
-                    logger.warning(f"Graph Core returned status {resp.status_code}: {resp.text}")
+                    logger.warning(f"Backend returned status {resp.status_code}: {resp.text}")
                     return False
         except Exception as exc:
-            logger.debug(f"Graph Core API at {self.alert_api_url} unreachable ({exc}). Alert buffered locally.")
+            logger.debug(f"Backend at {self.alert_api_url} unreachable ({exc}). Alert buffered locally.")
             return False
 
     async def dispatch_alert_async(self, alert: Dict[str, Any]) -> bool:
@@ -309,7 +313,7 @@ if __name__ == "__main__":
     parser.add_argument("--kafka", action="store_true", help="Consume from Kafka topic 'network-flows'")
     parser.add_argument("--broker", type=str, default="localhost:9092", help="Kafka bootstrap broker")
     parser.add_argument("--topic", type=str, default="network-flows", help="Kafka topic")
-    parser.add_argument("--api", type=str, default="http://localhost:8000/api/v1/alerts", help="Target Graph Core API URL")
+    parser.add_argument("--api", type=str, default="http://localhost:8000/alerts", help="OmniGuard backend POST /alerts URL")
     args = parser.parse_args()
 
     consumer = TelemetryStreamConsumer(alert_api_url=args.api)

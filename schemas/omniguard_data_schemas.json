@@ -1,455 +1,502 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "OmniGuard SOC Telemetry & Graph Schemas",
-  "description": "Standardized data schemas for VerifyEye (ingress phishing), SpectraC2 (beaconing egress), and Neo4j graph entity correlation with Tier 2 nodes (Process, URL) and Tier 3 concept properties.",
-  "version": "1.1.0",
+  "title": "OmniGuard SOC Alert Contract & Graph Schema",
+  "description": "The single alert contract every detection engine posts to POST /alerts, and the Neo4j property graph built from it. This file documents what backend/models.py and backend/graph.py actually implement - if they disagree, the code is right and this file is stale.",
+  "version": "2.1.0",
   "definitions": {
     "SeverityEnum": {
       "type": "string",
-      "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL", "low", "medium", "high", "critical"],
-      "description": "Triage priority level for analysts"
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "description": "Analyst triage priority. Lowercase only - the dashboard uses these values as CSS class names."
     },
-    "VerifyEyeAlert": {
+    "SourceEnum": {
+      "type": "string",
+      "enum": [
+        "verifyeye",
+        "spectrac2",
+        "manual"
+      ],
+      "description": "Which subsystem produced the alert. 'manual' is for analyst-submitted and test alerts."
+    },
+    "StatusEnum": {
+      "type": "string",
+      "enum": [
+        "new",
+        "triaged",
+        "resolved"
+      ],
+      "description": "Triage state. Set by the dashboard, not by the engine."
+    },
+    "AlertCreate": {
       "type": "object",
-      "description": "Alert payload emitted by VerifyEye Chrome Extension / Ingress crawler when phishing or brand impersonation is detected.",
+      "description": "What a detection engine POSTs to /alerts. One contract for all engines - there is no per-engine payload. Fields not relevant to a given engine are simply omitted.",
       "required": [
         "source",
         "event_type",
         "severity",
-        "timestamp",
-        "host_id",
-        "target_url",
-        "domain",
-        "brand_target",
-        "confidence"
+        "host"
       ],
+      "additionalProperties": false,
       "properties": {
         "source": {
-          "type": "string",
-          "const": "verifyeye",
-          "description": "Identification of the originating subsystem"
+          "$ref": "#/definitions/SourceEnum"
         },
         "event_type": {
           "type": "string",
-          "enum": [
+          "description": "Machine-readable event label",
+          "examples": [
             "phishing_page_detected",
-            "credential_harvesting_attempt",
-            "brand_impersonation",
-            "malicious_dom_manipulation"
-          ],
-          "description": "Threat event classification"
+            "c2_beacon_detected",
+            "lateral_movement_suspected"
+          ]
         },
         "severity": {
           "$ref": "#/definitions/SeverityEnum"
         },
-        "timestamp": {
-          "type": "number",
-          "description": "Epoch timestamp (seconds with microsecond precision) of detection"
-        },
-        "host_id": {
+        "host": {
           "type": "string",
-          "description": "Unique identifier / hostname of endpoint device (Host node in Neo4j)"
+          "description": "Hostname of the affected machine. Required. Becomes a Host node keyed on 'hostname'.",
+          "examples": [
+            "LAPTOP-10"
+          ]
         },
         "user": {
-          "type": ["string", "null"],
-          "description": "Logged-in user account identifier, if available (User node in Neo4j)"
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Account involved, if attributable. Network-only detections usually have none. Becomes a User node.",
+          "examples": [
+            "maharjan"
+          ]
         },
         "src_ip": {
-          "type": ["string", "null"],
-          "description": "Local / egress IP address of the client machine"
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Source IP of the affected host. Becomes an IP node and a Host-[:HAS_IP]->IP edge.",
+          "examples": [
+            "10.0.0.42"
+          ]
         },
-        "target_url": {
-          "type": "string",
-          "format": "uri",
-          "description": "Full URL of the flagged phishing website (materialized into URL node in Neo4j)"
+        "dst_ip": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Destination IP, typically the C2 listener. Becomes an IP node.",
+          "examples": [
+            "198.51.100.42"
+          ]
         },
         "domain": {
-          "type": "string",
-          "description": "Fully Qualified Domain Name (FQDN) being visited (Domain node in Neo4j)"
-        },
-        "action_endpoint": {
-          "type": ["string", "null"],
-          "description": "Form action URL where intercepted credentials would be submitted"
-        },
-        "brand_target": {
-          "type": "string",
-          "description": "Corporate brand identified by YOLOv8/pHash (e.g., 'Microsoft 365', 'Okta', 'Google Workspace')"
-        },
-        "confidence": {
-          "type": "number",
-          "minimum": 0.0,
-          "maximum": 1.0,
-          "description": "Object detection model confidence score (0.0 to 1.0)"
-        },
-        "phash_distance": {
-          "type": ["number", "null"],
-          "description": "Hamming distance of visual perceptual hash against authentic brand template"
-        },
-        "input_frozen": {
-          "type": "boolean",
-          "default": true,
-          "description": "Whether client-side script successfully locked input fields and blocked form submission"
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Domain involved. From TLS SNI for beacon alerts, from the visited URL for phishing alerts. Becomes a Domain node.",
+          "examples": [
+            "evil-microsoft-login.com",
+            "cdn-telemetry-sync.net"
+          ]
         },
         "mitre_technique": {
-          "type": "string",
-          "default": "T1566.002",
-          "description": "Mapped MITRE ATT&CK technique code (e.g. T1566.002 Spearphishing Link, T1056 Input Capture)"
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "MITRE ATT&CK technique ID. Becomes a Technique node so alerts can be grouped by technique across engines.",
+          "examples": [
+            "T1566",
+            "T1071",
+            "T1021"
+          ]
+        },
+        "confidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Detector confidence as a fraction, not a percentage. 0.87, never 87.",
+          "examples": [
+            0.87
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/StatusEnum",
+          "default": "new"
         },
         "description": {
           "type": "string",
-          "description": "Analyst-readable threat narrative summary"
+          "default": "",
+          "description": "Human-readable summary shown to the analyst"
         },
-        "raw_metadata": {
-          "type": "object",
-          "additionalProperties": true,
-          "description": "Optional telemetry details (DOM tree signature, bounding box coordinates, TLS certificate issuer)"
+        "dst_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "SpectraC2. Destination port. Stored as a property on the Alert-[:REPORTED_DST_IP]->IP edge.",
+          "examples": [
+            443
+          ]
+        },
+        "beacon_interval": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0.0,
+          "description": "SpectraC2. Dominant beacon period in seconds from the FFT. Edge property.",
+          "examples": [
+            60.0
+          ]
+        },
+        "mean_jitter": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0.0,
+          "description": "SpectraC2. Mean timing jitter in seconds. Edge property.",
+          "examples": [
+            18.2
+          ]
+        },
+        "process_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "SpectraC2 / EDR. Originating binary. Becomes a Process node when combined with pid.",
+          "examples": [
+            "sliver-agent.exe"
+          ]
+        },
+        "pid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "SpectraC2 / EDR. OS process id. Combined with host it forms the Process key 'host:pid'.",
+          "examples": [
+            4920
+          ]
+        },
+        "target_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "VerifyEye. Full URL of the phishing page. Becomes a URL node, which links every host hit by the same lure.",
+          "examples": [
+            "https://evil-microsoft-login.com/auth/login.php"
+          ]
+        },
+        "action_endpoint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "VerifyEye. Where the credential form would submit. An off-domain action is the phishing signal. URL node property.",
+          "examples": [
+            "https://evil-microsoft-login.com/api/v1/harvest"
+          ]
+        },
+        "brand_target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "VerifyEye. Brand the page impersonates, from logo detection. URL node property.",
+          "examples": [
+            "Microsoft 365"
+          ]
         }
       }
     },
-    "SpectraC2Alert": {
+    "Alert": {
       "type": "object",
-      "description": "Alert payload emitted by SpectraC2 beacon detector on encrypted network traffic.",
-      "required": [
-        "source",
-        "event_type",
-        "severity",
-        "timestamp",
-        "host_id",
-        "src_ip",
-        "dst_ip",
-        "dst_port",
-        "proto",
-        "confidence",
-        "beacon_interval",
-        "mean_jitter"
-      ],
-      "properties": {
-        "source": {
-          "type": "string",
-          "const": "spectrac2"
+      "description": "What the API stores and returns: AlertCreate plus two fields the server generates. Clients cannot set these - they are not accepted on input, so an alert_id cannot be forged and a timestamp cannot be backdated.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/AlertCreate"
         },
-        "event_type": {
-          "type": "string",
-          "enum": ["c2_beacon_detected", "covert_channel_exfiltration", "abnormal_cadence"]
-        },
-        "severity": {
-          "$ref": "#/definitions/SeverityEnum"
-        },
-        "timestamp": {
-          "type": "number"
-        },
-        "host_id": {
-          "type": "string"
-        },
-        "src_ip": {
-          "type": "string"
-        },
-        "dst_ip": {
-          "type": "string"
-        },
-        "dst_port": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535
-        },
-        "proto": {
-          "type": "string"
-        },
-        "service": {
-          "type": "string",
-          "description": "Detected application service layer (e.g., 'ssl', 'ssh', 'http')"
-        },
-        "sni": {
-          "type": ["string", "null"]
-        },
-        "mitre_technique": {
-          "type": "string",
-          "default": "T1071"
-        },
-        "confidence": {
-          "type": "number",
-          "minimum": 0.0,
-          "maximum": 1.0
-        },
-        "beacon_interval": {
-          "type": "number",
-          "description": "Dominant periodicity in seconds computed via FFT power spectral density"
-        },
-        "mean_jitter": {
-          "type": "number",
-          "description": "Timing jitter delta in seconds"
-        },
-        "pid": {
-          "type": ["integer", "null"],
-          "description": "Originating process PID if endpoint EDR telemetry is available"
-        },
-        "process_name": {
-          "type": ["string", "null"],
-          "description": "Originating process binary name (e.g. 'sliver-client.exe', 'powershell.exe')"
+        {
+          "type": "object",
+          "required": [
+            "alert_id",
+            "timestamp"
+          ],
+          "properties": {
+            "alert_id": {
+              "type": "string",
+              "description": "Server-generated UUID. Returned in the POST response so the producer can reference it."
+            },
+            "timestamp": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Server-generated UTC time of receipt, ISO 8601."
+            }
+          }
         }
-      }
+      ]
     }
   },
   "neo4j_graph_schema": {
-    "description": "Neo4j property graph topology. Incorporates 7 primary nodes (Tier 1 core + Tier 2 Process & URL) with Tier 3 concepts represented cleanly as node and edge properties.",
+    "description": "Built by backend/graph.py ingest_alert(), one transaction per alert. Two layers: REPORTED_* edges hang off an Alert and are the audit trail of what that alert observed; every other edge is a standing fact about the network and survives the alert being deleted. The entity layer is self-sufficient - it shows what connects to what without any Alert nodes in the picture, which is why the dashboard canvas renders entities only by default.",
     "nodes": {
+      "Alert": {
+        "key": "alert_id",
+        "properties": [
+          "alert_id",
+          "source",
+          "event_type",
+          "severity",
+          "status",
+          "confidence",
+          "description",
+          "timestamp",
+          "mitre_technique"
+        ],
+        "created_with": "MERGE on alert_id, ON CREATE SET the rest"
+      },
       "Host": {
-        "description": "Physical or virtual machine endpoint (Asset and Network Segment concepts embedded as properties).",
-        "primary_key": "host_id",
-        "properties": {
-          "host_id": "STRING (unique identifier, e.g. 'HOST-CORP-WKSTN-10')",
-          "hostname": "STRING (e.g. 'WKSTN-FIN-10')",
-          "ip": "STRING (primary assigned IP)",
-          "os": "STRING ('Windows 11 Enterprise', 'Ubuntu 22.04 LTS')",
-          "status": "STRING ('ACTIVE', 'COMPROMISED', 'ISOLATED')",
-          "last_seen": "FLOAT (epoch timestamp)",
-          "is_critical_asset": "BOOLEAN (Tier 3 Asset concept: flags high-value targets)",
-          "asset_tier": "STRING (Tier 3 Asset concept: 'tier-1-dc', 'tier-2-server', 'workstation')",
-          "subnet": "STRING (Tier 3 Network Segment concept: e.g. '10.0.1.0/24')",
-          "vlan": "INTEGER (Tier 3 Network Segment concept: e.g. 10)",
-          "network_zone": "STRING (Tier 3 Network Segment concept: 'DMZ', 'INTERNAL', 'PCI_ZONE')",
-          "cve_list": "LIST<STRING> (Tier 3 Vulnerability concept: known unpatched CVEs on this host, e.g. ['CVE-2024-21413'])",
-          "cloud_provider": "STRING (Tier 3 Cloud Resource concept: 'aws', 'azure', 'gcp', 'on-prem')",
-          "cloud_region": "STRING (Tier 3 Cloud Resource concept: e.g. 'us-east-1')",
-          "installed_services": "LIST<STRING> (Tier 3 Service/Application concept: e.g. ['ssh', 'rdp', 'nginx'])"
-        }
+        "key": "hostname",
+        "properties": [
+          "hostname"
+        ],
+        "note": "Keyed on hostname rather than a separate host_id. The alert contract carries one host field."
       },
       "User": {
-        "description": "Identity principal (Account concept embedded as properties).",
-        "primary_key": "username",
-        "properties": {
-          "username": "STRING (unique username, e.g. 'maharjan')",
-          "email": "STRING (e.g. 'maharjan@corp.internal')",
-          "department": "STRING (e.g. 'Finance', 'Engineering')",
-          "account_type": "STRING (Tier 3 Account concept: 'ActiveDirectory', 'Local', 'Okta_SaaS')",
-          "privilege_level": "STRING ('standard', 'admin', 'domain_admin')",
-          "is_service_account": "BOOLEAN (Tier 3 Account concept: true for automated identities)"
-        }
+        "key": "username",
+        "properties": [
+          "username"
+        ]
       },
       "IP": {
-        "description": "Internal or external IPv4/IPv6 network endpoint.",
-        "primary_key": "address",
-        "properties": {
-          "address": "STRING (e.g. '10.0.1.42', '198.51.100.44')",
-          "is_internal": "BOOLEAN (true for RFC1918 internal addresses)",
-          "asn": "STRING (Autonomous System Number, e.g. 'AS16509 Amazon.com')",
-          "country": "STRING (GeoIP country code, e.g. 'US', 'NL')",
-          "subnet": "STRING (Tier 3 Network Segment concept: CIDR prefix, e.g. '10.0.1.0/24')",
-          "cloud_provider": "STRING (Tier 3 Cloud Resource concept: 'aws', 'cloudflare', 'digitalocean', 'on-prem')"
-        }
+        "key": "address",
+        "properties": [
+          "address"
+        ],
+        "note": "Same property whether the address appeared as a source or a destination, so one IP is one node."
       },
       "Domain": {
-        "description": "Fully Qualified Domain Name queried via DNS or TLS SNI.",
-        "primary_key": "domain_name",
-        "properties": {
-          "domain_name": "STRING (e.g. 'evil-microsoft-login.com', 'cdn-profile-update.org')",
-          "tld": "STRING (e.g. 'com', 'org', 'xyz')",
-          "brand_impersonated": "STRING (e.g. 'Microsoft 365', 'Okta')",
-          "reputation_score": "FLOAT (0.0 to 1.0; 1.0 = malicious)",
-          "is_sinkholed": "BOOLEAN (true if internal DNS has redirected to sinkhole)"
-        }
+        "key": "domain_name",
+        "properties": [
+          "domain_name"
+        ]
+      },
+      "Technique": {
+        "key": "id",
+        "properties": [
+          "id"
+        ],
+        "note": "A node rather than a property, so alerts can be grouped by ATT&CK technique across engines."
       },
       "URL": {
-        "description": "Tier 2 Node: Explicit web resource link intercepted by VerifyEye. Links disparate hosts attacked with the same lure.",
-        "primary_key": "url",
-        "properties": {
-          "url": "STRING (full normalized target URL, e.g. 'https://evil-microsoft-login.com/auth/login.php')",
-          "path": "STRING (URL path component, e.g. '/auth/login.php')",
-          "action_endpoint": "STRING (form submission harvesting URL, e.g. 'https://evil-microsoft-login.com/api/v1/harvest')",
-          "brand_target": "STRING (brand target flagged by YOLOv8, e.g. 'Microsoft 365')",
-          "is_phishing": "BOOLEAN (true if confirmed malicious)",
-          "first_seen": "FLOAT (epoch timestamp)"
-        }
+        "key": "url",
+        "properties": [
+          "url",
+          "action_endpoint",
+          "brand_target"
+        ],
+        "note": "Links every host hit by the same lure page. Campaign breadth."
       },
       "Process": {
-        "description": "Tier 2 Node: Running execution unit on a host (File/Payload concept embedded as sha256 property). Crucial for Stage 3 lateral movement and process injection.",
-        "primary_key": "process_id",
-        "properties": {
-          "process_id": "STRING (composite unique key: host_id + ':' + pid, e.g. 'HOST-CORP-WKSTN-10:4920')",
-          "name": "STRING (executable binary name, e.g. 'powershell.exe', 'sliver-agent.exe', 'lsass.exe')",
-          "pid": "INTEGER (OS process ID)",
-          "parent_pid": "INTEGER (PPID of parent execution process)",
-          "command_line": "STRING (full invoked command-line arguments)",
-          "sha256": "STRING (Tier 3 File/Payload concept: cryptographic hash of binary file)",
-          "file_path": "STRING (Tier 3 File concept: path on disk, e.g. 'C:\\Windows\\Temp\\sliver.exe')",
-          "user": "STRING (user account security context under which process executed)",
-          "started_at": "FLOAT (epoch timestamp)",
-          "status": "STRING ('RUNNING', 'TERMINATED', 'KILLED_BY_SOC')"
-        }
-      },
-      "Alert": {
-        "description": "Correlated high-confidence security event emitted by VerifyEye, SpectraC2, or EDR.",
-        "primary_key": "alert_id",
-        "properties": {
-          "alert_id": "STRING (UUID)",
-          "source": "STRING ('verifyeye' | 'spectrac2' | 'manual')",
-          "event_type": "STRING ('phishing_page_detected', 'c2_beacon_detected')",
-          "severity": "STRING ('LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL')",
-          "confidence": "FLOAT (0.0 to 1.0)",
-          "mitre_technique": "STRING ('T1566.002', 'T1071', 'T1056')",
-          "timestamp": "FLOAT (epoch timestamp)",
-          "status": "STRING ('new' | 'triaged' | 'resolved')",
-          "description": "STRING (executive threat narrative)"
-        }
+        "key": "process_id",
+        "properties": [
+          "process_id",
+          "name",
+          "pid"
+        ],
+        "note": "process_id is host + ':' + pid, so the same pid on two machines is two nodes."
       }
     },
     "relationships": [
       {
-        "type": "TARGETS_HOST",
+        "type": "REPORTED_HOST",
         "from": "Alert",
         "to": "Host",
-        "description": "Direct alert attribution to affected physical/virtual host"
+        "always": true,
+        "description": "The host this alert was observed on. Every alert has one."
       },
       {
-        "type": "TARGETS_URL",
-        "from": "Alert",
-        "to": "URL",
-        "description": "VerifyEye alert pinpointing specific phishing URL"
-      },
-      {
-        "type": "INDICATES_DOMAIN",
-        "from": "Alert",
-        "to": "Domain",
-        "description": "Alert flagging malicious domain infrastructure"
-      },
-      {
-        "type": "INDICATES_IP",
-        "from": "Alert",
-        "to": "IP",
-        "description": "Alert flagging external command-and-control IP"
-      },
-      {
-        "type": "INVOLVES_USER",
+        "type": "REPORTED_USER",
         "from": "Alert",
         "to": "User",
-        "description": "Alert attributing compromise to specific user identity"
+        "when": "user is present"
       },
       {
-        "type": "BELONGS_TO",
-        "from": "URL",
+        "type": "REPORTED_DOMAIN",
+        "from": "Alert",
         "to": "Domain",
-        "description": "Hierarchical link connecting specific URL path to its parent Domain node"
+        "when": "domain is present"
       },
       {
-        "type": "ACCESSED_URL",
-        "from": "Host",
-        "to": "URL",
-        "properties": { "timestamp": "FLOAT", "browser": "STRING" },
-        "description": "Host browser navigated to URL. Multi-host links reveal enterprise campaign breadth."
-      },
-      {
-        "type": "RESOLVED_DOMAIN",
-        "from": "Host",
-        "to": "Domain",
-        "properties": { "timestamp": "FLOAT", "query_type": "STRING" },
-        "description": "Host performed DNS resolution for domain"
-      },
-      {
-        "type": "COMMUNICATED_WITH",
-        "from": "Host",
+        "type": "REPORTED_SRC_IP",
+        "from": "Alert",
         "to": "IP",
-        "properties": {
-          "port": "INTEGER (destination port, e.g. 443)",
-          "proto": "STRING ('tcp', 'udp')",
-          "service": "STRING (Tier 3 Service concept: 'ssl', 'ssh', 'rdp', 'http')",
-          "beacon_interval": "FLOAT (FFT dominant period in seconds)",
-          "mean_jitter": "FLOAT (timing delta jitter in seconds)",
-          "timestamp": "FLOAT"
-        },
-        "description": "Network connection established from host to external IP"
+        "when": "src_ip is present"
+      },
+      {
+        "type": "REPORTED_DST_IP",
+        "from": "Alert",
+        "to": "IP",
+        "when": "dst_ip is present",
+        "properties": [
+          "port",
+          "beacon_interval",
+          "mean_jitter"
+        ],
+        "description": "Destination this alert reported. Connection detail lives on this edge, not on the IP node."
+      },
+      {
+        "type": "MAPS_TO_TECHNIQUE",
+        "from": "Alert",
+        "to": "Technique",
+        "when": "mitre_technique is present"
+      },
+      {
+        "type": "REPORTED_URL",
+        "from": "Alert",
+        "to": "URL",
+        "when": "target_url is present"
+      },
+      {
+        "type": "REPORTED_PROCESS",
+        "from": "Alert",
+        "to": "Process",
+        "when": "process_name and pid are present"
       },
       {
         "type": "LOGGED_INTO",
         "from": "User",
         "to": "Host",
-        "properties": { "timestamp": "FLOAT", "auth_type": "STRING ('Kerberos', 'NTLM', 'SSH')" },
-        "description": "User identity authenticated on machine"
+        "description": "Standing fact: this account uses this machine"
+      },
+      {
+        "type": "HAS_IP",
+        "from": "Host",
+        "to": "IP",
+        "description": "The host's own address"
+      },
+      {
+        "type": "CONNECTED_TO_DOMAIN",
+        "from": "Host",
+        "to": "Domain",
+        "description": "This machine contacted this domain"
+      },
+      {
+        "type": "ACCESSED_URL",
+        "from": "Host",
+        "to": "URL",
+        "description": "This machine loaded this page"
       },
       {
         "type": "SPAWNED_PROCESS",
         "from": "Host",
-        "to": "Process",
-        "properties": { "timestamp": "FLOAT" },
-        "description": "Host operating system spawned execution process"
+        "to": "Process"
+      },
+      {
+        "type": "BELONGS_TO",
+        "from": "URL",
+        "to": "Domain",
+        "description": "Hierarchy: page to its parent domain"
       },
       {
         "type": "INITIATED_FLOW",
         "from": "Process",
         "to": "IP",
-        "properties": { "port": "INTEGER", "proto": "STRING", "timestamp": "FLOAT" },
-        "description": "Specific process established network egress connection to external IP"
-      },
-      {
-        "type": "INJECTED_INTO",
-        "from": "Process",
-        "to": "Process",
-        "properties": { "technique": "STRING ('Process Injection', 'LSASS Dump')", "timestamp": "FLOAT" },
-        "description": "Malicious process performed memory injection into another process (Stage 3 lateral movement)"
+        "description": "This binary opened the connection"
       },
       {
         "type": "HOSTS_DOMAIN",
         "from": "IP",
         "to": "Domain",
-        "properties": { "first_seen": "FLOAT", "last_seen": "FLOAT" },
-        "description": "External IP address resolves to or serves specified Domain"
+        "when": "dst_ip and domain are both present",
+        "description": "This address serves this domain. Asserted from co-occurrence in a single alert, not DNS-verified - behind a CDN it may not hold."
       }
     ],
-    "sample_cypher_queries": {
-      "create_constraints": [
-        "CREATE CONSTRAINT unique_host_id IF NOT EXISTS FOR (h:Host) REQUIRE h.host_id IS UNIQUE;",
-        "CREATE CONSTRAINT unique_username IF NOT EXISTS FOR (u:User) REQUIRE u.username IS UNIQUE;",
-        "CREATE CONSTRAINT unique_ip_address IF NOT EXISTS FOR (i:IP) REQUIRE i.address IS UNIQUE;",
-        "CREATE CONSTRAINT unique_domain_name IF NOT EXISTS FOR (d:Domain) REQUIRE d.domain_name IS UNIQUE;",
-        "CREATE CONSTRAINT unique_url IF NOT EXISTS FOR (url:URL) REQUIRE url.url IS UNIQUE;",
-        "CREATE CONSTRAINT unique_process_id IF NOT EXISTS FOR (p:Process) REQUIRE p.process_id IS UNIQUE;",
-        "CREATE CONSTRAINT unique_alert_id IF NOT EXISTS FOR (a:Alert) REQUIRE a.alert_id IS UNIQUE;",
-        "CREATE INDEX alert_timestamp_idx IF NOT EXISTS FOR (a:Alert) ON (a.timestamp);",
-        "CREATE INDEX host_subnet_idx IF NOT EXISTS FOR (h:Host) ON (h.subnet);"
-      ]
-    }
+    "deferred_relationships": [
+      {
+        "type": "INJECTED_INTO",
+        "from": "Process",
+        "to": "Process",
+        "reason": "Needs a parent and target process plus evidence of injection. The contract carries one process per alert and no parent_pid, so there is no data behind it yet. Requires EDR telemetry."
+      }
+    ],
+    "constraints": [
+      "CREATE CONSTRAINT host_unique IF NOT EXISTS FOR (h:Host) REQUIRE h.hostname IS UNIQUE",
+      "CREATE CONSTRAINT user_unique IF NOT EXISTS FOR (u:User) REQUIRE u.username IS UNIQUE",
+      "CREATE CONSTRAINT domain_unique IF NOT EXISTS FOR (d:Domain) REQUIRE d.domain_name IS UNIQUE",
+      "CREATE CONSTRAINT ip_unique IF NOT EXISTS FOR (i:IP) REQUIRE i.address IS UNIQUE",
+      "CREATE CONSTRAINT alert_unique IF NOT EXISTS FOR (a:Alert) REQUIRE a.alert_id IS UNIQUE",
+      "CREATE CONSTRAINT technique_unique IF NOT EXISTS FOR (t:Technique) REQUIRE t.id IS UNIQUE",
+      "CREATE CONSTRAINT url_unique IF NOT EXISTS FOR (u:URL) REQUIRE u.url IS UNIQUE",
+      "CREATE CONSTRAINT process_unique IF NOT EXISTS FOR (p:Process) REQUIRE p.process_id IS UNIQUE",
+      "CREATE INDEX alert_timestamp_idx IF NOT EXISTS FOR (a:Alert) ON (a.timestamp)",
+      "CREATE INDEX alert_severity_idx IF NOT EXISTS FOR (a:Alert) ON (a.severity)"
+    ]
   },
   "sample_payloads": {
-    "verifyeye_payload": {
-      "source": "verifyeye",
-      "event_type": "phishing_page_detected",
-      "severity": "CRITICAL",
-      "timestamp": 1758880442.124,
-      "host_id": "HOST-CORP-WKSTN-10",
-      "user": "maharjan",
-      "src_ip": "10.0.1.42",
-      "target_url": "https://evil-microsoft-login.com/auth/login.php",
-      "domain": "evil-microsoft-login.com",
-      "action_endpoint": "https://evil-microsoft-login.com/api/v1/harvest",
-      "brand_target": "Microsoft 365",
-      "confidence": 0.985,
-      "phash_distance": 2,
-      "input_frozen": true,
-      "mitre_technique": "T1566.002",
-      "description": "VerifyEye intercepted zero-hour credential theft page visually impersonating Microsoft 365. Keystroke inputs frozen.",
-      "raw_metadata": {
-        "dom_elements_frozen": 3,
-        "yolo_bounding_box": [120, 45, 260, 95],
-        "browser": "Chrome/128.0.0.0 (Windows NT 10.0; Win64; x64)"
-      }
-    },
-    "spectrac2_payload": {
+    "spectrac2": {
       "source": "spectrac2",
       "event_type": "c2_beacon_detected",
-      "severity": "CRITICAL",
-      "timestamp": 1758880455.892,
-      "host_id": "HOST-CORP-WKSTN-10",
-      "src_ip": "10.0.1.42",
-      "dst_ip": "198.51.100.44",
+      "severity": "critical",
+      "host": "LAPTOP-10",
+      "src_ip": "10.0.0.42",
+      "dst_ip": "198.51.100.42",
       "dst_port": 443,
-      "proto": "tcp",
-      "service": "ssl",
-      "sni": "cdn-profile-update.org",
+      "domain": "cdn-telemetry-sync.net",
       "mitre_technique": "T1071",
-      "confidence": 0.9782,
-      "beacon_interval": 30.125,
-      "mean_jitter": 2.45,
+      "confidence": 0.87,
+      "beacon_interval": 60.0,
+      "mean_jitter": 18.2,
+      "process_name": "sliver-agent.exe",
       "pid": 4920,
-      "process_name": "sliver-agent.exe"
+      "description": "Encrypted C2 beacon, dominant interval ~60s with 18s jitter"
+    },
+    "verifyeye": {
+      "source": "verifyeye",
+      "event_type": "phishing_page_detected",
+      "severity": "high",
+      "host": "LAPTOP-10",
+      "user": "maharjan",
+      "domain": "evil-microsoft-login.com",
+      "target_url": "https://evil-microsoft-login.com/auth/login.php",
+      "action_endpoint": "https://evil-microsoft-login.com/api/v1/harvest",
+      "brand_target": "Microsoft 365",
+      "mitre_technique": "T1566",
+      "confidence": 0.94,
+      "description": "Credential form impersonating Microsoft 365; form action posts off-domain"
+    },
+    "minimal": {
+      "source": "manual",
+      "event_type": "suspicious_login",
+      "severity": "low",
+      "host": "WS-FINANCE-04",
+      "$comment": "The four required fields. Everything else is optional - engines send what they have."
     }
-  }
+  },
+  "changes_from_v1": [
+    "One AlertCreate replaces the separate VerifyEyeAlert and SpectraC2Alert definitions. Adding a third engine means no new model.",
+    "severity is lowercase only. It was accepted in both cases and uppercased, which broke the dashboard's CSS class names.",
+    "host replaces host_id; domain replaces sni.",
+    "alert_id and timestamp are generated by the server and are not accepted on input, so they cannot be forged or backdated.",
+    "confidence is a fraction (0.87), never a percentage (87).",
+    "Added a Technique node so alerts can be grouped by ATT&CK technique across engines.",
+    "Connection detail (port, beacon_interval, mean_jitter) sits on the REPORTED_DST_IP edge rather than a separate COMMUNICATED_WITH edge.",
+    "Alert edges renamed to the REPORTED_* family. The old names (TARGETS_HOST, FROM_SRC_IP, TO_DST_IP) read as if the alert were an actor - 'the alert came from this IP' - when an alert is an observation. Every edge now reads as a true sentence when you say it aloud."
+  ]
 }
