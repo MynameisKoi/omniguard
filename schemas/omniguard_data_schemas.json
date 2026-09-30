@@ -1,0 +1,502 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OmniGuard SOC Alert Contract & Graph Schema",
+  "description": "The single alert contract every detection engine posts to POST /alerts, and the Neo4j property graph built from it. This file documents what backend/models.py and backend/graph.py actually implement - if they disagree, the code is right and this file is stale.",
+  "version": "2.1.0",
+  "definitions": {
+    "SeverityEnum": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "description": "Analyst triage priority. Lowercase only - the dashboard uses these values as CSS class names."
+    },
+    "SourceEnum": {
+      "type": "string",
+      "enum": [
+        "verifyeye",
+        "spectrac2",
+        "manual"
+      ],
+      "description": "Which subsystem produced the alert. 'manual' is for analyst-submitted and test alerts."
+    },
+    "StatusEnum": {
+      "type": "string",
+      "enum": [
+        "new",
+        "triaged",
+        "resolved"
+      ],
+      "description": "Triage state. Set by the dashboard, not by the engine."
+    },
+    "AlertCreate": {
+      "type": "object",
+      "description": "What a detection engine POSTs to /alerts. One contract for all engines - there is no per-engine payload. Fields not relevant to a given engine are simply omitted.",
+      "required": [
+        "source",
+        "event_type",
+        "severity",
+        "host"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/SourceEnum"
+        },
+        "event_type": {
+          "type": "string",
+          "description": "Machine-readable event label",
+          "examples": [
+            "phishing_page_detected",
+            "c2_beacon_detected",
+            "lateral_movement_suspected"
+          ]
+        },
+        "severity": {
+          "$ref": "#/definitions/SeverityEnum"
+        },
+        "host": {
+          "type": "string",
+          "description": "Hostname of the affected machine. Required. Becomes a Host node keyed on 'hostname'.",
+          "examples": [
+            "LAPTOP-10"
+          ]
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Account involved, if attributable. Network-only detections usually have none. Becomes a User node.",
+          "examples": [
+            "maharjan"
+          ]
+        },
+        "src_ip": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Source IP of the affected host. Becomes an IP node and a Host-[:HAS_IP]->IP edge.",
+          "examples": [
+            "10.0.0.42"
+          ]
+        },
+        "dst_ip": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Destination IP, typically the C2 listener. Becomes an IP node.",
+          "examples": [
+            "198.51.100.42"
+          ]
+        },
+        "domain": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Domain involved. From TLS SNI for beacon alerts, from the visited URL for phishing alerts. Becomes a Domain node.",
+          "examples": [
+            "evil-microsoft-login.com",
+            "cdn-telemetry-sync.net"
+          ]
+        },
+        "mitre_technique": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "MITRE ATT&CK technique ID. Becomes a Technique node so alerts can be grouped by technique across engines.",
+          "examples": [
+            "T1566",
+            "T1071",
+            "T1021"
+          ]
+        },
+        "confidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Detector confidence as a fraction, not a percentage. 0.87, never 87.",
+          "examples": [
+            0.87
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/StatusEnum",
+          "default": "new"
+        },
+        "description": {
+          "type": "string",
+          "default": "",
+          "description": "Human-readable summary shown to the analyst"
+        },
+        "dst_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "SpectraC2. Destination port. Stored as a property on the Alert-[:REPORTED_DST_IP]->IP edge.",
+          "examples": [
+            443
+          ]
+        },
+        "beacon_interval": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0.0,
+          "description": "SpectraC2. Dominant beacon period in seconds from the FFT. Edge property.",
+          "examples": [
+            60.0
+          ]
+        },
+        "mean_jitter": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0.0,
+          "description": "SpectraC2. Mean timing jitter in seconds. Edge property.",
+          "examples": [
+            18.2
+          ]
+        },
+        "process_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "SpectraC2 / EDR. Originating binary. Becomes a Process node when combined with pid.",
+          "examples": [
+            "sliver-agent.exe"
+          ]
+        },
+        "pid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "SpectraC2 / EDR. OS process id. Combined with host it forms the Process key 'host:pid'.",
+          "examples": [
+            4920
+          ]
+        },
+        "target_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "VerifyEye. Full URL of the phishing page. Becomes a URL node, which links every host hit by the same lure.",
+          "examples": [
+            "https://evil-microsoft-login.com/auth/login.php"
+          ]
+        },
+        "action_endpoint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "VerifyEye. Where the credential form would submit. An off-domain action is the phishing signal. URL node property.",
+          "examples": [
+            "https://evil-microsoft-login.com/api/v1/harvest"
+          ]
+        },
+        "brand_target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "VerifyEye. Brand the page impersonates, from logo detection. URL node property.",
+          "examples": [
+            "Microsoft 365"
+          ]
+        }
+      }
+    },
+    "Alert": {
+      "type": "object",
+      "description": "What the API stores and returns: AlertCreate plus two fields the server generates. Clients cannot set these - they are not accepted on input, so an alert_id cannot be forged and a timestamp cannot be backdated.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/AlertCreate"
+        },
+        {
+          "type": "object",
+          "required": [
+            "alert_id",
+            "timestamp"
+          ],
+          "properties": {
+            "alert_id": {
+              "type": "string",
+              "description": "Server-generated UUID. Returned in the POST response so the producer can reference it."
+            },
+            "timestamp": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Server-generated UTC time of receipt, ISO 8601."
+            }
+          }
+        }
+      ]
+    }
+  },
+  "neo4j_graph_schema": {
+    "description": "Built by backend/graph.py ingest_alert(), one transaction per alert. Two layers: REPORTED_* edges hang off an Alert and are the audit trail of what that alert observed; every other edge is a standing fact about the network and survives the alert being deleted. The entity layer is self-sufficient - it shows what connects to what without any Alert nodes in the picture, which is why the dashboard canvas renders entities only by default.",
+    "nodes": {
+      "Alert": {
+        "key": "alert_id",
+        "properties": [
+          "alert_id",
+          "source",
+          "event_type",
+          "severity",
+          "status",
+          "confidence",
+          "description",
+          "timestamp",
+          "mitre_technique"
+        ],
+        "created_with": "MERGE on alert_id, ON CREATE SET the rest"
+      },
+      "Host": {
+        "key": "hostname",
+        "properties": [
+          "hostname"
+        ],
+        "note": "Keyed on hostname rather than a separate host_id. The alert contract carries one host field."
+      },
+      "User": {
+        "key": "username",
+        "properties": [
+          "username"
+        ]
+      },
+      "IP": {
+        "key": "address",
+        "properties": [
+          "address"
+        ],
+        "note": "Same property whether the address appeared as a source or a destination, so one IP is one node."
+      },
+      "Domain": {
+        "key": "domain_name",
+        "properties": [
+          "domain_name"
+        ]
+      },
+      "Technique": {
+        "key": "id",
+        "properties": [
+          "id"
+        ],
+        "note": "A node rather than a property, so alerts can be grouped by ATT&CK technique across engines."
+      },
+      "URL": {
+        "key": "url",
+        "properties": [
+          "url",
+          "action_endpoint",
+          "brand_target"
+        ],
+        "note": "Links every host hit by the same lure page. Campaign breadth."
+      },
+      "Process": {
+        "key": "process_id",
+        "properties": [
+          "process_id",
+          "name",
+          "pid"
+        ],
+        "note": "process_id is host + ':' + pid, so the same pid on two machines is two nodes."
+      }
+    },
+    "relationships": [
+      {
+        "type": "REPORTED_HOST",
+        "from": "Alert",
+        "to": "Host",
+        "always": true,
+        "description": "The host this alert was observed on. Every alert has one."
+      },
+      {
+        "type": "REPORTED_USER",
+        "from": "Alert",
+        "to": "User",
+        "when": "user is present"
+      },
+      {
+        "type": "REPORTED_DOMAIN",
+        "from": "Alert",
+        "to": "Domain",
+        "when": "domain is present"
+      },
+      {
+        "type": "REPORTED_SRC_IP",
+        "from": "Alert",
+        "to": "IP",
+        "when": "src_ip is present"
+      },
+      {
+        "type": "REPORTED_DST_IP",
+        "from": "Alert",
+        "to": "IP",
+        "when": "dst_ip is present",
+        "properties": [
+          "port",
+          "beacon_interval",
+          "mean_jitter"
+        ],
+        "description": "Destination this alert reported. Connection detail lives on this edge, not on the IP node."
+      },
+      {
+        "type": "MAPS_TO_TECHNIQUE",
+        "from": "Alert",
+        "to": "Technique",
+        "when": "mitre_technique is present"
+      },
+      {
+        "type": "REPORTED_URL",
+        "from": "Alert",
+        "to": "URL",
+        "when": "target_url is present"
+      },
+      {
+        "type": "REPORTED_PROCESS",
+        "from": "Alert",
+        "to": "Process",
+        "when": "process_name and pid are present"
+      },
+      {
+        "type": "LOGGED_INTO",
+        "from": "User",
+        "to": "Host",
+        "description": "Standing fact: this account uses this machine"
+      },
+      {
+        "type": "HAS_IP",
+        "from": "Host",
+        "to": "IP",
+        "description": "The host's own address"
+      },
+      {
+        "type": "CONNECTED_TO_DOMAIN",
+        "from": "Host",
+        "to": "Domain",
+        "description": "This machine contacted this domain"
+      },
+      {
+        "type": "ACCESSED_URL",
+        "from": "Host",
+        "to": "URL",
+        "description": "This machine loaded this page"
+      },
+      {
+        "type": "SPAWNED_PROCESS",
+        "from": "Host",
+        "to": "Process"
+      },
+      {
+        "type": "BELONGS_TO",
+        "from": "URL",
+        "to": "Domain",
+        "description": "Hierarchy: page to its parent domain"
+      },
+      {
+        "type": "INITIATED_FLOW",
+        "from": "Process",
+        "to": "IP",
+        "description": "This binary opened the connection"
+      },
+      {
+        "type": "HOSTS_DOMAIN",
+        "from": "IP",
+        "to": "Domain",
+        "when": "dst_ip and domain are both present",
+        "description": "This address serves this domain. Asserted from co-occurrence in a single alert, not DNS-verified - behind a CDN it may not hold."
+      }
+    ],
+    "deferred_relationships": [
+      {
+        "type": "INJECTED_INTO",
+        "from": "Process",
+        "to": "Process",
+        "reason": "Needs a parent and target process plus evidence of injection. The contract carries one process per alert and no parent_pid, so there is no data behind it yet. Requires EDR telemetry."
+      }
+    ],
+    "constraints": [
+      "CREATE CONSTRAINT host_unique IF NOT EXISTS FOR (h:Host) REQUIRE h.hostname IS UNIQUE",
+      "CREATE CONSTRAINT user_unique IF NOT EXISTS FOR (u:User) REQUIRE u.username IS UNIQUE",
+      "CREATE CONSTRAINT domain_unique IF NOT EXISTS FOR (d:Domain) REQUIRE d.domain_name IS UNIQUE",
+      "CREATE CONSTRAINT ip_unique IF NOT EXISTS FOR (i:IP) REQUIRE i.address IS UNIQUE",
+      "CREATE CONSTRAINT alert_unique IF NOT EXISTS FOR (a:Alert) REQUIRE a.alert_id IS UNIQUE",
+      "CREATE CONSTRAINT technique_unique IF NOT EXISTS FOR (t:Technique) REQUIRE t.id IS UNIQUE",
+      "CREATE CONSTRAINT url_unique IF NOT EXISTS FOR (u:URL) REQUIRE u.url IS UNIQUE",
+      "CREATE CONSTRAINT process_unique IF NOT EXISTS FOR (p:Process) REQUIRE p.process_id IS UNIQUE",
+      "CREATE INDEX alert_timestamp_idx IF NOT EXISTS FOR (a:Alert) ON (a.timestamp)",
+      "CREATE INDEX alert_severity_idx IF NOT EXISTS FOR (a:Alert) ON (a.severity)"
+    ]
+  },
+  "sample_payloads": {
+    "spectrac2": {
+      "source": "spectrac2",
+      "event_type": "c2_beacon_detected",
+      "severity": "critical",
+      "host": "LAPTOP-10",
+      "src_ip": "10.0.0.42",
+      "dst_ip": "198.51.100.42",
+      "dst_port": 443,
+      "domain": "cdn-telemetry-sync.net",
+      "mitre_technique": "T1071",
+      "confidence": 0.87,
+      "beacon_interval": 60.0,
+      "mean_jitter": 18.2,
+      "process_name": "sliver-agent.exe",
+      "pid": 4920,
+      "description": "Encrypted C2 beacon, dominant interval ~60s with 18s jitter"
+    },
+    "verifyeye": {
+      "source": "verifyeye",
+      "event_type": "phishing_page_detected",
+      "severity": "high",
+      "host": "LAPTOP-10",
+      "user": "maharjan",
+      "domain": "evil-microsoft-login.com",
+      "target_url": "https://evil-microsoft-login.com/auth/login.php",
+      "action_endpoint": "https://evil-microsoft-login.com/api/v1/harvest",
+      "brand_target": "Microsoft 365",
+      "mitre_technique": "T1566",
+      "confidence": 0.94,
+      "description": "Credential form impersonating Microsoft 365; form action posts off-domain"
+    },
+    "minimal": {
+      "source": "manual",
+      "event_type": "suspicious_login",
+      "severity": "low",
+      "host": "WS-FINANCE-04",
+      "$comment": "The four required fields. Everything else is optional - engines send what they have."
+    }
+  },
+  "changes_from_v1": [
+    "One AlertCreate replaces the separate VerifyEyeAlert and SpectraC2Alert definitions. Adding a third engine means no new model.",
+    "severity is lowercase only. It was accepted in both cases and uppercased, which broke the dashboard's CSS class names.",
+    "host replaces host_id; domain replaces sni.",
+    "alert_id and timestamp are generated by the server and are not accepted on input, so they cannot be forged or backdated.",
+    "confidence is a fraction (0.87), never a percentage (87).",
+    "Added a Technique node so alerts can be grouped by ATT&CK technique across engines.",
+    "Connection detail (port, beacon_interval, mean_jitter) sits on the REPORTED_DST_IP edge rather than a separate COMMUNICATED_WITH edge.",
+    "Alert edges renamed to the REPORTED_* family. The old names (TARGETS_HOST, FROM_SRC_IP, TO_DST_IP) read as if the alert were an actor - 'the alert came from this IP' - when an alert is an observation. Every edge now reads as a true sentence when you say it aloud."
+  ]
+}
