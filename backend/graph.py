@@ -215,6 +215,22 @@ def ingest_alert(alert: Alert):
         session.execute_write(_write_alert, alert)
 
 
+def update_alert_status(alert_id: str, status: str) -> bool:
+    """Update status property of Alert node in Neo4j."""
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (a:Alert {alert_id: $alert_id})
+            SET a.status = $status
+            RETURN a.alert_id AS alert_id
+            """,
+            alert_id=alert_id,
+            status=status,
+        )
+        return result.single() is not None
+
+
+
 # ── Read functions for GET /graph ────────────────────────────────────────────
 
 def _node_to_element(node) -> dict:
