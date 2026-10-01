@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI 
 from models import Alert, AlertCreate
 from db import database
-from graph import ingest_alert, get_entity_graph, get_host_subgraph
+from graph import ingest_alert
 
 from config import CORS_ORIGINS
 
@@ -42,31 +42,3 @@ def create_alert(payload: AlertCreate) -> Alert:
 def get_alerts() -> list[Alert]:
     alerts: list[Alert] = list(alerts_collection.find({}, {"_id": 0}))
     return alerts
-
-# ── Graph endpoints ──────────────────────────────────────────────────────────
-# Both return Cytoscape-compatible { nodes: [...], edges: [...] }.
-# Alert nodes are excluded by design — the entity layer alone shows lateral
-# movement, shared infrastructure, and multi-host campaigns without the noise
-# of one node per alert.
-
-@app.get("/graph")
-def get_graph():
-    """
-    Full entity graph: every Host, IP, Domain, URL, Process, User, and
-    Technique node plus all standing-fact edges (HAS_IP, LOGGED_INTO, etc.).
-    Alert-REPORTED_* edges are excluded — alerts live in /alerts.
-    """
-    return get_entity_graph()
-
-
-@app.get("/graph/host/{hostname}")
-def get_host_graph(hostname: str):
-    """
-    2-hop subgraph centred on a specific hostname.
-    Returns all nodes reachable from that Host within 2 relationship hops,
-    plus the edges between them — useful for per-host investigation panels.
-    """
-    result = get_host_subgraph(hostname)
-    if not result["nodes"]:
-        raise HTTPException(status_code=404, detail=f"Host '{hostname}' not found in graph")
-    return result

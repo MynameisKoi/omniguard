@@ -1,6 +1,5 @@
 import "./App.css"
 import { useState, useEffect } from 'react';
-import GraphCanvas from './GraphCanvas';
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const SOURCES = ["verifyeye", "spectrac2", "manual"];
@@ -110,53 +109,14 @@ function App() {
 
     const openAlert = (id) => { setSelectedId(id); setPage("alert-detail"); };
 
-    // Smart findings — surfaces analyst-relevant patterns derived from the
-    // scoped alert set. Each entry: { tone: "bad"|"warn"|"good"|"", body: <JSX> }
+    // TODO: derive these from `scoped`.
+    // Shape: { tone: "bad" | "warn" | "good" | "", body: <JSX> }
+    // Ideas worth surfacing:
+    //   - a host with alerts from more than one engine  (two tools agreeing)
+    //   - a domain contacted by more than one host      (shared C2 infrastructure)
+    //   - how many criticals, and on which hosts
+    //   - how much of the queue is still untriaged
     const findings = [];
-
-    // Multi-engine agreement: any host seen by more than one engine is a strong signal
-    const hostsByEngine = {};
-    scoped.forEach(a => {
-        if (!hostsByEngine[a.host]) hostsByEngine[a.host] = new Set();
-        hostsByEngine[a.host].add(a.source);
-    });
-    Object.entries(hostsByEngine).forEach(([host, engines]) => {
-        if (engines.size > 1) {
-            findings.push({
-                tone: "bad",
-                body: <><b>{host}</b> has alerts from {engines.size} different engines ({[...engines].join(", ")}) — independent corroboration.</>,
-            });
-        }
-    });
-
-    // Shared C2 infrastructure: a domain contacted by more than one distinct host
-    const hostsByDomain = {};
-    scoped.forEach(a => {
-        if (!a.domain) return;
-        if (!hostsByDomain[a.domain]) hostsByDomain[a.domain] = new Set();
-        hostsByDomain[a.domain].add(a.host);
-    });
-    Object.entries(hostsByDomain).forEach(([domain, hosts]) => {
-        if (hosts.size > 1) {
-            findings.push({
-                tone: "bad",
-                body: <><b>{domain}</b> contacted by {hosts.size} hosts ({[...hosts].join(", ")}) — possible shared C2 or campaign infrastructure.</>,
-            });
-        }
-    });
-
-    // Untriaged criticals
-    const untriagedCriticals = scoped.filter(a => a.severity === "critical" && a.status === "new").length;
-    if (untriagedCriticals > 0) {
-        findings.push({
-            tone: "bad",
-            body: <>{untriagedCriticals} untriaged critical alert{untriagedCriticals > 1 ? "s" : ""} — triage required.</>,
-        });
-    }
-
-    if (findings.length === 0 && scoped.length > 0) {
-        findings.push({ tone: "good", body: <>No cross-engine or multi-host patterns detected in the current scope.</> });
-    }
 
     const pageLabel = page === "alert-detail"
         ? "Alerts"
@@ -316,8 +276,10 @@ function App() {
                                 <div>
                                     {selected.description && <p className="note">{selected.description}</p>}
 
-                                    <Panel title="Attack graph" note={`2-hop neighbourhood of ${selected.host}`}>
-                                        <GraphCanvas hostname={selected.host} height="260px" />
+                                    <Panel title="Attack graph" note="placeholder — React Flow">
+                                        <div className="canvas">
+                                            <span className="hint">neighbourhood of {selected.host}</span>
+                                        </div>
                                     </Panel>
                                 </div>
 
@@ -597,8 +559,12 @@ function App() {
 
                     {/* ── attack graph ── */}
                     {page === "graph" && (
-                        <Panel title="Attack graph" note="entity layer · Alert nodes excluded by design">
-                            <GraphCanvas height="460px" />
+                        <Panel title="Attack graph" note="placeholder — needs GET /graph">
+                            <div className="canvas" style={{ height: "420px" }}>
+                                <span className="hint">
+                                    {countDistinct("host")} hosts · {countDistinct("domain")} domains · {alerts.length} alerts in Neo4j
+                                </span>
+                            </div>
                         </Panel>
                     )}
 
@@ -763,7 +729,7 @@ function App() {
                                 <div className="kv">
                                     <KV k="Project" v="OmniGuard SOC" />
                                     <KV k="Alerts stored" v={String(alerts.length)} />
-                                    <KV k="Contract" v="AlertCreate v2.1" />
+                                    <KV k="Contract" v="AlertCreate v0.2" />
                                     <KV k="Theme" v={theme} />
                                     <KV k="Signed in as" v="A. Maharjan" />
                                 </div>

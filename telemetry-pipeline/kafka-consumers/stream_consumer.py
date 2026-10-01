@@ -115,7 +115,7 @@ class TelemetryStreamConsumer:
         dst_port = int(event.get("dst_port", event.get("id.resp_p", 443)))
         proto = str(event.get("proto", "tcp")).lower()
         service = str(event.get("service", event.get("app_proto", "ssl")))
-        host = str(event.get("host", event.get("host_id", src_ip)))
+        host = str(event.get("host_id", event.get("host", src_ip)))
         sni = event.get("sni", event.get("domain", event.get("ssl_server_name")))
 
         flow_key = f"{src_ip}:{src_port}->{dst_ip}:{dst_port}/{proto}"
@@ -236,7 +236,7 @@ class TelemetryStreamConsumer:
         )
 
         try:
-            with httpx.Client(timeout=5.0) as client:
+            with httpx.Client(timeout=0.5) as client:
                 resp = client.post(self.alert_api_url, json=alert)
                 if resp.status_code in (200, 201, 202):
                     logger.info(f"✅ Alert accepted by backend: {resp.json().get('alert_id', 'ok')}")
@@ -363,8 +363,8 @@ if __name__ == "__main__":
                 "dst_port": 443,
                 "proto": "tcp",
                 "service": "ssl",
-                "host": "WORKSTATION-CORP-42",
-                "domain": "api-telemetry-cdn.net",
+                "host_id": "WORKSTATION-CORP-42",
+                "sni": "api-telemetry-cdn.net",
                 "timestamp": ts,
                 "bytes": sz,
                 "direction": dr,
