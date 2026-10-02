@@ -1,4 +1,6 @@
-from fastapi import FastAPI 
+from fastapi import FastAPI, WebSocket,  WebSocketDisconnect
+from starlette.concurrency import run_in_threadpool
+from events import manager
 from models import Alert, AlertCreate
 from db import database
 from graph import ingest_alert, get_overview_graph
@@ -28,12 +30,18 @@ def get_health():
 # This is coming from our security system
 # They store the event here
 @app.post("/alerts", response_model=Alert, status_code=201)
-def create_alert(payload: AlertCreate) -> Alert:
+async def create_alert(payload: AlertCreate) -> Alert:
     alert = Alert(**payload.model_dump())
-    alerts_collection.insert_one(alert.model_dump())
+
+    # running in threadpool
+    await run_in_threadpool(alerts_collection.insert_one, alert.model_dump())
 
     # now creating the graph in neo4j as well
-    ingest_alert(alert)
+    # running in threadpool 
+    await run_in_threadpool(ingest_alert, alert)
+
+    # now broadcasting to all the websockets about the new alert
+    await manager.broadcast(alert.model_dump(mode="json"))
 
     return alert
 
@@ -47,3 +55,14 @@ def get_alerts() -> list[Alert]:
 @app.get("/graph")
 def get_graph() -> None:
     return get_overview_graph()
+
+
+# making the websocket connection for live alert in the frontend 
+@app.websocket("/ws/alerts")
+async def get_live_alerts(websocket: WebSocket) -> None: 
+    await manager.connect(websocket)
+    while True: 
+        try:
+            await websocket.receive_text()
+        except WebSocketDisconnect:
+            manager.disconnect(websocket)

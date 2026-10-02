@@ -78,6 +78,26 @@ function App() {
         .catch(err => setError(err.message))
     }, []);
 
+    useEffect(() => {
+        const socket = new WebSocket("ws://localhost:8000/ws/alerts")
+        let closing = false
+
+        socket.onmessage = (event) => {
+            const alert = JSON.parse(event.data)
+            setAlerts(prev => [alert, ...prev])
+        }
+
+        socket.onerror = () => { 
+            if (!closing) setError("Lost the live connection to the backend")
+        }
+
+        return () => {
+            closing = true 
+            socket.close() 
+        }
+
+    }, [])
+
     // set it on <html> so body and everything else inherit the palette
     useEffect(() => {
         document.documentElement.setAttribute("data-theme", theme);
