@@ -1,5 +1,10 @@
 import "./App.css"
 import { useState, useEffect } from 'react';
+import {
+    LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
+    Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
+    ShieldAlert, Globe, Check, TriangleAlert, Inbox, X,
+} from 'lucide-react';
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const SOURCES = ["verifyeye", "spectrac2", "manual"];
@@ -33,16 +38,16 @@ function timeAgo(ts) {
 
 const NAV = [
     { group: "Monitor", items: [
-        { id: "overview", icon: "▤", label: "Overview" },
-        { id: "alerts",   icon: "⚑", label: "Alerts", counted: true },
-        { id: "graph",    icon: "⬡", label: "Attack graph" },
+        { id: "overview", icon: LayoutDashboard, label: "Overview" },
+        { id: "alerts",   icon: Flag,            label: "Alerts", counted: true },
+        { id: "graph",    icon: Share2,          label: "Attack graph" },
     ]},
     { group: "Investigate", items: [
-        { id: "assets", icon: "▣", label: "Assets" },
+        { id: "assets", icon: Server, label: "Assets" },
     ]},
     { group: "System", items: [
-        { id: "engines",  icon: "◈", label: "Engines" },
-        { id: "settings", icon: "⚙", label: "Settings" },
+        { id: "engines",  icon: Cpu,      label: "Engines" },
+        { id: "settings", icon: Settings, label: "Settings" },
     ]},
 ];
 
@@ -129,7 +134,7 @@ function App() {
             <nav className={`nav ${navOpen ? "" : "collapsed"}`}>
                 <div className="nav-head">
                     <button className="burger" onClick={() => setNavOpen(!navOpen)} aria-label="Toggle navigation">
-                        <span />
+                        <Menu size={17} />
                     </button>
                     {navOpen && <div className="nav-name">OmniGuard <em>SOC</em></div>}
                 </div>
@@ -137,18 +142,21 @@ function App() {
                 {NAV.map(section => (
                     <div className="nav-group" key={section.group}>
                         <div className="nav-group-label">{section.group}</div>
-                        {section.items.map(item => (
-                            <button
-                                key={item.id}
-                                className={`nav-item ${page === item.id || (page === "alert-detail" && item.id === "alerts") ? "active" : ""}`}
-                                onClick={() => { setPage(item.id); setSelectedId(null); }}
-                                title={item.label}
-                            >
-                                <span className="nav-icon">{item.icon}</span>
-                                {navOpen && <span>{item.label}</span>}
-                                {navOpen && item.counted && <span className="nav-count">{alerts.length}</span>}
-                            </button>
-                        ))}
+                        {section.items.map(item => {
+                            const Icon = item.icon;
+                            return (
+                                <button
+                                    key={item.id}
+                                    className={`nav-item ${page === item.id || (page === "alert-detail" && item.id === "alerts") ? "active" : ""}`}
+                                    onClick={() => { setPage(item.id); setSelectedId(null); }}
+                                    title={item.label}
+                                >
+                                    <span className="nav-icon"><Icon /></span>
+                                    {navOpen && <span>{item.label}</span>}
+                                    {navOpen && item.counted && <span className="nav-count">{alerts.length}</span>}
+                                </button>
+                            );
+                        })}
                     </div>
                 ))}
 
@@ -183,14 +191,19 @@ function App() {
                         title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
                         aria-label="Toggle theme"
                     >
-                        {theme === "dark" ? "☀" : "☾"}
+                        {theme === "dark" ? <Sun /> : <Moon />}
                     </button>
                     <span className="clock">{new Date().toLocaleDateString()}</span>
                 </header>
 
                 <div className="content">
 
-                    {error && <div className="error">Could not reach the backend — {error}</div>}
+                    {error && (
+                        <div className="error">
+                            <TriangleAlert size={15} />
+                            Could not reach the backend — {error}
+                        </div>
+                    )}
 
                     {/* ── alerts list ── */}
                     {page === "alerts" && (
@@ -306,69 +319,59 @@ function App() {
                     {/* ── overview ── */}
                     {page === "overview" && (
                         <>
-                            <div className="globalbar">
-                                <span className="group">
-                                    <span className="group-label">Severity</span>
-                                    <button className={`chip ${filter === null ? "on" : ""}`} onClick={() => setFilter(null)}>all</button>
-                                    {SEVERITIES.map(sev => (
-                                        <button key={sev} className={`chip ${filter === sev ? "on" : ""}`} onClick={() => setFilter(sev)}>
-                                            {sev}
-                                        </button>
-                                    ))}
-                                </span>
-                                <span className="divider" />
-                                <span className="group">
-                                    <span className="group-label">Engine</span>
-                                    <button className={`chip ${srcFilter === null ? "on" : ""}`} onClick={() => setSrcFilter(null)}>all</button>
-                                    {SOURCES.map(src => (
-                                        <button key={src} className={`chip ${srcFilter === src ? "on" : ""}`} onClick={() => setSrcFilter(src)}>
-                                            {src}
-                                        </button>
-                                    ))}
+                            <div className="hero">
+                                <div className="hero-main">
+                                    <h1 className="hero-title">Shift handover</h1>
+                                    <p className="hero-sub">
+                                        {alerts.length === 0
+                                            ? "Nothing has come in yet. The queue is clear."
+                                            : <>Everything open right now across <b>{countDistinct("host")}</b> host{countDistinct("host") === 1 ? "" : "s"} and <b>{Object.keys(engineCounts).length}</b> reporting engine{Object.keys(engineCounts).length === 1 ? "" : "s"}.</>}
+                                    </p>
+                                </div>
+                                <span className="live"><span className="live-dot" />Live</span>
+                            </div>
+
+                            <div className="toolbar">
+                                <Seg label="Severity" value={filter} onChange={setFilter} options={SEVERITIES} />
+                                <Seg label="Engine" value={srcFilter} onChange={setSrcFilter} options={SOURCES} />
+                                <span className="toolbar-grow" />
+                                <span className="toolbar-count">
+                                    {scoped.length === alerts.length
+                                        ? `${alerts.length} alerts`
+                                        : `${scoped.length} of ${alerts.length}`}
                                 </span>
                                 {(filter || srcFilter) && (
                                     <button className="reset" onClick={() => { setFilter(null); setSrcFilter(null); }}>
-                                        Clear filters
+                                        <X /> Clear
                                     </button>
                                 )}
                             </div>
 
-                            <div className="section-head">
-                                <span className="section-n">1</span>
-                                <span className="section-title">Shift handover at a glance</span>
-                                <span className="section-note">
-                                    {scoped.length === alerts.length
-                                        ? `all ${alerts.length} alerts`
-                                        : `${scoped.length} of ${alerts.length} alerts`}
-                                </span>
-                            </div>
-
                             <div className="stats">
-                                <Stat label="Total alerts" value={alerts.length} />
-                                <Stat label="Critical" value={countOf("critical")} tone="critical" />
-                                <Stat label="Hosts affected" value={countDistinct("host")} />
-                                <Stat label="Domains seen" value={countDistinct("domain")} />
-                                <Stat label="Untriaged" value={alerts.filter(a => a.status === "new").length} tone="high" />
+                                <Stat icon={Flag}         label="Total alerts"   value={alerts.length} foot="in the queue" />
+                                <Stat icon={ShieldAlert}  label="Critical"       value={countOf("critical")} tone="critical" foot="need triage first" />
+                                <Stat icon={Server}       label="Hosts affected" value={countDistinct("host")} foot="seen in alerts" />
+                                <Stat icon={Globe}        label="Domains seen"   value={countDistinct("domain")} foot="contacted externally" />
+                                <Stat icon={Inbox}        label="Untriaged"      value={alerts.filter(a => a.status === "new").length} tone="high" foot="still untouched" />
                             </div>
 
                             <Attention findings={findings} />
 
                             <div className="section-head">
-                                <span className="section-n">2</span>
                                 <span className="section-title">Alert flow &amp; triage</span>
                             </div>
 
                             <div className="cards">
 
                                 <Card
-                                    icon="⚑"
+                                    icon={Flag}
                                     title="Recent alerts"
                                     action={alerts.length ? "View all" : null}
                                     onAction={() => { setFilter(null); setPage("alerts"); }}
                                 >
                                     {recent.length === 0 ? (
                                         <CardEmpty
-                                            glyph="⚑"
+                                            glyph={Flag}
                                             text="No alerts yet"
                                             cta="Post one in Swagger"
                                             onCta={() => window.open("http://localhost:8000/docs", "_blank")}
@@ -391,13 +394,13 @@ function App() {
                                 </Card>
 
                                 <Card
-                                    icon="⬤"
+                                    icon={ShieldAlert}
                                     title="Critical alerts"
                                     action={countOf("critical") ? "View all" : null}
                                     onAction={() => { setFilter("critical"); setPage("alerts"); }}
                                 >
                                     {criticals.length === 0 ? (
-                                        <CardEmpty glyph="✓" text="No critical alerts open" />
+                                        <CardEmpty glyph={Check} text="No critical alerts open" />
                                     ) : criticals.map(a => (
                                         <button className="item" key={a.alert_id} onClick={() => openAlert(a.alert_id)}>
                                             <span className="item-mark critical" />
@@ -414,13 +417,13 @@ function App() {
                                 </Card>
 
                                 <Card
-                                    icon="▣"
+                                    icon={Server}
                                     title="Affected hosts"
                                     action={countDistinct("host") ? "View all" : null}
                                     onAction={() => { setAssetTab("hosts"); setPage("assets"); }}
                                 >
                                     {topN("host", 3).length === 0 ? (
-                                        <CardEmpty glyph="▣" text="No hosts seen yet" />
+                                        <CardEmpty glyph={Server} text="No hosts seen yet" />
                                     ) : topN("host", 3).map(([host, n]) => {
                                         const mine = alerts.filter(a => a.host === host);
                                         const worst = SEVERITIES.find(s => mine.some(a => a.severity === s));
@@ -441,13 +444,13 @@ function App() {
                                 </Card>
 
                                 <Card
-                                    icon="⬡"
+                                    icon={Share2}
                                     title="Attack graph"
                                     action={alerts.length ? "Open" : null}
                                     onAction={() => setPage("graph")}
                                 >
                                     <CardEmpty
-                                        glyph="⬡"
+                                        glyph={Share2}
                                         text={alerts.length
                                             ? `${countDistinct("host")} hosts and ${countDistinct("domain")} domains in the graph`
                                             : "Graph is empty"}
@@ -457,7 +460,7 @@ function App() {
                                 </Card>
 
                                 <Card
-                                    icon="◈"
+                                    icon={Cpu}
                                     title="Detection engines"
                                     action="View all"
                                     onAction={() => setPage("engines")}
@@ -481,13 +484,13 @@ function App() {
                                 </Card>
 
                                 <Card
-                                    icon="◍"
+                                    icon={Globe}
                                     title="Contacted domains"
                                     action={countDistinct("domain") ? "View all" : null}
                                     onAction={() => { setAssetTab("domains"); setPage("assets"); }}
                                 >
                                     {topN("domain", 3).length === 0 ? (
-                                        <CardEmpty glyph="◍" text="No domains recorded" />
+                                        <CardEmpty glyph={Globe} text="No domains recorded" />
                                     ) : topN("domain", 3).map(([domain, n]) => {
                                         const mine = alerts.filter(a => a.domain === domain);
                                         const worst = SEVERITIES.find(s => mine.some(a => a.severity === s));
@@ -514,23 +517,15 @@ function App() {
                             </div>
 
                             <div className="section-head">
-                                <span className="section-n">3</span>
                                 <span className="section-title">Coverage</span>
                             </div>
 
                             <div className="cols">
                                 <Panel title="Severity distribution" note={`${scoped.length} alerts`}>
-                                    <div className="rank">
-                                        {SEVERITIES.map(sev => (
-                                            <div className="rank-row" key={sev} title={`${sev}: ${countOf(sev)}`}>
-                                                <span className="rank-key">{sev}</span>
-                                                <span className="rank-n">{countOf(sev)}</span>
-                                                <span className="rank-track">
-                                                    <span className={`rank-fill sev-${sev}`} style={{ width: pct(countOf(sev), maxCount) }} />
-                                                </span>
-                                            </div>
-                                        ))}
-                                    </div>
+                                    <Donut
+                                        total={scoped.length}
+                                        slices={SEVERITIES.map(sev => ({ key: sev, n: countOf(sev) }))}
+                                    />
                                 </Panel>
 
                                 <Panel title="MITRE techniques">
@@ -750,7 +745,7 @@ function Attention({ findings = [] }) {
     return (
         <div className="attention">
             <div className="attention-head">
-                <span className="pin">▸</span>
+                <span className="pin"><AlertTriangle /></span>
                 What needs attention
             </div>
             <ul>
@@ -765,14 +760,16 @@ function Attention({ findings = [] }) {
 }
 
 /* summary card: a few rows plus a "view all" into the full page */
-function Card({ icon, title, action, onAction, children }) {
+function Card({ icon: Icon, title, action, onAction, children }) {
     return (
         <section className="card">
             <div className="card-head">
-                <span className="card-icon">{icon}</span>
+                <span className="card-icon"><Icon /></span>
                 <span className="card-title">{title}</span>
                 {action && (
-                    <button className="card-action" onClick={onAction}>{action} →</button>
+                    <button className="card-action" onClick={onAction}>
+                        {action} <ArrowRight />
+                    </button>
                 )}
             </div>
             <div className="card-body">{children}</div>
@@ -780,12 +777,12 @@ function Card({ icon, title, action, onAction, children }) {
     );
 }
 
-function CardEmpty({ glyph, text, cta, onCta }) {
+function CardEmpty({ glyph: Glyph, text, cta, onCta }) {
     return (
         <div className="card-empty">
-            <span className="glyph">{glyph}</span>
+            <span className="glyph"><Glyph /></span>
             <p>{text}</p>
-            {cta && <button className="cta" onClick={onCta}>{cta} ↗</button>}
+            {cta && <button className="cta" onClick={onCta}>{cta} <ExternalLink /></button>}
         </div>
     );
 }
@@ -797,7 +794,7 @@ function Panel({ title, note, children, flush = false, defaultOpen = true }) {
         <section className={`panel ${open ? "" : "closed"}`}>
             <div className="panel-head">
                 <button className="panel-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>
-                    <span className="chev">▼</span>
+                    <span className="chev"><ChevronDown /></span>
                     <span className="panel-title">{title}</span>
                     {note && <span className="panel-note">{note}</span>}
                 </button>
@@ -807,11 +804,106 @@ function Panel({ title, note, children, flush = false, defaultOpen = true }) {
     );
 }
 
-function Stat({ label, value, tone }) {
+function Stat({ icon: Icon, label, value, tone, foot }) {
     return (
         <div className="stat">
-            <div className="stat-label">{label}</div>
+            <div className="stat-head">
+                <span className="stat-label">{label}</span>
+                {Icon && <span className={`stat-icon ${tone || ""}`}><Icon /></span>}
+            </div>
             <div className={`stat-value ${tone || ""}`}>{value}</div>
+            {foot && <div className="stat-foot">{foot}</div>}
+        </div>
+    );
+}
+
+/* one segmented control: "All" plus every option, joined into a single pill */
+function Seg({ label, value, onChange, options }) {
+    return (
+        <div className="seg-group">
+            <span className="seg-label">{label}</span>
+            <div className="seg" role="group" aria-label={label}>
+                <button
+                    className={`seg-btn ${value === null ? "on" : ""}`}
+                    onClick={() => onChange(null)}
+                    aria-pressed={value === null}
+                >
+                    All
+                </button>
+                {options.map(o => (
+                    <button
+                        key={o}
+                        className={`seg-btn ${value === o ? "on" : ""}`}
+                        onClick={() => onChange(o)}
+                        aria-pressed={value === o}
+                    >
+                        {o}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+/* part-to-whole ring. Presentational — it draws whatever slices it is handed.
+   Each slice: { key, n }; the key doubles as the CSS class for its colour. */
+function Donut({ slices, total, size = 132, thickness = 14 }) {
+    const r = (size - thickness) / 2;
+    const circumference = 2 * Math.PI * r;
+    const sum = slices.reduce((acc, s) => acc + s.n, 0);
+
+    let offset = 0;
+    const arcs = slices
+        .filter(s => s.n > 0)
+        .map(s => {
+            const len = (s.n / sum) * circumference;
+            const arc = { ...s, len, offset };
+            offset += len;
+            return arc;
+        });
+
+    return (
+        <div className="donut-wrap">
+            <div className="donut" style={{ width: size, height: size }}>
+                <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
+                    {/* track, so an empty or partial ring still reads as a ring */}
+                    <circle
+                        className="donut-track"
+                        cx={size / 2} cy={size / 2} r={r}
+                        fill="none" strokeWidth={thickness}
+                    />
+                    {arcs.map(a => (
+                        <circle
+                            key={a.key}
+                            className={`donut-arc sev-${a.key}`}
+                            cx={size / 2} cy={size / 2} r={r}
+                            fill="none"
+                            strokeWidth={thickness}
+                            strokeDasharray={`${a.len} ${circumference - a.len}`}
+                            strokeDashoffset={-a.offset}
+                            /* start at 12 o'clock instead of 3 */
+                            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+                        >
+                            <title>{`${a.key}: ${a.n}`}</title>
+                        </circle>
+                    ))}
+                </svg>
+                <div className="donut-center">
+                    <span className="donut-total">{total}</span>
+                    <span className="donut-caption">alerts</span>
+                </div>
+            </div>
+
+            <div className="donut-legend">
+                {slices.map(s => (
+                    <div className="donut-row" key={s.key}>
+                        <span className={`donut-swatch sev-${s.key}`} />
+                        <span className="donut-key">{s.key}</span>
+                        <span className="donut-n">{s.n}</span>
+                        <span className="donut-pct">{sum ? Math.round((s.n / sum) * 100) : 0}%</span>
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }
