@@ -47,6 +47,19 @@
   --eng-2: #3fb97a;
   --eng-3: #a97fd4;
 
+  /* attack-graph node types. Shape is the primary encoder; colour backs it up.
+     Internal assets sit in the cool range, external infrastructure in the warm
+     range, so "inside vs outside" reads before you parse any single node. */
+  --g-host:      #4f9ae0;
+  --g-user:      #3fb97a;
+  --g-process:   #8b7cf6;
+  --g-ip:        #46b8c4;
+  --g-domain:    #ef8c3e;
+  --g-url:       #e0696f;
+  --g-technique: #9aa1ab;
+  --g-edge:      #39414b;
+  --g-edge-hl:   #8b7cf6;
+
   /* a 1px top highlight is what separates cards in the dark — shadows don't read */
   --edge:     inset 0 1px 0 rgba(255, 255, 255, 0.035);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -109,6 +122,16 @@
   --eng-1: #2a6cc0;
   --eng-2: #1c8a53;
   --eng-3: #7a4cb5;
+
+  --g-host:      #2f7fcc;
+  --g-user:      #1f9960;
+  --g-process:   #6553e0;
+  --g-ip:        #1f98a6;
+  --g-domain:    #d9761f;
+  --g-url:       #cf4f56;
+  --g-technique: #78808b;
+  --g-edge:      #c8cfd8;
+  --g-edge-hl:   #6553e0;
 
   --edge:      inset 0 1px 0 rgba(255, 255, 255, 0.9);
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
@@ -1032,6 +1055,114 @@ button { font: inherit; color: inherit; }
   padding: 5px 13px;
   box-shadow: var(--shadow-md);
 }
+
+/* ─── attack graph ──────────────────────────────── */
+
+.graph { display: flex; flex-direction: column; }
+
+/* fullscreen is done in CSS rather than the Fullscreen API so the dashboard's
+   own theming and fonts carry over, and Escape stays ours to handle */
+.graph.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--surface);
+  padding: 16px 20px 20px;
+}
+
+.graph.fullscreen .graph-canvas {
+  height: auto;
+  flex: 1;
+}
+
+.graph-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  padding: 4px 9px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--dim);
+  font-size: var(--t-xs);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+
+.graph-expand svg { width: 13px; height: 13px; stroke-width: 2; }
+.graph-expand:hover { background: var(--hover); color: var(--text); }
+
+.graph-esc {
+  font-family: var(--mono);
+  font-size: var(--t-2xs);
+  color: var(--faint);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 8px;
+}
+
+.graph-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 0 0 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-xs);
+  color: var(--dim);
+}
+
+/* each swatch is clipped to the same silhouette cytoscape draws for that
+   node type, so the legend reads as a key to the shapes and not just colours */
+.graph-legend-dot {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+
+.graph-legend-dot.shape-host      { border-radius: 2px; }
+.graph-legend-dot.shape-user      { border-radius: 50%; }
+.graph-legend-dot.shape-process   { clip-path: polygon(50% 0%, 100% 100%, 0% 100%); }
+.graph-legend-dot.shape-ip        { clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); }
+.graph-legend-dot.shape-domain    { clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); }
+.graph-legend-dot.shape-url       { clip-path: polygon(0% 0%, 70% 0%, 100% 50%, 70% 100%, 0% 100%); }
+.graph-legend-dot.shape-technique {
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%,
+                     79% 91%, 50% 70%, 21% 91%, 32% 57%,
+                     2% 35%, 39% 35%);
+}
+
+.graph-legend-note {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--faint);
+}
+
+.graph-canvas {
+  height: 540px;
+  width: 100%;
+  border-radius: var(--r-md);
+  /* plain fill, no dot grid — the dots stay put while the graph pans under
+     them, which reads as broken */
+  background-color: var(--bg);
+  /* the canvas pans, so it reads as draggable. JS swaps in `pointer` over a
+     node and `grabbing` while something is being dragged. */
+  cursor: grab;
+}
+
+.graph-canvas:active { cursor: grabbing; }
 
 /* ─── bars ──────────────────────────────────────── */
 

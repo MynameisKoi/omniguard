@@ -1,7 +1,7 @@
 from fastapi import FastAPI 
 from models import Alert, AlertCreate
 from db import database
-from graph import ingest_alert
+from graph import ingest_alert, get_overview_graph
 
 from config import CORS_ORIGINS
 
@@ -42,3 +42,8 @@ def create_alert(payload: AlertCreate) -> Alert:
 def get_alerts() -> list[Alert]:
     alerts: list[Alert] = list(alerts_collection.find({}, {"_id": 0}))
     return alerts
+
+# This is for graph to be shown in the frontend 
+@app.get("/graph")
+def get_graph() -> None:
+    return get_overview_graph()

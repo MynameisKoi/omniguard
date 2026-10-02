@@ -6,6 +6,36 @@ from models import Alert
 auth = (NEO4J_USER, NEO4J_PASSWORD)
 driver = GraphDatabase.driver(NEO4J_URI, auth=auth)
 
+
+# this key value dictionary is to make sure that we can label the nodes
+NODE_KEY = {
+    "Host": "hostname",
+    "User": "username", 
+    "Domain": "domain_name",
+    "IP": "address", 
+    "URL": "url", 
+    "Process": "process_id", 
+    "Technique": "id",
+}
+
+LABEL_KEY = {"Process": "name"}
+
+
+
+# # HELPER function 
+def _get_node_payload(node) -> tuple:
+    # # we are extracting all the details of this node and then sending it back 
+    label = list(node.labels)[0] # first item is what we want
+    id_key = NODE_KEY[label]
+
+    # only for process 
+    label_key = LABEL_KEY.get(label, id_key)
+    node_id = f"{label}:{node[id_key]}"
+
+    return node_id, {"id": node_id, "type": label, "label": node[label_key]}
+
+
+
 # wiring the new function for ensuring that we have required schemas before building the graph
 def ensure_schema():
     # these are the rules that the schema must follow
@@ -213,3 +243,54 @@ def _write_alert(tx, alert: Alert):
 def ingest_alert(alert: Alert):
     with driver.session() as session:
         session.execute_write(_write_alert, alert)
+
+
+# getting the overview of the graph 
+def _read_overview(tx): 
+    results = tx.run(
+        """
+            MATCH (a)-[r:HAS_IP|LOGGED_INTO|CONNECTED_TO_DOMAIN|ACCESSED_URL
+            |SPAWNED_PROCESS|BELONGS_TO|INITIATED_FLOW|HOSTS_DOMAIN]->(b)
+            RETURN a, r, b
+        """
+    ) 
+
+    # now going to use the helper function and getting the nodes back
+    # these return nodes and edges 
+    nodes = {} 
+    edges = []
+
+    for res in results: 
+        # get each objects 
+        # # first the record (first node), second the relationship and then the record(last node)
+        record_src, relationship, record_dst = res 
+
+        record_src_id, record_src_payload = _get_node_payload(record_src)
+        record_dst_id, record_dst_payload = _get_node_payload(record_dst)
+
+        # now we are storing these payloads so that they are not duplicated
+        nodes[record_src_id] = record_src_payload
+        nodes[record_dst_id] = record_dst_payload
+
+        # then we will make the edge as well
+        edges.append({
+            "id": f"{record_src_id}->{record_dst_id}",
+            "source": record_src_id,
+            "target": record_dst_id,
+            "type":   relationship.type,
+        })
+
+
+    return {"nodes": list(nodes.values()), "edges": edges}
+
+
+
+
+# the function that gets called in the main function and also called the private function here
+def get_overview_graph():
+    with driver.session() as session: 
+        return session.execute_read(_read_overview)
+
+
+if __name__ == "__main__":
+    print(get_overview_graph())

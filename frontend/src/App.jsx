@@ -1,5 +1,6 @@
 import "./App.css"
 import { useState, useEffect } from 'react';
+import GraphCanvas from './GraphCanvas';
 import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
@@ -554,12 +555,11 @@ function App() {
 
                     {/* ── attack graph ── */}
                     {page === "graph" && (
-                        <Panel title="Attack graph" note="placeholder — needs GET /graph">
-                            <div className="canvas" style={{ height: "420px" }}>
-                                <span className="hint">
-                                    {countDistinct("host")} hosts · {countDistinct("domain")} domains · {alerts.length} alerts in Neo4j
-                                </span>
-                            </div>
+                        <Panel
+                            title="Attack graph"
+                            note={`${countDistinct("host")} hosts · ${countDistinct("domain")} domains`}
+                        >
+                            <GraphCanvas />
                         </Panel>
                     )}
 
