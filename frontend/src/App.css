@@ -1539,6 +1539,9 @@ button { font: inherit; color: inherit; }
 /* dashboard preview — no legend, no expand button, shorter canvas */
 .graph.compact .graph-canvas { height: 300px; }
 
+/* the alert-detail graph gets more room — it's the main thing on that view */
+.split .graph.compact .graph-canvas { height: 560px; }
+
 .td-clip {
   max-width: 1px;
   overflow: hidden;

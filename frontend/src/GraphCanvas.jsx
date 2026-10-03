@@ -4,7 +4,7 @@ import { API_URL } from "./config"
 import { Maximize2, Minimize2 } from 'lucide-react'
 import { buildGraphStyle, attachGraphInteractions, NODE_TYPES, TOKEN } from './graphStyle'
 
-function GraphCanvas({ compact = false, refreshKey}) {
+function GraphCanvas({ compact = false, refreshKey, host}) {
     // going to write useRef
     const containerRef = useRef(null);
 
@@ -20,12 +20,15 @@ function GraphCanvas({ compact = false, refreshKey}) {
     // adding useEffect here 
     useEffect(() => {
         // fetching the backend for the graph data
-        fetch(`${API_URL}/graph`)
+        const url = host 
+            ? `${API_URL}/graph/host/${encodeURIComponent(host)}`
+            : `${API_URL}/graph`
+        fetch(url)
         .then(res => res.json())
         .then(data => setGraph(data))
         .catch(err => setError(err.message))
         .finally(() => setLoading(false))
-    }, [refreshKey])
+    }, [refreshKey, host])
 
     // create the cytoscape instance ONCE. If we rebuilt it on every graph
     // change, the whole layout would reshuffle each time an alert arrives —
@@ -52,8 +55,27 @@ function GraphCanvas({ compact = false, refreshKey}) {
             attributeFilter: ["data-theme"],
         })
 
+        // cytoscape caches the container size at init. On the detail page and
+        // the dashboard the container is often 0-sized for a frame, so nodes
+        // get laid out against nothing and render off-screen. Watch the size
+        // and re-fit once it has real dimensions.
+        let lastW = 0, lastH = 0
+        const sizer = new ResizeObserver(() => {
+            const el = containerRef.current
+            if (!el || !cyRef.current) return
+            const { clientWidth: w, clientHeight: h } = el
+            if (w === lastW && h === lastH) return
+            lastW = w; lastH = h
+            if (w > 0 && h > 0) {
+                cy.resize()
+                if (cy.nodes().length) cy.fit(undefined, 40)
+            }
+        })
+        sizer.observe(containerRef.current)
+
         return () => {
             observer.disconnect()
+            sizer.disconnect()
             cy.destroy()
             cyRef.current = null
         }

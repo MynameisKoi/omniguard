@@ -35,6 +35,36 @@ def _get_node_payload(node) -> tuple:
     return node_id, {"id": node_id, "type": label, "label": node[label_key]}
 
 
+# helper function to build the graph 
+def _build_graph(results):
+    # now going to use the helper function and getting the nodes back
+    # these return nodes and edges 
+    nodes = {} 
+    edges = []
+
+    for res in results: 
+        # get each objects 
+        # # first the record (first node), second the relationship and then the record(last node)
+        record_src, relationship, record_dst = res 
+
+        record_src_id, record_src_payload = _get_node_payload(record_src)
+        record_dst_id, record_dst_payload = _get_node_payload(record_dst)
+
+        # now we are storing these payloads so that they are not duplicated
+        nodes[record_src_id] = record_src_payload
+        nodes[record_dst_id] = record_dst_payload
+
+        # then we will make the edge as well
+        edges.append({
+            "id": f"{record_src_id}->{record_dst_id}",
+            "source": record_src_id,
+            "target": record_dst_id,
+            "type":   relationship.type,
+        })
+
+
+    return {"nodes": list(nodes.values()), "edges": edges}
+    
 
 # wiring the new function for ensuring that we have required schemas before building the graph
 def ensure_schema():
@@ -255,36 +285,22 @@ def _read_overview(tx):
         """
     ) 
 
-    # now going to use the helper function and getting the nodes back
-    # these return nodes and edges 
-    nodes = {} 
-    edges = []
+    return _build_graph(results)
 
-    for res in results: 
-        # get each objects 
-        # # first the record (first node), second the relationship and then the record(last node)
-        record_src, relationship, record_dst = res 
+# now the function to read each alert 
+def _read_host(tx, hostname):
+    results = tx.run(
+        """
+        MATCH (h:Host {hostname: $hostname})
+            -[rels:HAS_IP|LOGGED_INTO|CONNECTED_TO_DOMAIN|ACCESSED_URL
+                    |SPAWNED_PROCESS|BELONGS_TO|INITIATED_FLOW|HOSTS_DOMAIN*1..2]-(far)
+        UNWIND rels AS r
+        RETURN DISTINCT startNode(r) AS a, r, endNode(r) AS b
+        """,
+        hostname=hostname,
+    )
 
-        record_src_id, record_src_payload = _get_node_payload(record_src)
-        record_dst_id, record_dst_payload = _get_node_payload(record_dst)
-
-        # now we are storing these payloads so that they are not duplicated
-        nodes[record_src_id] = record_src_payload
-        nodes[record_dst_id] = record_dst_payload
-
-        # then we will make the edge as well
-        edges.append({
-            "id": f"{record_src_id}->{record_dst_id}",
-            "source": record_src_id,
-            "target": record_dst_id,
-            "type":   relationship.type,
-        })
-
-
-    return {"nodes": list(nodes.values()), "edges": edges}
-
-
-
+    return _build_graph(results)
 
 # the function that gets called in the main function and also called the private function here
 def get_overview_graph():
@@ -292,5 +308,9 @@ def get_overview_graph():
         return session.execute_read(_read_overview)
 
 
-if __name__ == "__main__":
-    print(get_overview_graph())
+# now write the host graph 
+def get_host_graph(hostname):
+    with driver.session() as session: 
+        return session.execute_read(_read_host, hostname)
+
+

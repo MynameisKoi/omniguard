@@ -3,7 +3,7 @@ from starlette.concurrency import run_in_threadpool
 from events import manager
 from models import Alert, AlertCreate
 from db import database
-from graph import ingest_alert, get_overview_graph
+from graph import ingest_alert, get_overview_graph, get_host_graph
 
 from config import CORS_ORIGINS
 
@@ -55,6 +55,11 @@ def get_alerts() -> list[Alert]:
 @app.get("/graph")
 def get_graph() -> None:
     return get_overview_graph()
+
+# This endpoint is for individual alerts and for its graph 
+@app.get("/graph/host/{hostname}")
+def get_host_graph_route(hostname: str):
+    return get_host_graph(hostname)
 
 
 # making the websocket connection for live alert in the frontend 

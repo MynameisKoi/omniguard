@@ -497,10 +497,8 @@ function App() {
                                 <div>
                                     {selected.description && <p className="note">{selected.description}</p>}
 
-                                    <Panel title="Attack graph" note="placeholder — React Flow">
-                                        <div className="canvas">
-                                            <span className="hint">neighbourhood of {selected.host}</span>
-                                        </div>
+                                    <Panel title="Attack graph" note={`neighbourhood of ${selected.host}`}>
+                                        <GraphCanvas host={selected.host} refreshKey={alerts.length} compact />
                                     </Panel>
                                 </div>
 
