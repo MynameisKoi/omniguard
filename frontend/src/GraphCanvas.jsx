@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState }  from 'react'
 import cytoscape from 'cytoscape'
+import { API_URL } from "./config"
 import { Maximize2, Minimize2 } from 'lucide-react'
 import { buildGraphStyle, attachGraphInteractions, NODE_TYPES, TOKEN } from './graphStyle'
 
@@ -19,7 +20,7 @@ function GraphCanvas({ compact = false }) {
     // adding useEffect here 
     useEffect(() => {
         // fetching the backend for the graph data
-        fetch("http://localhost:8000/graph")
+        fetch(`${API_URL}/graph`)
         .then(res => res.json())
         .then(data => setGraph(data))
         .catch(err => setError(err.message))

@@ -1,4 +1,5 @@
 import "./App.css"
+import { API_URL, WS_URL } from "./config"
 import { useState, useEffect } from 'react';
 import GraphCanvas from './GraphCanvas';
 import {
@@ -92,14 +93,14 @@ function App() {
 
     // we will fetch the alerts from backend
     useEffect(() => {
-        fetch("http://localhost:8000/alerts")
+        fetch(`${API_URL}/alerts`)
         .then((res) => res.json())
         .then((data) => setAlerts(data))
         .catch(err => setError(err.message))
     }, []);
 
     useEffect(() => {
-        const socket = new WebSocket("ws://localhost:8000/ws/alerts")
+        const socket = new WebSocket(`${WS_URL}/ws/alerts`)
         let closing = false
 
         socket.onmessage = (event) => {
