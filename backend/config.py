@@ -25,4 +25,4 @@ if not NEO4J_PASSWORD:
     )
 
 # who can call this API from a browser
-CORS_ORIGINS = ["http://localhost:5173"]
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
