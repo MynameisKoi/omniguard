@@ -202,48 +202,78 @@ Physical BadUSB Drop      Encrypted Beaconing      Internal Lateral Pivot     Ai
 
 ## 7. Quickstart & Installation
 
-### Prerequisites
-* Docker & Docker Compose (v2.20+)
-* Python 3.11+
-* Node.js 18+ & npm
-* Ollama installed locally with the target model:
-  ```bash
-  ollama pull llama3
-  ```
+> **What runs today.** The platform core — the alert API, the MongoDB alert
+> store, the Neo4j attack graph, and the React dashboard — runs from one
+> `docker compose up`. The detection engines (VerifyEye, SpectraC2) are
+> developed in their own folders and connect to the API over HTTP; they are not
+> part of the compose stack yet. For the full, always-current setup guide see
+> [`docs/running-locally.md`](docs/running-locally.md).
 
-### 1. Clone Repository & Setup Environment
+### The fast way — Docker
+
+Needs **Docker Desktop** running.
+
 ```bash
-git clone https://github.com/your-org/omniguard-soc.git
-cd omniguard-soc
-cp .env.example .env
+git clone <this-repo>
+cd omniguard
+docker compose up -d --build
 ```
 
-### 2. Boot Infrastructure Stack
-Launch Kafka, Redis, Neo4j, and core microservices:
-```bash
-docker-compose up -d neo4j kafka redis
-```
-* Neo4j Browser will be available at `http://localhost:7474` (Default Auth: `neo4j/omniguard_secret`).
+| Service   | URL                          |
+|-----------|------------------------------|
+| Dashboard | http://localhost:8080        |
+| API + Swagger | http://localhost:8000/docs |
+| Neo4j browser | http://localhost:7474    |
 
-### 3. Launch Backend Microservices
-```bash
-# Setup Python virtual environment
-python3 -m venv venv
-source venv/bin/activate
-pip install -r spectrac2-engine/requirements.txt
-pip install -r graph-triage-core/requirements.txt
+Stop with `docker compose down` (data persists in named volumes).
 
-# Start SpectraC2 & Graph Triage APIs
-uvicorn graph-triage-core.api.main:app --host 0.0.0.0 --port 8000 --reload
+The Neo4j password is set in `docker-compose.yml`. The backend reaches the
+databases by service name (`mongo`, `neo4j`), not localhost — inside a container
+localhost is the container itself.
+
+### The manual way — for development
+
+Separate processes, no rebuild on each change. Needs Python 3.11+, Node 18+,
+MongoDB, and Neo4j Desktop. Full steps in
+[`docs/running-locally.md`](docs/running-locally.md); in short:
+
+```bash
+# databases: MongoDB via brew services, Neo4j via the desktop app
+# backend  — terminal 1
+cd backend && python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env            # then set NEO4J_PASSWORD
+uvicorn main:app --reload       # API on :8000
+
+# frontend — terminal 2
+cd frontend && npm install && npm run dev   # dashboard on :5173
 ```
 
-### 4. Start the Unified React Dashboard
+### Sending a test alert
+
+Any engine — or you, from Swagger — posts to `POST /alerts`. The contract is one
+shape for every engine, documented in
+[`schemas/omniguard_data_schemas.json`](schemas/omniguard_data_schemas.json).
+
 ```bash
-cd frontend-dashboard
-npm install
-npm run dev
+curl -X POST http://localhost:8000/alerts -H 'Content-Type: application/json' -d '{
+  "source": "manual",
+  "event_type": "suspicious_login",
+  "severity": "high",
+  "host": "WS-FINANCE-04"
+}'
 ```
-Navigate to `http://localhost:3000` to view the active incident console.
+
+It appears on the dashboard live, and in the attack graph.
+
+### Ollama (local LLM triage)
+
+Planned, not wired in yet. When it lands it runs locally — zero cloud egress,
+in line with the project's data-sovereignty goal:
+
+```bash
+ollama pull llama3
+```
 
 ---
 

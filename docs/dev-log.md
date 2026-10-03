@@ -4,6 +4,69 @@ My notes while building the OmniGuard dashboard + backend + frontend + MongoDB. 
 
 ---
 
+
+## Thu–Fri, Oct 2 2026
+
+Big week. Got the graph working end to end, made alerts live, rebuilt the
+dashboard, and dockerized everything. Wrote all of this myself, used Claude as a
+teacher to explain the parts I hadn't done before (neo4j reads, websockets,
+docker).
+
+### Attack graph
+
+Built `GET /graph` — reads the entity graph out of Neo4j and returns
+`{nodes, edges}` for the frontend. Key decision: filter by relationship type,
+not node label, so Alert nodes never leak into the graph. Learned the hard way
+why node ids have to be mine (`Host:LAPTOP-10`) and not neo4j's element id —
+those change on restart.
+
+Then `GET /graph/host/{hostname}` for the per-alert view — one host's
+neighbourhood at depth 2. Depth 2 is nice because it pulls in the *other* hosts
+that touched the same C2 / phishing domain, which is exactly the thing a list of
+alerts can't show you.
+
+Pulled the record→nodes/edges loop into one `_build_graph` helper so the two
+read functions don't repeat it.
+
+Frontend uses Cytoscape — shape per entity type, size by how many things a node
+connects to, click to highlight a node's neighbourhood. Took a while to get the
+live-update right: every new alert was re-running the layout and the whole graph
+jumped. Fixed it by locking existing nodes so only new ones get placed.
+
+### Live alerts
+
+WebSocket at `/ws/alerts`. Small connection manager that keeps the list of open
+sockets and broadcasts each new alert after it's written. `POST /alerts` became
+async so it can await the broadcast; the blocking Mongo/Neo4j writes go through
+a threadpool so they don't freeze the event loop. Didn't need motor — the socket
+never touches the db.
+
+### Dashboard
+
+Redesigned it off some real SOC dashboards. Stat cards with sparklines, severity
+donut, top MITRE techniques, a small graph preview, top affected hosts by a
+simple risk score. Some panels (the 24h chart, the sparklines) are sample data
+for now — marked them clearly, they need a /stats endpoint later. Light and dark
+both work.
+
+### Docker
+
+`docker compose up` runs mongo, neo4j, backend, frontend. Learned what an image
+vs a container is, why localhost doesn't work inside a container (it's the
+container itself, so it's `mongo:27017` by service name), and why the frontend is
+a two-stage build — node to build it, nginx to serve it. Pulled the config out
+to env vars so the same code runs local or in docker. Slimmed requirements.txt
+down to the 6 packages I actually import.
+
+Left the engines out of compose on purpose — Khoi and Rahim own their
+Dockerfiles, and the engines already talk to the backend over HTTP.
+
+### Next
+
+Scale stuff for the graph (limits, filters, counters on ingest), then Ollama.
+Also want to try a VerifyEye test where it catches a fake login page locally.
+
+
 ## Mon 28 – Tue 29 Sept
 
 Khoi pushed his branch and it turned out he'd built a second FastAPI service
