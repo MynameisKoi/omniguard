@@ -3,7 +3,7 @@ import cytoscape from 'cytoscape'
 import { Maximize2, Minimize2 } from 'lucide-react'
 import { buildGraphStyle, attachGraphInteractions, NODE_TYPES, TOKEN } from './graphStyle'
 
-function GraphCanvas() {
+function GraphCanvas({ compact = false }) {
     // going to write useRef
     const containerRef = useRef(null);
 
@@ -103,8 +103,8 @@ function GraphCanvas() {
     }, [fullscreen])
 
     return (
-        <div className={`graph ${fullscreen ? "fullscreen" : ""}`}>
-            <div className="graph-legend">
+        <div className={`graph ${fullscreen ? "fullscreen" : ""} ${compact ? "compact" : ""}`}>
+            {!compact && <div className="graph-legend">
                 {NODE_TYPES.map(type => (
                     <span className="graph-legend-item" key={type}>
                         <span
@@ -128,7 +128,7 @@ function GraphCanvas() {
                     {fullscreen ? <Minimize2 /> : <Maximize2 />}
                     {fullscreen ? "Exit" : "Expand"}
                 </button>
-            </div>
+            </div>}
 
             {error && <div className="error">Could not load the graph — {error}</div>}
 

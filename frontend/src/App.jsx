@@ -5,7 +5,11 @@ import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
     ShieldAlert, Globe, Check, TriangleAlert, Inbox, X,
+    Siren, Users, Activity, Target, TrendingUp, TrendingDown, Search, Bell,
+    UserRound, LogOut,
 } from 'lucide-react';
+import { Sparkline, StackedArea, BarRow, SampleBadge } from './charts';
+import { sampleThreatActivity, sampleSparkline, SAMPLE_DELTAS } from './sampleData';
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const SOURCES = ["verifyeye", "spectrac2", "manual"];
@@ -17,6 +21,17 @@ const MITRE = {
     T1021: "Remote services",
     T1056: "Input capture",
 };
+
+/* TODO: these should come from a real /health check per service rather than
+   being hardcoded. Backend/Mongo/Neo4j are reachable if the app loaded at all;
+   the other two are placeholders. */
+const SERVICES = [
+    { name: "Backend API", ok: true },
+    { name: "MongoDB", ok: true },
+    { name: "Neo4j", ok: true },
+    { name: "Data ingestion", ok: true },
+    { name: "AI analysis", ok: false },
+];
 
 const ENGINE_ROLE = {
     verifyeye: "Phishing pages, credential forms",
@@ -39,12 +54,14 @@ function timeAgo(ts) {
 
 const NAV = [
     { group: "Monitor", items: [
-        { id: "overview", icon: LayoutDashboard, label: "Overview" },
-        { id: "alerts",   icon: Flag,            label: "Alerts", counted: true },
-        { id: "graph",    icon: Share2,          label: "Attack graph" },
+        { id: "overview",  icon: LayoutDashboard, label: "Dashboard" },
+        { id: "alerts",    icon: Flag,            label: "Alerts", counted: true },
+        { id: "incidents", icon: Siren,           label: "Incidents" },
+        { id: "graph",     icon: Share2,          label: "Network graph" },
     ]},
     { group: "Investigate", items: [
-        { id: "assets", icon: Server, label: "Assets" },
+        { id: "assets", icon: Server, label: "Hosts & assets" },
+        { id: "users",  icon: Users,  label: "Users" },
     ]},
     { group: "System", items: [
         { id: "engines",  icon: Cpu,      label: "Engines" },
@@ -66,6 +83,9 @@ function App() {
     const [filter, setFilter] = useState(null)
     const [srcFilter, setSrcFilter] = useState(null)
     const [assetTab, setAssetTab] = useState("hosts")
+    const [query, setQuery] = useState("")
+    // which top-bar dropdown is open: null | "search" | "bell" | "profile"
+    const [menu, setMenu] = useState(null)
     const [theme, setTheme] = useState(() => {
         try { return localStorage.getItem("og-theme") || "dark" } catch { return "dark" }
     })
@@ -104,9 +124,31 @@ function App() {
         try { localStorage.setItem("og-theme", theme) } catch { /* private mode */ }
     }, [theme]);
 
+    // a click anywhere outside an open dropdown closes it, and so does escape
+    useEffect(() => {
+        if (!menu) return
+        const onDown = e => { if (!e.target.closest(".hasmenu")) setMenu(null) }
+        const onKey = e => { if (e.key === "Escape") setMenu(null) }
+        document.addEventListener("mousedown", onDown)
+        window.addEventListener("keydown", onKey)
+        return () => {
+            document.removeEventListener("mousedown", onDown)
+            window.removeEventListener("keydown", onKey)
+        }
+    }, [menu]);
+
+    // free-text search across the fields an analyst would actually type
+    const q = query.trim().toLowerCase();
+    const matchesQuery = (a) => !q || [
+        a.host, a.user, a.event_type, a.domain, a.src_ip, a.dst_ip,
+        a.source, a.mitre_technique, a.description,
+    ].some(v => v && String(v).toLowerCase().includes(q));
+
     // one filter set, scoping everything below it
     const scoped = alerts.filter(a =>
-        (!filter || a.severity === filter) && (!srcFilter || a.source === srcFilter)
+        (!filter || a.severity === filter) &&
+        (!srcFilter || a.source === srcFilter) &&
+        matchesQuery(a)
     );
 
     const countOf = (sev) => scoped.filter(a => a.severity === sev).length;
@@ -130,8 +172,35 @@ function App() {
     const engineCounts = countBy("source");
 
     const byNewest = [...scoped].sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
-    const recent = byNewest.slice(0, 3);
+    const recent = byNewest.slice(0, 7);
     const criticals = byNewest.filter(a => a.severity === "critical").slice(0, 3);
+    const untriaged = scoped.filter(a => a.status === "new").length;
+
+    // placeholder until GET /stats/timeseries exists — see sampleData.js
+    const activity = sampleThreatActivity();
+
+    const techniques = topN("mitre_technique", 5);
+    const techniqueMax = Math.max(1, ...techniques.map(([, n]) => n));
+
+    // Risk score, 0-100. Weighted by severity so one critical outranks a pile
+    // of lows, then scaled against the worst host so the bars stay readable.
+    // Deliberately simple and explainable — not a black box.
+    const RISK_WEIGHT = { critical: 10, high: 6, medium: 3, low: 1 };
+    const hostRisk = Object.keys(countBy("host")).map(host => {
+        const mine = scoped.filter(a => a.host === host);
+        const raw = mine.reduce((sum, a) => sum + (RISK_WEIGHT[a.severity] || 0), 0);
+        return {
+            host,
+            raw,
+            count: mine.length,
+            worst: SEVERITIES.find(s => mine.some(a => a.severity === s)),
+        };
+    });
+    const worstRaw = Math.max(1, ...hostRisk.map(h => h.raw));
+    const riskyHosts = hostRisk
+        .map(h => ({ ...h, score: Math.round((h.raw / worstRaw) * 100) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 6);
 
     const openAlert = (id) => { setSelectedId(id); setPage("alert-detail"); };
 
@@ -181,15 +250,20 @@ function App() {
                     </div>
                 ))}
 
-                <div className="nav-foot">
-                    <div className="avatar">AM</div>
-                    {navOpen && (
-                        <div className="who">
-                            <b>A. Maharjan</b>
-                            <span>Tier 2 analyst</span>
-                        </div>
-                    )}
-                </div>
+                {navOpen && (
+                    <div className="sysstatus">
+                        <div className="sysstatus-head">System status</div>
+                        {SERVICES.map(s => (
+                            <div className="sysstatus-row" key={s.name}>
+                                <span className={`sysstatus-dot ${s.ok ? "ok" : "down"}`} />
+                                <span className="sysstatus-name">{s.name}</span>
+                                <span className={`sysstatus-state ${s.ok ? "ok" : "down"}`}>
+                                    {s.ok ? "Online" : "Offline"}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </nav>
 
             {/* ─── main column ──────────────────────── */}
@@ -205,7 +279,84 @@ function App() {
                             </>
                         ) : pageLabel}
                     </div>
+                    <div className="searchbox hasmenu">
+                        <Search />
+                        <input
+                            className="search"
+                            placeholder="Search hosts, alerts, users, IPs…"
+                            value={query}
+                            onChange={e => setQuery(e.target.value)}
+                            onFocus={() => setMenu("search")}
+                        />
+                        {query && (
+                            <button className="search-clear" onClick={() => setQuery("")} aria-label="Clear search">
+                                <X />
+                            </button>
+                        )}
+                        {menu === "search" && (
+                            <div className="dropdown wide">
+                                <div className="dropdown-head">Search</div>
+                                {query ? (
+                                    <div className="dropdown-row">
+                                        <span className="dropdown-title">
+                                            {scoped.length} alert{scoped.length === 1 ? "" : "s"} match “{query}”
+                                        </span>
+                                        <span className="dropdown-sub">
+                                            Filtering every panel below. Press Escape to close this.
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <div className="dropdown-row">
+                                        <span className="dropdown-title">Type to filter the dashboard</span>
+                                        <span className="dropdown-sub">
+                                            Matches host, user, event type, domain, IP, engine, technique and description.
+                                        </span>
+                                    </div>
+                                )}
+                                <div className="dropdown-note">
+                                    <SampleBadge note="work needed" />
+                                    Full search — jump straight to a host or run a saved query — comes
+                                    with the search endpoint.
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     <div className="grow" />
+
+                    <span className="clock">
+                        {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                    </span>
+                    <span className="live"><span className="live-dot" />Live</span>
+
+                    <span className="hasmenu">
+                        <button
+                            className={`icon-btn bell ${menu === "bell" ? "on" : ""}`}
+                            onClick={() => setMenu(menu === "bell" ? null : "bell")}
+                            title={`${untriaged} untriaged`}
+                            aria-label="Notifications"
+                        >
+                            <Bell />
+                            {untriaged > 0 && <span className="bell-badge">{untriaged > 99 ? "99+" : untriaged}</span>}
+                        </button>
+                        {menu === "bell" && (
+                            <div className="dropdown">
+                                <div className="dropdown-head">Notifications</div>
+                                <div className="dropdown-empty">
+                                    <Bell />
+                                    <p>Notifications will arrive here when implemented.</p>
+                                    <span>
+                                        {untriaged} alert{untriaged === 1 ? "" : "s"} currently untriaged.
+                                    </span>
+                                </div>
+                                <div className="dropdown-note">
+                                    <SampleBadge note="work needed" />
+                                    Needs a read/unread store so a notification can be dismissed.
+                                </div>
+                            </div>
+                        )}
+                    </span>
+
                     <button
                         className="icon-btn"
                         onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -214,7 +365,42 @@ function App() {
                     >
                         {theme === "dark" ? <Sun /> : <Moon />}
                     </button>
-                    <span className="clock">{new Date().toLocaleDateString()}</span>
+
+                    <span className="hasmenu">
+                        <button
+                            className={`whoami ${menu === "profile" ? "on" : ""}`}
+                            onClick={() => setMenu(menu === "profile" ? null : "profile")}
+                            aria-label="Account menu"
+                        >
+                            <span className="avatar sm">AM</span>
+                            <span className="whoami-name">SOC Analyst</span>
+                            <ChevronDown className="whoami-chev" />
+                        </button>
+                        {menu === "profile" && (
+                            <div className="dropdown">
+                                <div className="dropdown-id">
+                                    <span className="avatar">AM</span>
+                                    <span>
+                                        <b>A. Maharjan</b>
+                                        <em>Tier 2 analyst</em>
+                                    </span>
+                                </div>
+                                <button className="dropdown-item" onClick={() => setMenu(null)}>
+                                    <UserRound /> Profile
+                                </button>
+                                <button className="dropdown-item" onClick={() => setMenu(null)}>
+                                    <Settings /> Preferences
+                                </button>
+                                <button className="dropdown-item danger" onClick={() => setMenu(null)}>
+                                    <LogOut /> Log out
+                                </button>
+                                <div className="dropdown-note">
+                                    <SampleBadge note="work needed" />
+                                    Placeholders — there's no auth yet.
+                                </div>
+                            </div>
+                        )}
+                    </span>
                 </header>
 
                 <div className="content">
@@ -340,20 +526,9 @@ function App() {
                     {/* ── overview ── */}
                     {page === "overview" && (
                         <>
-                            <div className="hero">
-                                <div className="hero-main">
-                                    <h1 className="hero-title">Shift handover</h1>
-                                    <p className="hero-sub">
-                                        {alerts.length === 0
-                                            ? "Nothing has come in yet. The queue is clear."
-                                            : <>Everything open right now across <b>{countDistinct("host")}</b> host{countDistinct("host") === 1 ? "" : "s"} and <b>{Object.keys(engineCounts).length}</b> reporting engine{Object.keys(engineCounts).length === 1 ? "" : "s"}.</>}
-                                    </p>
-                                </div>
-                                <span className="live"><span className="live-dot" />Live</span>
-                            </div>
-
                             <div className="toolbar">
                                 <Seg label="Severity" value={filter} onChange={setFilter} options={SEVERITIES} />
+                                <span className="toolbar-sep" />
                                 <Seg label="Engine" value={srcFilter} onChange={setSrcFilter} options={SOURCES} />
                                 <span className="toolbar-grow" />
                                 <span className="toolbar-count">
@@ -361,34 +536,116 @@ function App() {
                                         ? `${alerts.length} alerts`
                                         : `${scoped.length} of ${alerts.length}`}
                                 </span>
-                                {(filter || srcFilter) && (
-                                    <button className="reset" onClick={() => { setFilter(null); setSrcFilter(null); }}>
+                                {(filter || srcFilter || query) && (
+                                    <button
+                                        className="reset"
+                                        onClick={() => { setFilter(null); setSrcFilter(null); setQuery(""); }}
+                                    >
                                         <X /> Clear
                                     </button>
                                 )}
                             </div>
 
                             <div className="stats">
-                                <Stat icon={Flag}         label="Total alerts"   value={alerts.length} foot="in the queue" />
-                                <Stat icon={ShieldAlert}  label="Critical"       value={countOf("critical")} tone="critical" foot="need triage first" />
-                                <Stat icon={Server}       label="Hosts affected" value={countDistinct("host")} foot="seen in alerts" />
-                                <Stat icon={Globe}        label="Domains seen"   value={countDistinct("domain")} foot="contacted externally" />
-                                <Stat icon={Inbox}        label="Untriaged"      value={alerts.filter(a => a.status === "new").length} tone="high" foot="still untouched" />
+                                <Stat icon={Flag}        label="Total alerts" value={scoped.length}         series="total"    />
+                                <Stat icon={ShieldAlert} label="Critical"     value={countOf("critical")}   series="critical" tone="critical" />
+                                <Stat icon={TriangleAlert} label="High"       value={countOf("high")}       series="high"     tone="high" />
+                                <Stat icon={Activity}    label="Medium"       value={countOf("medium")}     series="medium"   tone="medium" />
+                                <Stat icon={Inbox}       label="Low"          value={countOf("low")}        series="low"      tone="low" />
+                                <Stat icon={Target}      label="Untriaged"    value={untriaged}             series="incidents" tone="accent" />
                             </div>
 
                             <Attention findings={findings} />
 
-                            <div className="section-head">
-                                <span className="section-title">Alert flow &amp; triage</span>
+                            <div className="grid-3">
+                                <Panel
+                                    title="Threat activity"
+                                    note={<><SampleBadge />last 24 hours</>}
+                                    wide
+                                >
+                                    <div className="chart-legend">
+                                        {SEVERITIES.map(sev => (
+                                            <span className="chart-legend-item" key={sev}>
+                                                <span className={`chart-legend-dot sev-${sev}`} />
+                                                {sev}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <StackedArea data={activity} />
+                                </Panel>
+
+                                <Panel title="Severity distribution" note={`${scoped.length} alerts`}>
+                                    <Donut
+                                        total={scoped.length}
+                                        slices={SEVERITIES.map(sev => ({ key: sev, n: countOf(sev) }))}
+                                    />
+                                </Panel>
+
+                                <Panel title="Top techniques" note="MITRE ATT&amp;CK">
+                                    {techniques.length === 0 ? (
+                                        <div className="empty">No techniques mapped yet.</div>
+                                    ) : (
+                                        <div className="barrows">
+                                            {techniques.map(([id, n]) => (
+                                                <BarRow
+                                                    key={id}
+                                                    label={MITRE[id] || id}
+                                                    sub={id}
+                                                    value={n}
+                                                    max={techniqueMax}
+                                                />
+                                            ))}
+                                        </div>
+                                    )}
+                                </Panel>
                             </div>
 
-                            <div className="cards">
+                            <div className="grid-2">
+                                <Panel
+                                    title="Network graph"
+                                    note={`${countDistinct("host")} hosts · ${countDistinct("domain")} domains`}
+                                    action="Open"
+                                    onAction={() => setPage("graph")}
+                                >
+                                    {alerts.length === 0 ? (
+                                        <CardEmpty glyph={Share2} text="Graph is empty" />
+                                    ) : (
+                                        <GraphCanvas compact />
+                                    )}
+                                </Panel>
 
-                                <Card
-                                    icon={Flag}
+                                <Panel
+                                    title="Top affected assets"
+                                    note="by risk score"
+                                    action={countDistinct("host") ? "View all" : null}
+                                    onAction={() => { setAssetTab("hosts"); setPage("assets"); }}
+                                >
+                                    {riskyHosts.length === 0 ? (
+                                        <CardEmpty glyph={Server} text="No hosts seen yet" />
+                                    ) : (
+                                        <div className="barrows">
+                                            {riskyHosts.map(h => (
+                                                <BarRow
+                                                    key={h.host}
+                                                    label={h.host}
+                                                    sub={`${h.count} alert${h.count === 1 ? "" : "s"}`}
+                                                    value={h.score}
+                                                    max={100}
+                                                    tone={h.worst}
+                                                />
+                                            ))}
+                                        </div>
+                                    )}
+                                </Panel>
+                            </div>
+
+                            <div className="grid-1">
+                                <Panel
                                     title="Recent alerts"
+                                    note={`${recent.length} shown`}
                                     action={alerts.length ? "View all" : null}
                                     onAction={() => { setFilter(null); setPage("alerts"); }}
+                                    flush
                                 >
                                     {recent.length === 0 ? (
                                         <CardEmpty
@@ -397,172 +654,22 @@ function App() {
                                             cta="Post one in Swagger"
                                             onCta={() => window.open("http://localhost:8000/docs", "_blank")}
                                         />
-                                    ) : recent.map(a => (
-                                        <button className="item" key={a.alert_id} onClick={() => openAlert(a.alert_id)}>
-                                            <span className={`item-mark ${a.severity}`} />
-                                            <span className="item-main">
-                                                <span className="item-title">{a.event_type}</span>
-                                                <span className="item-meta">
-                                                    <span className="strong">{a.host}</span>
-                                                    <span className="dot">·</span>
-                                                    <span>{a.source}</span>
-                                                    <span className="dot">·</span>
-                                                    <span>{timeAgo(a.timestamp)}</span>
-                                                </span>
-                                            </span>
-                                        </button>
-                                    ))}
-                                </Card>
-
-                                <Card
-                                    icon={ShieldAlert}
-                                    title="Critical alerts"
-                                    action={countOf("critical") ? "View all" : null}
-                                    onAction={() => { setFilter("critical"); setPage("alerts"); }}
-                                >
-                                    {criticals.length === 0 ? (
-                                        <CardEmpty glyph={Check} text="No critical alerts open" />
-                                    ) : criticals.map(a => (
-                                        <button className="item" key={a.alert_id} onClick={() => openAlert(a.alert_id)}>
-                                            <span className="item-mark critical" />
-                                            <span className="item-main">
-                                                <span className="item-title">{a.host}</span>
-                                                <span className="item-meta">
-                                                    <span>{a.event_type}</span>
-                                                    <span className="dot">·</span>
-                                                    <span>{timeAgo(a.timestamp)}</span>
-                                                </span>
-                                            </span>
-                                        </button>
-                                    ))}
-                                </Card>
-
-                                <Card
-                                    icon={Server}
-                                    title="Affected hosts"
-                                    action={countDistinct("host") ? "View all" : null}
-                                    onAction={() => { setAssetTab("hosts"); setPage("assets"); }}
-                                >
-                                    {topN("host", 3).length === 0 ? (
-                                        <CardEmpty glyph={Server} text="No hosts seen yet" />
-                                    ) : topN("host", 3).map(([host, n]) => {
-                                        const mine = alerts.filter(a => a.host === host);
-                                        const worst = SEVERITIES.find(s => mine.some(a => a.severity === s));
-                                        return (
-                                            <button className="item" key={host} onClick={() => { setAssetTab("hosts"); setPage("assets"); }}>
-                                                <span className={`item-mark ${worst}`} />
-                                                <span className="item-main">
-                                                    <span className="item-title">{host}</span>
-                                                    <span className="item-meta">
-                                                        <span className="strong">{n} alert{n === 1 ? "" : "s"}</span>
-                                                        <span className="dot">·</span>
-                                                        <span>worst {worst}</span>
-                                                    </span>
-                                                </span>
-                                            </button>
-                                        );
-                                    })}
-                                </Card>
-
-                                <Card
-                                    icon={Share2}
-                                    title="Attack graph"
-                                    action={alerts.length ? "Open" : null}
-                                    onAction={() => setPage("graph")}
-                                >
-                                    <CardEmpty
-                                        glyph={Share2}
-                                        text={alerts.length
-                                            ? `${countDistinct("host")} hosts and ${countDistinct("domain")} domains in the graph`
-                                            : "Graph is empty"}
-                                        cta={alerts.length ? "Open attack graph" : null}
-                                        onCta={() => setPage("graph")}
-                                    />
-                                </Card>
-
-                                <Card
-                                    icon={Cpu}
-                                    title="Detection engines"
-                                    action="View all"
-                                    onAction={() => setPage("engines")}
-                                >
-                                    {SOURCES.map(src => {
-                                        const n = engineCounts[src] || 0;
-                                        return (
-                                            <button className="item" key={src} onClick={() => setPage("engines")}>
-                                                <span className={`swatch eng-${src}`} style={{ marginTop: "5px" }} />
-                                                <span className="item-main">
-                                                    <span className="item-title">{src}</span>
-                                                    <span className="item-meta">
-                                                        <span className="strong">{n} alert{n === 1 ? "" : "s"}</span>
-                                                        <span className="dot">·</span>
-                                                        <span>{n ? "reporting" : "no data"}</span>
-                                                    </span>
-                                                </span>
-                                            </button>
-                                        );
-                                    })}
-                                </Card>
-
-                                <Card
-                                    icon={Globe}
-                                    title="Contacted domains"
-                                    action={countDistinct("domain") ? "View all" : null}
-                                    onAction={() => { setAssetTab("domains"); setPage("assets"); }}
-                                >
-                                    {topN("domain", 3).length === 0 ? (
-                                        <CardEmpty glyph={Globe} text="No domains recorded" />
-                                    ) : topN("domain", 3).map(([domain, n]) => {
-                                        const mine = alerts.filter(a => a.domain === domain);
-                                        const worst = SEVERITIES.find(s => mine.some(a => a.severity === s));
-                                        return (
-                                            <button
-                                                className="item"
-                                                key={domain}
-                                                onClick={() => { setAssetTab("domains"); setPage("assets"); }}
-                                            >
-                                                <span className={`item-mark ${worst}`} />
-                                                <span className="item-main">
-                                                    <span className="item-title">{domain}</span>
-                                                    <span className="item-meta">
-                                                        <span className="strong">{n} alert{n === 1 ? "" : "s"}</span>
-                                                        <span className="dot">·</span>
-                                                        <span>{new Set(mine.map(a => a.host)).size} host(s)</span>
-                                                    </span>
-                                                </span>
-                                            </button>
-                                        );
-                                    })}
-                                </Card>
-
-                            </div>
-
-                            <div className="section-head">
-                                <span className="section-title">Coverage</span>
-                            </div>
-
-                            <div className="cols">
-                                <Panel title="Severity distribution" note={`${scoped.length} alerts`}>
-                                    <Donut
-                                        total={scoped.length}
-                                        slices={SEVERITIES.map(sev => ({ key: sev, n: countOf(sev) }))}
-                                    />
-                                </Panel>
-
-                                <Panel title="MITRE techniques">
-                                    {topN("mitre_technique", 6).length === 0 ? (
-                                        <div className="empty">No techniques mapped yet.</div>
                                     ) : (
-                                        <table className="mini">
+                                        <table className="table">
                                             <thead>
-                                                <tr><th>ID</th><th>Technique</th><th className="num">Alerts</th></tr>
+                                                <tr>
+                                                    <th>Time</th><th>Severity</th><th>Type</th>
+                                                    <th>Host</th><th className="td-wide">Description</th>
+                                                </tr>
                                             </thead>
                                             <tbody>
-                                                {topN("mitre_technique", 6).map(([id, n]) => (
-                                                    <tr key={id}>
-                                                        <td className="mono">{id}</td>
-                                                        <td>{MITRE[id] || "—"}</td>
-                                                        <td className="num">{n}</td>
+                                                {recent.map(a => (
+                                                    <tr key={a.alert_id} onClick={() => openAlert(a.alert_id)}>
+                                                        <td className="td-mono td-faint">{timeAgo(a.timestamp)}</td>
+                                                        <td><span className={`sev ${a.severity}`}>{a.severity}</span></td>
+                                                        <td className="td-mono">{a.event_type}</td>
+                                                        <td className="td-mono td-dim">{a.host}</td>
+                                                        <td className="td-wide td-dim td-clip">{a.description || "—"}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -570,7 +677,111 @@ function App() {
                                     )}
                                 </Panel>
                             </div>
+
                         </>
+                    )}
+
+                    {/* ── incidents ── */}
+                    {page === "incidents" && (
+                        <Panel
+                            title="Incidents"
+                            note="grouped by host"
+                            flush
+                        >
+                            <div className="pagenote">
+                                <SampleBadge note="work needed" />
+                                An incident should be a real object — several alerts correlated
+                                into one case with an owner and a status. For now this groups
+                                alerts by host so the shape is visible.
+                            </div>
+
+                            {riskyHosts.length === 0 ? (
+                                <div className="empty">No incidents. The queue is clear.</div>
+                            ) : (
+                                <table className="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Incident</th><th>Severity</th><th>Alerts</th>
+                                            <th>Engines</th><th>Risk</th><th className="td-wide">Last activity</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {riskyHosts.map(h => {
+                                            const mine = scoped.filter(a => a.host === h.host);
+                                            const engines = [...new Set(mine.map(a => a.source))];
+                                            const last = mine.map(a => new Date(a.timestamp)).sort((x, y) => y - x)[0];
+                                            return (
+                                                <tr key={h.host} onClick={() => { setAssetTab("hosts"); setPage("assets"); }}>
+                                                    <td>
+                                                        <span className="cell">
+                                                            <span className={`cell-mark ${h.worst}`} />
+                                                            <span className="cell-main">
+                                                                <span className="cell-top">{h.host}</span>
+                                                                <span className="cell-sub">{mine.length} correlated alerts</span>
+                                                            </span>
+                                                        </span>
+                                                    </td>
+                                                    <td><span className={`sev ${h.worst}`}>{h.worst}</span></td>
+                                                    <td className="td-mono td-dim">{h.count}</td>
+                                                    <td>
+                                                        {engines.map(e => <span className="tag" key={e}>{e}</span>)}
+                                                    </td>
+                                                    <td className="td-mono td-dim">{h.score}</td>
+                                                    <td className="td-wide td-faint td-mono">{timeAgo(last)}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            )}
+                        </Panel>
+                    )}
+
+                    {/* ── users ── */}
+                    {page === "users" && (
+                        <Panel title="Users" note={`${countDistinct("user")} accounts seen`} flush>
+                            {topN("user", 50).length === 0 ? (
+                                <div className="empty">
+                                    No users attributed yet. Network-only alerts carry no username.
+                                </div>
+                            ) : (
+                                <table className="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Account</th><th>Worst severity</th><th>Alerts</th>
+                                            <th>Hosts used</th><th className="td-wide">Last seen</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {topN("user", 50).map(([user, n]) => {
+                                            const mine = scoped.filter(a => a.user === user);
+                                            const worst = SEVERITIES.find(s => mine.some(a => a.severity === s));
+                                            const hosts = [...new Set(mine.map(a => a.host))];
+                                            const last = mine.map(a => new Date(a.timestamp)).sort((x, y) => y - x)[0];
+                                            return (
+                                                <tr key={user}>
+                                                    <td>
+                                                        <span className="cell">
+                                                            <span className={`cell-mark ${worst}`} />
+                                                            <span className="cell-main">
+                                                                <span className="cell-top">{user}</span>
+                                                                <span className="cell-sub">
+                                                                    {hosts.length > 1 ? `on ${hosts.length} hosts` : "single host"}
+                                                                </span>
+                                                            </span>
+                                                        </span>
+                                                    </td>
+                                                    <td><span className={`sev ${worst}`}>{worst}</span></td>
+                                                    <td className="td-mono td-dim">{n}</td>
+                                                    <td className="td-mono td-dim">{hosts.join(", ")}</td>
+                                                    <td className="td-wide td-faint td-mono">{timeAgo(last)}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            )}
+                        </Panel>
                     )}
 
                     {/* ── attack graph ── */}
@@ -808,31 +1019,55 @@ function CardEmpty({ glyph: Glyph, text, cta, onCta }) {
 }
 
 /* collapsible panel — the whole header is the hit target */
-function Panel({ title, note, children, flush = false, defaultOpen = true }) {
+function Panel({ title, note, children, flush = false, defaultOpen = true, action, onAction, wide = false }) {
     const [open, setOpen] = useState(defaultOpen);
     return (
-        <section className={`panel ${open ? "" : "closed"}`}>
+        <section className={`panel ${open ? "" : "closed"} ${wide ? "panel-wide" : ""}`}>
             <div className="panel-head">
                 <button className="panel-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>
                     <span className="chev"><ChevronDown /></span>
                     <span className="panel-title">{title}</span>
                     {note && <span className="panel-note">{note}</span>}
                 </button>
+                {action && (
+                    <button className="panel-action" onClick={onAction}>
+                        {action} <ArrowRight />
+                    </button>
+                )}
             </div>
             {open && (flush ? children : <div className="panel-body">{children}</div>)}
         </section>
     );
 }
 
-function Stat({ icon: Icon, label, value, tone, foot }) {
+/* `series` and the delta come from sampleData — both are placeholders until
+   GET /stats/timeseries exists. The value itself is real. */
+function Stat({ icon: Icon, label, value, tone, foot, series }) {
+    const delta = series ? SAMPLE_DELTAS[series] : null;
+    const up = delta != null && delta >= 0;
+    const colour = tone && tone !== "accent" ? `var(--fill-${tone})` : "var(--accent)";
+
     return (
         <div className="stat">
             <div className="stat-head">
                 <span className="stat-label">{label}</span>
                 {Icon && <span className={`stat-icon ${tone || ""}`}><Icon /></span>}
             </div>
-            <div className={`stat-value ${tone || ""}`}>{value}</div>
-            {foot && <div className="stat-foot">{foot}</div>}
+
+            <div className="stat-row">
+                <span className={`stat-value ${tone || ""}`}>{value}</span>
+                {series && <Sparkline values={sampleSparkline(series)} stroke={colour} />}
+            </div>
+
+            {delta != null ? (
+                <div className={`stat-delta ${up ? "up" : "down"}`} title="Placeholder — needs GET /stats/timeseries">
+                    {up ? <TrendingUp /> : <TrendingDown />}
+                    {Math.abs(delta)}%
+                    <em>vs yesterday</em>
+                </div>
+            ) : foot ? (
+                <div className="stat-foot">{foot}</div>
+            ) : null}
         </div>
     );
 }
