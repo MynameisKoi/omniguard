@@ -611,7 +611,7 @@ function App() {
                                     {alerts.length === 0 ? (
                                         <CardEmpty glyph={Share2} text="Graph is empty" />
                                     ) : (
-                                        <GraphCanvas compact />
+                                        <GraphCanvas compact refreshKey={alerts.length}/>
                                     )}
                                 </Panel>
 
@@ -791,7 +791,7 @@ function App() {
                             title="Attack graph"
                             note={`${countDistinct("host")} hosts · ${countDistinct("domain")} domains`}
                         >
-                            <GraphCanvas />
+                            <GraphCanvas refreshKey={alerts.length}/>
                         </Panel>
                     )}
 
