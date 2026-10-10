@@ -149,10 +149,11 @@ def run_stage_3():
                 edges = data.get("edges", [])
                 node_map = {}
                 for n in nodes:
-                    d = n.get("data", {})
+                    d = n.get("data") if isinstance(n, dict) and "data" in n else n
                     nid = d.get("id")
-                    disp = d.get("display") or d.get("label") or nid
-                    node_map[nid] = (d.get("label", "Entity"), disp)
+                    disp = d.get("label") or d.get("display") or nid
+                    ntype = d.get("type") or d.get("label", "Entity")
+                    node_map[nid] = (ntype, disp)
 
                 print(f"[✓] Correlated Attack Subgraph retrieved from Neo4j:")
                 print(f"    ├─ Entities ({len(nodes)}):")
@@ -160,7 +161,7 @@ def run_stage_3():
                     print(f"    │   • [{lbl}] {disp}")
                 print(f"    └─ Attack Relationships ({len(edges)}):")
                 for e in edges:
-                    d = e.get("data", {})
+                    d = e.get("data") if isinstance(e, dict) and "data" in e else e
                     src_id = d.get("source")
                     tgt_id = d.get("target")
                     rel_type = d.get("type", "CONNECTED_TO")
