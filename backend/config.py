@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 
 # reads backend/.env into the environment.
 # this is the only place in the app that does it.
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 load_dotenv()
 
 

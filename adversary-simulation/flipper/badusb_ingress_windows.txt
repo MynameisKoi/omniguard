@@ -1,0 +1,11 @@
+REM ========================================================
+REM OmniGuard BadUSB Live Demo Payload (Windows Workstations)
+REM Target: Windows 10 / 11
+REM Action: Opens Run prompt (Win+R) and launches demo portal
+REM ========================================================
+
+DELAY 1000
+GUI r
+DELAY 800
+STRING msedge.exe "http://localhost:8080/login.html" || chrome.exe "http://localhost:8080/login.html"
+ENTER
