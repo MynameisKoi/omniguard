@@ -65,7 +65,6 @@ class AlertCreate(BaseModel):
         "new",
         description="triage state, updated by the dashboard after fixes or during or after",
     )
-
     description: str = Field(
         "",
         description="human-readable summary shown to the analyst",
@@ -129,7 +128,8 @@ class Alert(AlertCreate):
         description="Timestamp for when the alert was created"
     )
 
-
 class AlertStatusUpdate(BaseModel):
-    """Payload for PATCH /alerts/{alert_id}"""
-    status: Literal["new", "triaged", "resolved"]
+    status: Literal["new", "triaged", "resolved"] = Field(
+        description="Updated triage state for the alert",
+        examples=["triaged"],
+    )

@@ -1,253 +1,205 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState }  from 'react'
 import cytoscape from 'cytoscape'
+import { API_URL } from "./config"
+import { Maximize2, Minimize2 } from 'lucide-react'
+import { buildGraphStyle, attachGraphInteractions, NODE_TYPES, TOKEN } from './graphStyle'
 
-// Node colour palette — one colour per entity label.
-// These are HSL values that work on both dark and light backgrounds.
-const LABEL_COLOUR = {
-    Host:      "#4f9cf9",  // blue
-    IP:        "#a78bfa",  // violet
-    Domain:    "#fb923c",  // orange
-    URL:       "#4ade80",  // green
-    Process:   "#f87171",  // red
-    User:      "#2dd4bf",  // teal
-    Technique: "#facc15",  // yellow
-};
-
-const DEFAULT_COLOUR = "#94a3b8";
-
-// Cytoscape stylesheet
-const STYLE = [
-    {
-        selector: "node",
-        style: {
-            "background-color": (ele) => LABEL_COLOUR[ele.data("label")] ?? DEFAULT_COLOUR,
-            "label": "data(display)",
-            "color": "#f1f5f9",
-            "font-size": "10px",
-            "text-valign": "bottom",
-            "text-margin-y": "4px",
-            "text-outline-color": "#0f172a",
-            "text-outline-width": "2px",
-            "width": 28,
-            "height": 28,
-            "border-width": 2,
-            "border-color": "#1e293b",
-        },
-    },
-    {
-        selector: "node[label='Host']",
-        style: { width: 36, height: 36, "font-size": "11px", "font-weight": "bold" },
-    },
-    {
-        selector: "edge",
-        style: {
-            "width": 1.5,
-            "line-color": "#334155",
-            "target-arrow-color": "#475569",
-            "target-arrow-shape": "triangle",
-            "curve-style": "bezier",
-            "label": "data(type)",
-            "font-size": "8px",
-            "color": "#64748b",
-            "text-rotation": "autorotate",
-            "text-outline-color": "#0f172a",
-            "text-outline-width": "1px",
-        },
-    },
-    {
-        selector: ":selected",
-        style: {
-            "border-color": "#f8fafc",
-            "border-width": 3,
-            "line-color": "#94a3b8",
-        },
-    },
-];
-
-/**
- * GraphCanvas — renders the OmniGuard entity graph using Cytoscape.js.
- *
- * Props:
- *   hostname  (string|null)  — if set, fetches GET /graph/host/{hostname}
- *                              instead of the full GET /graph.
- *   height    (string)       — CSS height string, default "460px".
- */
-function GraphCanvas({ hostname = null, height = "460px" }) {
+function GraphCanvas({ compact = false, refreshKey, host}) {
+    // going to write useRef
     const containerRef = useRef(null);
-    const cyRef        = useRef(null);
-    const [status, setStatus]   = useState("loading"); // loading | ok | empty | error
-    const [tooltip, setTooltip] = useState(null);      // { label, x, y }
-    const [nodeCount, setNodeCount] = useState(0);
-    const [edgeCount, setEdgeCount] = useState(0);
 
+    // the live cytoscape instance, so the fullscreen toggle can resize it
+    const cyRef = useRef(null);
+    const [fullscreen, setFullscreen] = useState(false);
+
+    // adding the state for graph, error and loading
+    const [graph, setGraph] = useState({nodes: [], edges: []})
+    const [error, setError] = useState(null)
+    const [loading, setLoading] = useState(true)
+
+    // adding useEffect here 
     useEffect(() => {
-        let cancelled = false;
-        setStatus("loading");
-
-        const url = hostname
-            ? `http://localhost:8000/graph/host/${encodeURIComponent(hostname)}`
-            : "http://localhost:8000/graph";
-
+        // fetching the backend for the graph data
+        const url = host 
+            ? `${API_URL}/graph/host/${encodeURIComponent(host)}`
+            : `${API_URL}/graph`
         fetch(url)
-            .then(r => {
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                return r.json();
-            })
-            .then(({ nodes, edges }) => {
-                if (cancelled) return;
+        .then(res => res.json())
+        .then(data => setGraph(data))
+        .catch(err => setError(err.message))
+        .finally(() => setLoading(false))
+    }, [refreshKey, host])
 
-                if (!nodes.length) {
-                    setStatus("empty");
-                    return;
-                }
-
-                setNodeCount(nodes.length);
-                setEdgeCount(edges.length);
-
-                // Destroy previous instance if the component re-renders
-                if (cyRef.current) {
-                    cyRef.current.destroy();
-                    cyRef.current = null;
-                }
-
-                const cy = cytoscape({
-                    container: containerRef.current,
-                    elements: [...nodes, ...edges],
-                    style: STYLE,
-                    layout: {
-                        name: "cose",
-                        animate: true,
-                        animationDuration: 600,
-                        nodeRepulsion: 6000,
-                        gravity: 0.4,
-                        idealEdgeLength: 80,
-                        randomize: false,
-                        fit: true,
-                        padding: 24,
-                    },
-                    minZoom: 0.3,
-                    maxZoom: 4,
-                    wheelSensitivity: 0.3,
-                });
-
-                // Tooltip on hover
-                cy.on("mouseover", "node", (evt) => {
-                    const d = evt.target.data();
-                    const pos = evt.renderedPosition;
-                    const key = d.hostname || d.username || d.address || d.domain_name || d.url || d.process_id || d.id;
-                    setTooltip({ label: `${d.label}: ${key}`, x: pos.x, y: pos.y });
-                });
-                cy.on("mouseout", "node", () => setTooltip(null));
-
-                cyRef.current = cy;
-                setStatus("ok");
-            })
-            .catch(err => {
-                if (!cancelled) {
-                    console.error("GraphCanvas fetch error:", err);
-                    setStatus("error");
-                }
-            });
-
-        return () => {
-            cancelled = true;
-            // Don't destroy on cleanup — only destroy when re-fetching (above).
-        };
-    }, [hostname]);
-
-    // Clean up on unmount
+    // create the cytoscape instance ONCE. If we rebuilt it on every graph
+    // change, the whole layout would reshuffle each time an alert arrives —
+    // the node you're looking at would jump. Instead we build it empty here and
+    // sync data into it below, so positions are preserved across updates.
     useEffect(() => {
-        return () => {
-            if (cyRef.current) {
-                cyRef.current.destroy();
-                cyRef.current = null;
+        if (!containerRef.current) return
+
+        const cy = cytoscape({
+            container: containerRef.current,
+            elements: [],
+            style: buildGraphStyle(),
+            minZoom: 0.3,
+            maxZoom: 2.5,
+        })
+        cyRef.current = cy
+        attachGraphInteractions(cy)
+
+        // the palette lives in CSS variables, so re-apply the stylesheet when
+        // the dashboard theme flips
+        const observer = new MutationObserver(() => cy.style(buildGraphStyle()))
+        observer.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ["data-theme"],
+        })
+
+        // cytoscape caches the container size at init. On the detail page and
+        // the dashboard the container is often 0-sized for a frame, so nodes
+        // get laid out against nothing and render off-screen. Watch the size
+        // and re-fit once it has real dimensions.
+        let lastW = 0, lastH = 0
+        const sizer = new ResizeObserver(() => {
+            const el = containerRef.current
+            if (!el || !cyRef.current) return
+            const { clientWidth: w, clientHeight: h } = el
+            if (w === lastW && h === lastH) return
+            lastW = w; lastH = h
+            if (w > 0 && h > 0) {
+                cy.resize()
+                if (cy.nodes().length) cy.fit(undefined, 40)
             }
-        };
-    }, []);
+        })
+        sizer.observe(containerRef.current)
+
+        return () => {
+            observer.disconnect()
+            sizer.disconnect()
+            cy.destroy()
+            cyRef.current = null
+        }
+    }, [])
+
+    // sync the fetched graph into the existing instance: add new elements,
+    // drop ones that are gone, then lay out ONLY the new nodes so everything
+    // already on screen stays where the analyst last saw it.
+    useEffect(() => {
+        const cy = cyRef.current
+        if (!cy) return
+
+        // degree drives node size; recompute it each sync since edges change
+        const degree = {}
+        graph.edges.forEach(e => {
+            degree[e.source] = (degree[e.source] || 0) + 1
+            degree[e.target] = (degree[e.target] || 0) + 1
+        })
+
+        const wanted = new Set([
+            ...graph.nodes.map(n => n.id),
+            ...graph.edges.map(e => e.id),
+        ])
+
+        // remove anything no longer in the data
+        cy.elements().forEach(el => {
+            if (!wanted.has(el.id())) el.remove()
+        })
+
+        // nodes that already exist keep their position; track which are new
+        const fresh = []
+        cy.batch(() => {
+            graph.nodes.forEach(n => {
+                const existing = cy.getElementById(n.id)
+                if (existing.nonempty()) {
+                    existing.data("degree", degree[n.id] || 0)
+                } else {
+                    fresh.push(cy.add({ group: "nodes", data: { ...n, degree: degree[n.id] || 0 } }))
+                }
+            })
+            graph.edges.forEach(e => {
+                if (cy.getElementById(e.id).empty()) {
+                    cy.add({ group: "edges", data: e })
+                }
+            })
+        })
+
+        if (fresh.length === 0) return
+
+        const firstDraw = cy.nodes().length === fresh.length
+
+        // lock everything already placed so cose only positions the new nodes
+        const settled = cy.nodes().difference(cy.collection(fresh))
+        settled.lock()
+
+        const layout = cy.layout({
+            name: "cose",
+            animate: false,
+            padding: 40,
+            nodeRepulsion: 14000,
+            idealEdgeLength: 95,
+            nodeOverlap: 24,
+            fit: firstDraw,       // only auto-fit on the very first render
+            randomize: firstDraw, // new nodes start near their neighbours otherwise
+        })
+        layout.run()
+        settled.unlock()
+
+        return () => layout.stop()
+    }, [graph])
+
+    // the container changes size when fullscreen flips, and cytoscape caches
+    // its dimensions — it has to be told
+    useEffect(() => {
+        const cy = cyRef.current
+        if (!cy) return
+        const id = requestAnimationFrame(() => {
+            cy.resize()
+            cy.fit(undefined, 40)
+        })
+        return () => cancelAnimationFrame(id)
+    }, [fullscreen])
+
+    // escape leaves fullscreen
+    useEffect(() => {
+        if (!fullscreen) return
+        const onKey = e => { if (e.key === "Escape") setFullscreen(false) }
+        window.addEventListener("keydown", onKey)
+        return () => window.removeEventListener("keydown", onKey)
+    }, [fullscreen])
 
     return (
-        <div style={{ position: "relative", height, width: "100%" }}>
-            {/* The Cytoscape mount target — always rendered so the ref is stable */}
-            <div
-                ref={containerRef}
-                style={{
-                    height: "100%",
-                    width: "100%",
-                    borderRadius: "6px",
-                    background: "var(--surface)",
-                    display: status === "ok" ? "block" : "none",
-                }}
-            />
-
-            {/* Legend — overlaid top-right */}
-            {status === "ok" && (
-                <div style={{
-                    position: "absolute", top: 10, right: 10,
-                    background: "var(--surface-raised, #1e293b)",
-                    border: "1px solid var(--border, #334155)",
-                    borderRadius: 6, padding: "8px 12px",
-                    fontSize: 10, lineHeight: 1.7, userSelect: "none",
-                }}>
-                    {Object.entries(LABEL_COLOUR).map(([lbl, col]) => (
-                        <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <span style={{ width: 9, height: 9, borderRadius: "50%", background: col, display: "inline-block" }} />
-                            <span style={{ color: "var(--text-dim, #94a3b8)" }}>{lbl}</span>
-                        </div>
-                    ))}
-                    <div style={{ marginTop: 6, color: "var(--text-dim, #94a3b8)", borderTop: "1px solid var(--border, #334155)", paddingTop: 4 }}>
-                        {nodeCount} nodes · {edgeCount} edges
-                    </div>
-                </div>
-            )}
-
-            {/* Hover tooltip */}
-            {tooltip && (
-                <div style={{
-                    position: "absolute",
-                    left: tooltip.x + 12, top: tooltip.y - 8,
-                    background: "#0f172a", border: "1px solid #334155",
-                    borderRadius: 4, padding: "3px 8px",
-                    fontSize: 11, color: "#f1f5f9",
-                    pointerEvents: "none", whiteSpace: "nowrap",
-                }}>
-                    {tooltip.label}
-                </div>
-            )}
-
-            {/* Loading / empty / error overlays */}
-            {status === "loading" && (
-                <div style={overlayStyle}>
-                    <span style={{ color: "var(--text-dim, #94a3b8)", fontSize: 13 }}>Loading graph…</span>
-                </div>
-            )}
-            {status === "empty" && (
-                <div style={overlayStyle}>
-                    <span style={{ fontSize: 28, marginBottom: 8 }}>⬡</span>
-                    <span style={{ color: "var(--text-dim, #94a3b8)", fontSize: 13 }}>
-                        Graph is empty — post alerts at <code>localhost:8000/docs</code>
+        <div className={`graph ${fullscreen ? "fullscreen" : ""} ${compact ? "compact" : ""}`}>
+            {!compact && <div className="graph-legend">
+                {NODE_TYPES.map(type => (
+                    <span className="graph-legend-item" key={type}>
+                        <span
+                            className={`graph-legend-dot shape-${type.toLowerCase()}`}
+                            style={{ background: `var(${TOKEN[type]})` }}
+                        />
+                        {type}
                     </span>
-                </div>
-            )}
-            {status === "error" && (
-                <div style={overlayStyle}>
-                    <span style={{ color: "#f87171", fontSize: 13 }}>Could not load graph — is the backend running?</span>
-                </div>
-            )}
+                ))}
+                <span className="graph-legend-note">
+                    {loading
+                        ? "loading…"
+                        : `${graph.nodes.length} entities · ${graph.edges.length} connections`}
+                    {fullscreen && <span className="graph-esc">esc</span>}
+                </span>
+                <button
+                    className="graph-expand"
+                    onClick={() => setFullscreen(!fullscreen)}
+                    title={fullscreen ? "Exit fullscreen" : "Expand to fullscreen"}
+                >
+                    {fullscreen ? <Minimize2 /> : <Maximize2 />}
+                    {fullscreen ? "Exit" : "Expand"}
+                </button>
+            </div>}
+
+            {error && <div className="error">Could not load the graph — {error}</div>}
+
+            <div ref={containerRef} className="graph-canvas" />
         </div>
-    );
+    )
 }
 
-const overlayStyle = {
-    height: "100%",
-    width: "100%",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 6,
-    background: "var(--surface)",
-    border: "1px solid var(--border, #334155)",
-    gap: 8,
-};
-
-export default GraphCanvas;
+export default GraphCanvas; 

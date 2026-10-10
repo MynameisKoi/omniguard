@@ -2,7 +2,16 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "OmniGuard SOC Alert Contract & Graph Schema",
   "description": "The single alert contract every detection engine posts to POST /alerts, and the Neo4j property graph built from it. This file documents what backend/models.py and backend/graph.py actually implement - if they disagree, the code is right and this file is stale.",
-  "version": "2.1.0",
+  "version": "2.2.0",
+  "api_endpoints": {
+    "description": "What the backend exposes. Engines only need POST /alerts; the rest is for the dashboard. Base URL is http://localhost:8000 in dev, or the backend service in Docker.",
+    "POST /alerts": "Ingest an alert. Body is an AlertCreate. Returns the stored Alert (AlertCreate + server-generated alert_id and timestamp), 201. This is the one endpoint a detection engine calls.",
+    "GET /alerts": "All stored alerts, newest first. Used by the dashboard.",
+    "GET /graph": "The overview entity graph as {nodes, edges}. Only standing-fact relationships, so no Alert nodes appear.",
+    "GET /graph/host/{hostname}": "One host's neighbourhood to depth 2, same {nodes, edges} shape. Backs the per-alert graph on the detail page.",
+    "GET /health": "Liveness check, returns {\"status\": \"ok\"}.",
+    "WebSocket /ws/alerts": "Push channel. The server broadcasts each new alert as {\"type\": \"alert.created\", \"data\": <Alert>} right after it writes, so the dashboard updates with no reload."
+  },
   "definitions": {
     "SeverityEnum": {
       "type": "string",
@@ -498,5 +507,8 @@
     "Added a Technique node so alerts can be grouped by ATT&CK technique across engines.",
     "Connection detail (port, beacon_interval, mean_jitter) sits on the REPORTED_DST_IP edge rather than a separate COMMUNICATED_WITH edge.",
     "Alert edges renamed to the REPORTED_* family. The old names (TARGETS_HOST, FROM_SRC_IP, TO_DST_IP) read as if the alert were an actor - 'the alert came from this IP' - when an alert is an observation. Every edge now reads as a true sentence when you say it aloud."
+  ],
+  "changes_from_v2_1": [
+    "Added an api_endpoints section documenting the read side (GET /graph, GET /graph/host, GET /alerts, the /ws/alerts WebSocket). The contract and graph schema are unchanged."
   ]
 }
