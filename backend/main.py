@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 from events import manager
+ws_manager = manager
 from models import Alert, AlertCreate, AlertStatusUpdate
 from db import database
 from graph import ingest_alert, get_overview_graph, get_host_graph, update_alert_status
@@ -99,8 +100,8 @@ def get_host_graph_route(hostname: str):
 @app.websocket("/ws/alerts")
 async def get_live_alerts(websocket: WebSocket) -> None: 
     await manager.connect(websocket)
-    while True: 
-        try:
+    try:
+        while True: 
             await websocket.receive_text()
-        except WebSocketDisconnect:
-            manager.disconnect(websocket)
+    except (WebSocketDisconnect, Exception):
+        manager.disconnect(websocket)

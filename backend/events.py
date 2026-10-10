@@ -6,6 +6,10 @@ class ConnectionManager:
     def __init__(self) -> None:
         self.active: list[WebSocket] = []
 
+    @property
+    def active_connections(self) -> list[WebSocket]:
+        return self.active
+
     # writing the connect first 
     async def connect(self, websocket) -> None: 
         await websocket.accept()
