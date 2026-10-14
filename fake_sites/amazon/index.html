@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>amazon Sign In</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #ffffff;
+      color: #111111;
+    }
+
+    .page-wrapper {
+      min-height: 980px;
+    }
+
+    .logo-area {
+      text-align: center;
+      padding-top: 18px;
+      margin-bottom: 28px;
+    }
+
+    .logo-text {
+      display: inline-block;
+      position: relative;
+      font-size: 56px;
+      line-height: 1;
+      font-weight: 700;
+      letter-spacing: -3px;
+      color: #000;
+    }
+
+    .logo-text .fake {
+      font-size: 25px;
+      font-weight: 600;
+      letter-spacing: -1px;
+      margin-right: 3px;
+    }
+
+    .smile {
+      position: absolute;
+      left: 93px;
+      bottom: -13px;
+      width: 111px;
+      height: 24px;
+      border-bottom: 7px solid #ff9900;
+      border-radius: 0 0 90% 90%;
+      transform: rotate(2deg);
+    }
+
+    .smile::after {
+      content: "";
+      position: absolute;
+      right: -2px;
+      bottom: -6px;
+      width: 12px;
+      height: 12px;
+      border-right: 5px solid #ff9900;
+      border-top: 5px solid #ff9900;
+      transform: rotate(25deg);
+    }
+
+    .login-card {
+      width: 700px;
+      max-width: calc(100% - 40px);
+      margin: 0 auto;
+      border: 2px solid #d5d9d9;
+      border-radius: 17px;
+      padding: 47px 52px 46px;
+      background: #fff;
+    }
+
+    h1 {
+      margin: 0 0 18px;
+      font-size: 58px;
+      line-height: 1.05;
+      font-weight: 400;
+      letter-spacing: -1.5px;
+    }
+
+    label {
+      display: block;
+      font-size: 29px;
+      line-height: 1.2;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .input-box {
+      width: 100%;
+      height: 70px;
+      border: 2px solid #888c8c;
+      border-radius: 6px;
+      font-size: 25px;
+      padding: 10px 14px;
+      outline: none;
+      background: white;
+    }
+
+    .input-box:focus {
+      border-color: #007185;
+      box-shadow: 0 0 0 3px rgba(0, 113, 133, 0.18);
+    }
+
+    .password-label {
+      margin-top: 24px;
+    }
+
+    .continue-btn {
+      width: 100%;
+      height: 65px;
+      border: none;
+      border-radius: 40px;
+      background: #ffd814;
+      font-size: 29px;
+      margin-top: 24px;
+      cursor: pointer;
+    }
+
+    .continue-btn:hover {
+      background: #f7ca00;
+    }
+
+    .agreement {
+      font-size: 25px;
+      line-height: 1.35;
+      margin-top: 34px;
+      margin-bottom: 30px;
+    }
+
+    a {
+      color: #2162a1;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+      color: #c45500;
+    }
+
+    .help-link {
+      font-size: 28px;
+      margin-top: 8px;
+    }
+
+    .section-divider {
+      border: none;
+      border-top: 2px solid #d5d9d9;
+      margin: 46px 0 31px;
+    }
+
+    .business-title {
+      font-size: 29px;
+      font-weight: 700;
+      margin-bottom: 18px;
+    }
+
+    .business-link {
+      font-size: 27px;
+    }
+
+    .test-message {
+      display: none;
+      margin-top: 24px;
+      padding: 16px;
+      border: 2px solid #ff9900;
+      border-radius: 6px;
+      background: #fff8e7;
+      color: #111;
+      font-size: 18px;
+      line-height: 1.4;
+    }
+
+    footer {
+      border-top: 4px solid #d5d9d9;
+      margin-top: 96px;
+      padding: 50px 20px 140px;
+      text-align: center;
+      background: #ffffff;
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 18px;
+      flex-wrap: wrap;
+      font-size: 24px;
+      margin-bottom: 18px;
+    }
+
+    .copyright {
+      font-size: 22px;
+      color: #565959;
+    }
+
+    .test-note {
+      text-align: center;
+      font-size: 12px;
+      color: #777;
+      margin-top: 14px;
+    }
+
+    @media (max-width: 800px) {
+      .logo-text {
+        font-size: 44px;
+      }
+
+      .smile {
+        left: 76px;
+        width: 90px;
+      }
+
+      .login-card {
+        padding: 35px 28px;
+      }
+
+      h1 {
+        font-size: 45px;
+      }
+
+      label {
+        font-size: 24px;
+      }
+
+      .agreement,
+      .help-link,
+      .business-link {
+        font-size: 21px;
+      }
+
+      .business-title {
+        font-size: 24px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="page-wrapper">
+
+  <div class="logo-area">
+    <div class="logo-text">
+      <span class="fake"></span>amazon
+      <div class="smile"></div>
+    </div>
+  </div>
+
+  <main class="login-card">
+
+    <h1>
+      Sign in or create<br>
+      account
+    </h1>
+
+    <form id="loginForm">
+
+      <label for="email">
+        Enter mobile number or email
+      </label>
+
+      <input
+        class="input-box"
+        id="email"
+        type="text"
+        autocomplete="off"
+      />
+
+      <label
+        class="password-label"
+        for="password"
+      >
+        Password
+      </label>
+
+      <input
+        class="input-box"
+        id="password"
+        type="password"
+        autocomplete="off"
+      />
+
+      <button
+        class="continue-btn"
+        type="submit"
+      >
+        Sign in
+      </button>
+
+    </form>
+
+    <div class="agreement">
+      By continuing, you agree to amazon's
+      <a href="#">Conditions of Use</a>
+      and
+      <a href="#">Privacy Notice</a>.
+    </div>
+
+    <div class="help-link">
+      <a href="#">Need help?</a>
+    </div>
+
+    <hr class="section-divider">
+
+    <div class="business-title">
+      Buying for work?
+    </div>
+
+    <div class="business-link">
+      <a href="#">Create a free business account</a>
+    </div>
+
+    <div
+      id="testMessage"
+      class="test-message"
+    >
+      VerifyEye test triggered. No email, phone number,
+      password, or other information was transmitted or stored.
+    </div>
+
+  </main>
+
+  <div class="test-note">
+    OmniGuard / VerifyEye local testing page
+  </div>
+
+</div>
+
+<footer>
+
+  <div class="footer-links">
+    <a href="#">Conditions of Use</a>
+    <a href="#">Privacy Notice</a>
+    <a href="#">Help</a>
+  </div>
+
+  <div class="copyright">
+    © 1996-2026, amazon test environment
+  </div>
+
+</footer>
+
+<script>
+  document
+    .getElementById("loginForm")
+    .addEventListener("submit", function(event) {
+
+      event.preventDefault();
+
+      /*
+        VerifyEye local lab mode:
+        no API request,
+        no server submission,
+        no localStorage,
+        no credential logging.
+      */
+
+      document.getElementById("email").value = "";
+      document.getElementById("password").value = "";
+
+      document.getElementById("testMessage").style.display = "block";
+    });
+</script>
+
+</body>
+</html>
