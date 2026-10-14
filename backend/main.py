@@ -16,8 +16,9 @@ alerts_collection = database["alerts"]
 app = FastAPI(title="OmniGuard SOC API")
 
 app.add_middleware(
-    CORSMiddleware, 
+    CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=r"chrome-extension://.*",   # VerifyEye extension (id varies per machine)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]

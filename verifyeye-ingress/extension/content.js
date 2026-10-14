@@ -44,8 +44,37 @@ function guard() {
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
 }
 
+// we will send the post alert to the backend
+let reported = false;
+function report() {
+  if (reported) return;
+  reported = true;
+  const action = document.querySelector('form')?.getAttribute('action') || null;
+  chrome.runtime.sendMessage({
+    type: "phishing_detected",
+    alert: {
+      source: "verifyeye",
+      event_type: "phishing_page_detected",
+      severity: "critical",
+      // host is hardcoded for now — a browser extension can't read the machine's
+      // OS hostname (no API, blocked for privacy). real deploy: push it per-machine
+      // via managed policy (chrome.storage.managed). demo: make it an options-page
+      // setting later. this field is what the graph groups alerts by, so it matters.
+      host: "LAPTOP-10",
+      domain: location.hostname,
+      target_url: location.href,
+      action_endpoint: action,
+      mitre_technique: "T1566",
+      confidence: 0.9,
+      description: `Credential form on ${location.hostname} submitting to ${action || "unknown"}.`,
+    },
+  });
+}
+
+
 if (credentialFields.length > 0) {
     freeze()
     showBanner()
     guard()
+    report()
 }
