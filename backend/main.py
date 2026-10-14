@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket,  WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 from events import manager
 from models import Alert, AlertCreate
-from db import database
+from db import database, brands_collection
 from graph import ingest_alert, get_overview_graph, get_host_graph
 
 from config import CORS_ORIGINS
@@ -72,3 +72,8 @@ async def get_live_alerts(websocket: WebSocket) -> None:
             await websocket.receive_text()
         except WebSocketDisconnect:
             manager.disconnect(websocket)
+
+# new endpoint for getting the brands
+@app.get("/brands")
+def get_brands():
+    return list(brands_collection.find({}, {"_id": 0}))

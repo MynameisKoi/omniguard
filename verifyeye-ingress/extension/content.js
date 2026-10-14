@@ -72,9 +72,42 @@ function report() {
 }
 
 
-if (credentialFields.length > 0) {
-    freeze()
-    showBanner()
-    guard()
-    report()
+// now we have brands fetched from the database we will use the cached value and then use that to verify against 
+// so that not every page is blocked.
+// we will also have backend validation but for now we will have this for frontend
+function detectBrand(brands) {
+  // this will give me the entire page texts in lowercase
+  const text = (document.title + " " + document.body.innerText).toLowerCase();
+
+  // looping over the brands 
+  for (const brand of brands) {
+    // if we see any name that matches our brands we will return that one 
+    if (brand.keywords.some(kw => text.includes(kw))) {
+      return brand;
+    }
+  }
+
+  return null;
 }
+
+// another function to check if the found text is actually corresponding to the domain 
+function isLegitDomain(brand) {
+  const host = location.hostname.toLowerCase();
+
+  return brand.domains.some(domain => 
+    host === domain || host.endsWith("." + domain)
+  ); 
+}
+
+chrome.storage.local.get("brands", (d) => {
+  const brands = d.brands || [];
+  const brand = detectBrand(brands);
+
+  // if we have any brands and not legit we do this
+  if (credentialFields.length > 0 && brand && !isLegitDomain(brand)) {
+      freeze()
+      showBanner()
+      guard()
+      report()
+  }
+})
