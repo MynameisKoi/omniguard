@@ -1,9 +1,13 @@
 // finding the password fields in the page 
-const credentialFields = document.querySelectorAll(
-  'input[type="password"], input[type="email"], ' +
-  'input[id*="email" i], input[name*="email" i], input[autocomplete*="email"], ' +
-  'input[id*="user" i], input[name*="user" i], input[autocomplete="username"]'
-)
+// making this as a function 
+function hasCredentialFields() {
+  return document.querySelectorAll(
+    'input[type="password"], input[type="email"], ' +
+    'input[id*="email" i], input[name*="email" i], input[autocomplete*="email"], ' +
+    'input[id*="user" i], input[name*="user" i], input[autocomplete="username"]'
+  ).length > 0;
+}
+
 // writing the freeze function that will make the inputs, any text area, buttons unclickable
 function freeze() {
     // selecting all those elements
@@ -99,15 +103,38 @@ function isLegitDomain(brand) {
   ); 
 }
 
-chrome.storage.local.get("brands", (d) => {
-  const brands = d.brands || [];
+// we will write a function to run the detection 
+function runDetection(brands) {
   const brand = detectBrand(brands);
 
-  // if we have any brands and not legit we do this
-  if (credentialFields.length > 0 && brand && !isLegitDomain(brand)) {
-      freeze()
-      showBanner()
-      guard()
-      report()
+  if (hasCredentialFields() && brand && !isLegitDomain(brand)) {
+    freeze()
+    showBanner()
+    guard()
+    report()
+    return true;
   }
+
+  return false;
+}
+
+chrome.storage.local.get("brands", (d) => {
+  const brands = d.brands || [];
+
+  // if we have any brands and not legit we do this
+  if (!runDetection(brands)) {
+    const obs = new MutationObserver(() => {
+      if (runDetection(brands)) obs.disconnect();   // caught the late form → done
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+
+  let lastUrl = location.href;
+  setInterval(() => {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      reported = false;
+      runDetection(brands);
+    }
+  }, 1000)
 })
