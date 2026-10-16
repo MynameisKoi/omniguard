@@ -16,11 +16,17 @@ function freeze() {
       if(['password', 'email', 'text'].includes(el.type)) el.classList.add('ve-flagged');
     });
 
-    // not letting the button submit 
+    // not letting the button submit
     document.querySelectorAll('form button, button[type="submit"]').forEach(b => b.disabled = true);
 
-    // now preventing the forms to be submitted
-    document.querySelectorAll('form').forEach(f => f.addEventListener('submit', e => e.preventDefault()));
+    // stopping every form submit in one shot. we listen on the document in the
+    // capture phase (the true at the end) so we catch it on the way down, before
+    // the page's own handler can grab the password and send it off. stopPropagation
+    // means the page never even hears about the submit.
+    document.addEventListener('submit', e => {
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
 }
 
 function showBanner() {
