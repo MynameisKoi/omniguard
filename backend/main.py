@@ -4,6 +4,7 @@ from events import manager
 from models import Alert, AlertCreate
 from db import database, brands_collection
 from ai import run_triage
+from status import check_mongo, check_neo4j, check_ollama
 from graph import ingest_alert, get_overview_graph, get_host_graph
 
 from config import CORS_ORIGINS
@@ -85,3 +86,20 @@ async def ai_summary():
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(50))
     triage = await run_in_threadpool(run_triage, alerts)
     return {"triage": triage, "alert_count": len(alerts)}
+
+# live health of every piece the dashboard shows in its status panel. the checks
+# block (they talk to mongo/neo4j/ollama over the network) so we run them off the
+# event loop. "ingestion" means the pipeline can actually store alerts — mongo is
+# up and at least one alert has landed.
+@app.get("/status")
+async def get_status():
+    def gather():
+        mongo = check_mongo()
+        return {
+            "backend": True,
+            "mongo": mongo,
+            "neo4j": check_neo4j(),
+            "ollama": check_ollama(),
+            "ingestion": mongo and alerts_collection.estimated_document_count() > 0,
+        }
+    return await run_in_threadpool(gather)
