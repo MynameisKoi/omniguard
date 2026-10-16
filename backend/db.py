@@ -19,6 +19,7 @@ DEFAULT_BRANDS = [
     {"name": "Google",    "keywords": ["google", "gmail"],                    "domains": ["google.com"]},
     {"name": "Microsoft", "keywords": ["microsoft", "office 365", "outlook"], "domains": ["microsoft.com", "live.com"]},
     {"name": "Claude",    "keywords": ["claude", "anthropic"],                "domains": ["claude.ai", "anthropic.com"]},
+    {"name": "Apple",     "keywords": ["apple id", "icloud"],                 "domains": ["apple.com", "icloud.com"]},
 ]
 
 def seed_brands():

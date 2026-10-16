@@ -8,16 +8,21 @@ function hasCredentialFields() {
   ).length > 0;
 }
 
-// writing the freeze function that will make the inputs, any text area, buttons unclickable
+// writing the freeze function that will lock the credential fields
 function freeze() {
-    // selecting all those elements
-    document.querySelectorAll('input, textarea, button, select').forEach(el => {
+    // lock the credential fields but leave normal buttons alone. a phishing page
+    // can have a legit-looking "continue with google" that opens another fake
+    // popup — we want the user to still trigger it so we catch that popup too.
+    // only the credential fields + the submit buttons get disabled.
+    document.querySelectorAll('input, textarea, select').forEach(el => {
       el.disabled = true
       if(['password', 'email', 'text'].includes(el.type)) el.classList.add('ve-flagged');
     });
 
-    // not letting the button submit
-    document.querySelectorAll('form button, button[type="submit"]').forEach(b => b.disabled = true);
+    // not letting the form submit — only the submit buttons, NOT other buttons
+    // inside the form (an oauth "continue with google" is type=button and must
+    // stay clickable so we catch the popup it opens).
+    document.querySelectorAll('button[type="submit"], input[type="submit"]').forEach(b => b.disabled = true);
 
     // stopping every form submit in one shot. we listen on the document in the
     // capture phase (the true at the end) so we catch it on the way down, before

