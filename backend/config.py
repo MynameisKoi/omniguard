@@ -15,6 +15,10 @@ MONGO_DB = os.getenv("MONGO_DB", "omniguard")
 NEO4J_URI = os.getenv("NEO4J_URI", "neo4j://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 
+# ollama for AI 
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
+
 # no default - a password should never fall back to anything, least of all
 # neo4j's factory default. fail loudly at startup instead.
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")

@@ -3,6 +3,7 @@ from starlette.concurrency import run_in_threadpool
 from events import manager
 from models import Alert, AlertCreate
 from db import database, brands_collection
+from ai import run_triage
 from graph import ingest_alert, get_overview_graph, get_host_graph
 
 from config import CORS_ORIGINS
@@ -77,3 +78,10 @@ async def get_live_alerts(websocket: WebSocket) -> None:
 @app.get("/brands")
 def get_brands():
     return list(brands_collection.find({}, {"_id": 0}))
+
+# endpoint for ai summary for all the alerts
+@app.get("/ai/summary")
+async def ai_summary():
+    alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(50))
+    triage = await run_in_threadpool(run_triage, alerts)
+    return {"triage": triage, "alert_count": len(alerts)}
