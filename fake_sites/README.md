@@ -23,6 +23,9 @@ resolve to nothing. They exist only to prove detection works.
 | netflix    | 5800 | Netflix | |
 | tiktok     | 5900 | TikTok | |
 | amazon     | 6000 | Amazon | |
+| apple      | 6100 | Apple | fake Apple ID popup |
+
+> 📖 **Full Live Demo Walkthrough:** See [docs/DEMO_GUIDE.md](../docs/DEMO_GUIDE.md) for step-by-step instructions on presenting both the VerifyEye Extension & AI Analyst flow and the 4-Stage Adversary Simulation flow.
 
 ## The Google OAuth popup
 

@@ -2,6 +2,8 @@
 
 This directory contains the tools, payloads, and scripts to run a **live, real-time end-to-end intrusion & defense demo** on the OmniGuard SOC platform.
 
+> 📖 **Comprehensive Live Demo Guide:** See [docs/DEMO_GUIDE.md](../docs/DEMO_GUIDE.md) for detailed presenter instructions covering both this 4-Stage Adversary Simulation and the VerifyEye Browser Extension & Local AI Analyst flow.
+
 ---
 
 ## 🎭 The 4-Stage Attack Narrative
