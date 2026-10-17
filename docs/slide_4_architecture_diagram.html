@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>OmniGuard Architecture — Simple Overview</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body {
+    background: #090d16;
+    color: #f1f5f9;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .slide {
+    width: 1140px;
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 20px;
+    padding: 40px 48px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 36px;
+    border-bottom: 1px solid #1e293b;
+    padding-bottom: 20px;
+  }
+  .header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .header p {
+    color: #94a3b8;
+    font-size: 15px;
+    margin-top: 4px;
+  }
+  .pill {
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(52, 211, 153, 0.3);
+    padding: 8px 16px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pill-dot {
+    width: 8px;
+    height: 8px;
+    background: #10b981;
+    border-radius: 50%;
+    box-shadow: 0 0 8px #10b981;
+  }
+
+  /* 3-Column Pipeline */
+  .pipeline {
+    display: grid;
+    grid-template-columns: 1fr 40px 1.15fr 40px 1fr;
+    align-items: center;
+    gap: 0;
+  }
+
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .col-label {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-bottom: 2px;
+  }
+
+  /* Cards */
+  .card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 14px;
+    padding: 22px 24px;
+    position: relative;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  }
+
+  .card-blue { border-left: 5px solid #38bdf8; }
+  .card-amber { border-left: 5px solid #f59e0b; }
+  .card-purple { border-left: 5px solid #818cf8; background: #1a2238; }
+  .card-emerald { border-left: 5px solid #34d399; }
+  .card-pink { border-left: 5px solid #c084fc; }
+
+  .card-tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .tag-blue { color: #38bdf8; }
+  .tag-amber { color: #f59e0b; }
+  .tag-purple { color: #a5b4fc; }
+  .tag-emerald { color: #34d399; }
+  .tag-pink { color: #c084fc; }
+
+  .card-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-bottom: 8px;
+  }
+
+  .card-desc {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: #94a3b8;
+  }
+
+  /* Center Core Card Specials */
+  .db-pills {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .db-pill {
+    flex: 1;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: center;
+  }
+  .db-pill strong {
+    display: block;
+    font-size: 13px;
+    color: #f1f5f9;
+  }
+  .db-pill span {
+    font-size: 11px;
+    color: #64748b;
+  }
+
+  /* Arrows */
+  .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #475569;
+  }
+  .arrow-line {
+    width: 28px;
+    height: 2px;
+    background: #475569;
+    position: relative;
+  }
+  .arrow-line::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: -4px;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 6px solid #475569;
+  }
+  .arrow-sub {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-top: 6px;
+    letter-spacing: 0.05em;
+  }
+
+  /* Bottom Takeaways */
+  .footer-row {
+    margin-top: 36px;
+    padding-top: 22px;
+    border-top: 1px solid #1e293b;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+  }
+  .takeaway {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .takeaway-num {
+    width: 28px;
+    height: 28px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #38bdf8;
+  }
+  .takeaway-text strong {
+    display: block;
+    font-size: 13px;
+    color: #e2e8f0;
+  }
+  .takeaway-text span {
+    font-size: 12px;
+    color: #64748b;
+  }
+</style>
+</head>
+<body>
+
+<div class="slide">
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h1>System Architecture</h1>
+      <p>How OmniGuard ingests, correlates, and stops attacks in real time</p>
+    </div>
+    <div class="pill">
+      <div class="pill-dot"></div>
+      100% On-Premises · Zero Cloud Egress
+    </div>
+  </div>
+
+  <!-- Pipeline (3 clear stages) -->
+  <div class="pipeline">
+
+    <!-- 1. DETECT -->
+    <div class="col">
+      <div class="col-label">1. Detection (Producers)</div>
+
+      <div class="card card-blue">
+        <div class="card-tag tag-blue">Browser Ingress</div>
+        <div class="card-title">VerifyEye</div>
+        <div class="card-desc">
+          Detects fake login pages and locks user input fields in real time.
+        </div>
+      </div>
+
+      <div class="card card-amber">
+        <div class="card-tag tag-amber">Encrypted Egress</div>
+        <div class="card-title">SpectraC2</div>
+        <div class="card-desc">
+          Identifies hidden reverse-shell beacons using frequency signals (FFT).
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow 1 -->
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-sub">Alerts</div>
+    </div>
+
+    <!-- 2. CORRELATE -->
+    <div class="col">
+      <div class="col-label">2. Core &amp; Storage</div>
+
+      <div class="card card-purple">
+        <div class="card-tag tag-purple">Central Engine</div>
+        <div class="card-title">FastAPI Core API</div>
+        <div class="card-desc">
+          Validates incoming events through a single unified alert schema.
+        </div>
+
+        <div class="db-pills">
+          <div class="db-pill">
+            <strong>MongoDB</strong>
+            <span>Audit History &amp; Logs</span>
+          </div>
+          <div class="db-pill">
+            <strong>Neo4j Graph</strong>
+            <span>Attack Paths &amp; Blast Radius</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow 2 -->
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-sub">Live Feed</div>
+    </div>
+
+    <!-- 3. ACT -->
+    <div class="col">
+      <div class="col-label">3. Analysis &amp; Action</div>
+
+      <div class="card card-emerald">
+        <div class="card-tag tag-emerald">Analyst View</div>
+        <div class="card-title">SOC Dashboard</div>
+        <div class="card-desc">
+          Interactive attack graph, live incident stream, and 1-click host isolation.
+        </div>
+      </div>
+
+      <div class="card card-pink">
+        <div class="card-tag tag-pink">On-Device AI</div>
+        <div class="card-title">Local AI Analyst</div>
+        <div class="card-desc">
+          Summarizes incidents and recommends containment steps using Ollama.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Highlights -->
+  <div class="footer-row">
+    <div class="takeaway">
+      <div class="takeaway-num">1</div>
+      <div class="takeaway-text">
+        <strong>Contract-First Design</strong>
+        <span>Any new engine connects via 1 simple schema</span>
+      </div>
+    </div>
+    <div class="takeaway">
+      <div class="takeaway-num">2</div>
+      <div class="takeaway-text">
+        <strong>Graph Correlation</strong>
+        <span>Connects separate alerts into 1 unified incident</span>
+      </div>
+    </div>
+    <div class="takeaway">
+      <div class="takeaway-num">3</div>
+      <div class="takeaway-text">
+        <strong>Privacy Guaranteed</strong>
+        <span>Zero security telemetry leaves the company network</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
