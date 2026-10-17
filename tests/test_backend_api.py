@@ -105,3 +105,45 @@ def test_websocket_alerts_feed():
     with client.websocket_connect("/ws/alerts") as websocket:
         # Verify connection succeeds and manager registered connection
         assert len(backend_main.ws_manager.active_connections) >= 1
+
+
+def test_get_brands():
+    with patch.object(backend_main.brands_collection, "find") as mock_find:
+        mock_find.return_value = [{"name": "Google", "domains": ["google.com"]}]
+        res = client.get("/brands")
+        assert res.status_code == 200
+        assert res.json() == [{"name": "Google", "domains": ["google.com"]}]
+
+
+def test_get_status():
+    with patch("main.check_mongo", return_value=True), \
+         patch("main.check_neo4j", return_value=True), \
+         patch("main.check_ollama", return_value=True), \
+         patch.object(backend_main.alerts_collection, "estimated_document_count", return_value=5):
+        res = client.get("/status")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["backend"] is True
+        assert data["mongo"] is True
+        assert data["neo4j"] is True
+        assert data["ollama"] is True
+        assert data["ingestion"] is True
+
+
+def test_ai_summary():
+    with patch.object(backend_main.alerts_collection, "find") as mock_find, \
+         patch("main.run_triage", return_value="Summary: Phishing surge detected.\nNext steps: Isolate host."):
+        mock_cursor = MagicMock()
+        mock_cursor.sort.return_value = mock_cursor
+        mock_cursor.limit.return_value = [
+            {"alert_id": "a-1", "severity": "high", "source": "verifyeye", "event_type": "phishing"}
+        ]
+        mock_find.return_value = mock_cursor
+
+        res = client.get("/ai/summary")
+        assert res.status_code == 200
+        data = res.json()
+        assert "triage" in data
+        assert "Phishing surge detected" in data["triage"]
+        assert data["alert_count"] == 1
+
