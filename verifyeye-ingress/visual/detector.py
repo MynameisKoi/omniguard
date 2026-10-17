@@ -55,6 +55,18 @@ BRAND_SIGNATURES: Dict[str, list[re.Pattern]] = {
     "DHL Express": [
         re.compile(r"dhl|parcel\s*tracking", re.IGNORECASE),
     ],
+    "Anthropic Claude": [
+        re.compile(r"claude|anthropic", re.IGNORECASE),
+    ],
+    "GitHub": [
+        re.compile(r"github", re.IGNORECASE),
+    ],
+    "Instagram": [
+        re.compile(r"instagram", re.IGNORECASE),
+    ],
+    "Facebook": [
+        re.compile(r"facebook|meta", re.IGNORECASE),
+    ],
 }
 
 

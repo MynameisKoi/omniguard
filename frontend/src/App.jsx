@@ -7,7 +7,7 @@ import {
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
     ShieldAlert, Globe, Check, TriangleAlert, Inbox, X,
     Siren, Users, Activity, Target, TrendingUp, TrendingDown, Search, Bell,
-    UserRound, LogOut,
+    UserRound, LogOut, Sparkles, RefreshCw,
 } from 'lucide-react';
 import { Sparkline, StackedArea, BarRow, SampleBadge } from './charts';
 import { sampleThreatActivity, sampleSparkline, SAMPLE_DELTAS } from './sampleData';
@@ -23,15 +23,22 @@ const MITRE = {
     T1056: "Input capture",
 };
 
-/* TODO: these should come from a real /health check per service rather than
-   being hardcoded. Backend/Mongo/Neo4j are reachable if the app loaded at all;
-   the other two are placeholders. */
+/* the status panel's initial rows — shown until the first /status poll comes back */
 const SERVICES = [
     { name: "Backend API", ok: true },
     { name: "MongoDB", ok: true },
     { name: "Neo4j", ok: true },
     { name: "Data ingestion", ok: true },
     { name: "AI analysis", ok: false },
+];
+
+/* maps the keys the backend's /status returns to the labels we show, in order */
+const STATUS_ROWS = [
+    ["backend", "Backend API"],
+    ["mongo", "MongoDB"],
+    ["neo4j", "Neo4j"],
+    ["ingestion", "Data ingestion"],
+    ["ollama", "AI analysis"],
 ];
 
 const ENGINE_ROLE = {
@@ -74,6 +81,14 @@ function App() {
     // adding the state for alerts
     const [alerts, setAlerts] = useState([])
 
+    // adding the state for ai
+    const [aiText, setAiText] = useState("")
+    const [aiLoading, setAiLoading] = useState(false)
+    const [aiError, setAiError] = useState(null)
+
+    // live service health for the status panel (starts from the initial rows)
+    const [services, setServices] = useState(SERVICES)
+
     // adding the state for error
     const [error, setError] = useState(null)
 
@@ -97,6 +112,23 @@ function App() {
         .then((res) => res.json())
         .then((data) => setAlerts(data))
         .catch(err => setError(err.message))
+    }, []);
+
+    // poll /status so the system panel shows real health. runs now and every 10s.
+    useEffect(() => {
+        let alive = true
+        const pull = () => {
+            fetch(`${API_URL}/status`)
+            .then(res => res.json())
+            .then(data => {
+                if (alive) setServices(STATUS_ROWS.map(([key, name]) => ({ name, ok: !!data[key] })))
+            })
+            // backend unreachable means nothing is confirmed up — show it all down
+            .catch(() => { if (alive) setServices(STATUS_ROWS.map(([, name]) => ({ name, ok: false }))) })
+        }
+        pull()
+        const id = setInterval(pull, 10000)
+        return () => { alive = false; clearInterval(id) }
     }, []);
 
     useEffect(() => {
@@ -167,7 +199,8 @@ function App() {
 
     const countDistinct = (field) => Object.keys(countBy(field)).length;
 
-    const visible = scoped;
+    // newest alerts first on the Alerts page
+    const visible = [...scoped].sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
     const selected = alerts.find(a => a.alert_id === selectedId);
     const maxCount = Math.max(1, ...SEVERITIES.map(countOf));
     const engineCounts = countBy("source");
@@ -218,6 +251,23 @@ function App() {
         ? "Alerts"
         : NAV.flatMap(s => s.items).find(i => i.id === page)?.label ?? "Alerts";
 
+
+    async function runAiTriage() {
+        setAiLoading(true)
+        setAiError(null)
+
+        try {
+            const res = await fetch(`${API_URL}/ai/summary`)
+            if (!res.ok) throw new Error(res.status)
+            const data = await res.json()
+            setAiText(data.triage)
+        } catch (e) {
+            setAiError(String(e))
+        } finally {
+            setAiLoading(false)
+        }
+    }
+
     return (
         <div className="shell">
 
@@ -254,7 +304,7 @@ function App() {
                 {navOpen && (
                     <div className="sysstatus">
                         <div className="sysstatus-head">System status</div>
-                        {SERVICES.map(s => (
+                        {services.map(s => (
                             <div className="sysstatus-row" key={s.name}>
                                 <span className={`sysstatus-dot ${s.ok ? "ok" : "down"}`} />
                                 <span className="sysstatus-name">{s.name}</span>
@@ -553,6 +603,13 @@ function App() {
                                 <Stat icon={Inbox}       label="Low"          value={countOf("low")}        series="low"      tone="low" />
                                 <Stat icon={Target}      label="Untriaged"    value={untriaged}             series="incidents" tone="accent" />
                             </div>
+
+                            <AiTriage
+                                text={aiText}
+                                loading={aiLoading}
+                                error={aiError}
+                                onRun={runAiTriage}
+                            />
 
                             <Attention findings={findings} />
 
@@ -987,6 +1044,73 @@ function Attention({ findings = [] }) {
             </ul>
         </div>
     );
+}
+
+/* AI analyst panel — presentational only. The parent owns the fetch and passes
+   text / loading / error / onRun. Renders the local model's briefing. */
+function AiTriage({ text, loading, error, onRun }) {
+    return (
+        <section className="ai-triage">
+            <div className="ai-head">
+                <span className="ai-icon"><Cpu /></span>
+                <div className="ai-titles">
+                    <span className="ai-title">AI analyst</span>
+                    <span className="ai-sub">llama3.2:3b · runs locally</span>
+                </div>
+                <button className="ai-run" onClick={onRun} disabled={loading}>
+                    {loading
+                        ? <><RefreshCw className="ai-spin" /> Analyzing…</>
+                        : <><Sparkles /> {text ? "Regenerate" : "Generate briefing"}</>}
+                </button>
+            </div>
+            <div className="ai-body">
+                {error ? (
+                    <div className="ai-note ai-err">Couldn&rsquo;t reach the model — is Ollama running?</div>
+                ) : loading ? (
+                    <div className="ai-note ai-loading">
+                        <span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />
+                        Reading every alert&hellip;
+                    </div>
+                ) : text ? (
+                    <AiMarkdown text={text} />
+                ) : (
+                    <div className="ai-note ai-empty">
+                        Ask the local model to read every alert and write a summary with next steps.
+                    </div>
+                )}
+            </div>
+        </section>
+    );
+}
+
+/* tiny markdown renderer for the model output: **bold** headings, lists, paragraphs */
+function AiMarkdown({ text }) {
+    const inline = (s) =>
+        s.split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
+            p.startsWith("**") && p.endsWith("**")
+                ? <strong key={i}>{p.slice(2, -2)}</strong>
+                : <span key={i}>{p}</span>
+        );
+
+    const blocks = [];
+    let list = null;
+    const flush = () => {
+        if (list) { blocks.push(<ul key={`u${blocks.length}`} className="ai-list">{list}</ul>); list = null; }
+    };
+
+    text.split("\n").forEach((raw, i) => {
+        const line = raw.trim();
+        if (!line) { flush(); return; }
+        const headingBold = /^\*\*(.+?)\*\*:?$/.exec(line);
+        if (line.startsWith("#")) { flush(); blocks.push(<h4 key={i} className="ai-h">{inline(line.replace(/^#+\s*/, ""))}</h4>); return; }
+        if (headingBold) { flush(); blocks.push(<h4 key={i} className="ai-h">{headingBold[1]}</h4>); return; }
+        const li = /^(\d+\.|[-*])\s+(.*)$/.exec(line);
+        if (li) { if (!list) list = []; list.push(<li key={i}>{inline(li[2])}</li>); return; }
+        flush();
+        blocks.push(<p key={i} className="ai-p">{inline(line)}</p>);
+    });
+    flush();
+    return <div className="ai-md">{blocks}</div>;
 }
 
 /* summary card: a few rows plus a "view all" into the full page */
