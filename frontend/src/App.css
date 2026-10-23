@@ -2189,3 +2189,65 @@ button { font: inherit; color: inherit; }
   background: var(--accent);
 }
 .ai-md strong { font-weight: 650; color: var(--text); }
+
+/* ── mobile / phone layout ──────────────────────────────── */
+/* the topbar hamburger and drawer backdrop are desktop-hidden by default */
+.topbar-burger { display: none; }
+.nav-backdrop { display: none; }
+
+@media (max-width: 820px) {
+  /* one column — the nav floats over the content as a drawer */
+  .shell { grid-template-columns: 1fr; }
+  /* let the main column shrink below its content width (kills horizontal overflow) */
+  .main { min-width: 0; }
+  .content { overflow-x: hidden; }
+  .topbar { overflow: hidden; }
+  .topbar .search { width: 100%; min-width: 0; }
+
+  .nav {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 248px;
+    z-index: 200;
+    transform: translateX(0);
+    transition: transform 0.22s ease;
+    box-shadow: 2px 0 20px rgba(0, 0, 0, 0.3);
+  }
+  /* closed drawer slides fully off-screen (overrides the 56px desktop rail) */
+  .nav.collapsed {
+    width: 248px;
+    transform: translateX(-100%);
+  }
+  /* keep full labels + status visible inside the open drawer */
+  .nav.collapsed .nav-group-label { visibility: visible; height: auto; }
+
+  .nav-backdrop {
+    display: block;
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 150;
+  }
+
+  /* the topbar hamburger is the way into the drawer on mobile */
+  .topbar-burger {
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    width: 36px; height: 36px;
+    margin-right: 2px;
+    border: 0; background: transparent;
+    color: var(--text); cursor: pointer;
+    border-radius: var(--r-sm);
+    flex: none;
+  }
+  .topbar-burger:hover { background: var(--hover); }
+
+  /* let the search shrink instead of overflowing the bar */
+  .topbar { gap: 8px; }
+  .topbar .searchbox { min-width: 0; }
+  .clock { display: none; }  /* no room for the date on a phone */
+
+  /* tighter padding + stack every multi-column grid */
+  .content { padding: 14px; }
+  .grid-3, .grid-2 { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+}
