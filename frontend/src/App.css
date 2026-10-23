@@ -2201,8 +2201,9 @@ button { font: inherit; color: inherit; }
   /* let the main column shrink below its content width (kills horizontal overflow) */
   .main { min-width: 0; }
   .content { overflow-x: hidden; }
-  .topbar { overflow: hidden; }
-  .topbar .search { width: 100%; min-width: 0; }
+  .topbar { overflow: hidden; flex-wrap: nowrap; }
+  /* the page title must never wrap to a second line; keep short titles whole */
+  .crumb { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 0 auto; max-width: 55%; }
 
   .nav {
     position: fixed;
@@ -2241,10 +2242,12 @@ button { font: inherit; color: inherit; }
   }
   .topbar-burger:hover { background: var(--hover); }
 
-  /* let the search shrink instead of overflowing the bar */
+  /* declutter the top bar on phones */
   .topbar { gap: 8px; }
-  .topbar .searchbox { min-width: 0; }
-  .clock { display: none; }  /* no room for the date on a phone */
+  .clock { display: none; }                      /* no room for the date */
+  .topbar .searchbox { display: none; }          /* search is WIP; hide to free space */
+  .whoami-name, .whoami-chev { display: none; }  /* keep just the avatar */
+  .live { flex: none; }                          /* don't let the Live pill get clipped */
 
   /* tighter padding + stack every multi-column grid */
   .content { padding: 14px; }
