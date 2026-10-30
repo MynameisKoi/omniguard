@@ -49,14 +49,43 @@ function showBanner() {
   document.getElementById('ve-leave').addEventListener('click', () => { window.location.href = 'about:blank'; });
 }
 
+let guardObserver = null;
 function guard() {
-  const observer = new MutationObserver(() => {
-    // if the page re enables any field or deletes our banner we will put it back 
+  guardObserver = new MutationObserver(() => {
+    // if the page re enables any field or deletes our banner we will put it back
     const tampered = [...document.querySelectorAll('input')].some(el => !el.disabled)
       || !document.getElementById('verifyeye-banner');
     if (tampered) { freeze(); showBanner(); }
   })
-  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+  guardObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+}
+
+function unfreeze() {
+  if (guardObserver) guardObserver.disconnect();
+  document.querySelectorAll('input, textarea, select, button').forEach(el => {
+    el.disabled = false;
+    el.classList.remove('ve-flagged');
+  });
+  document.getElementById('verifyeye-banner')?.remove();
+}
+
+let verified = false;
+function verifyWithAgent() {
+  if (verified) return;
+  verified = true;
+  chrome.runtime.sendMessage({ type: "verify", url: location.href }, (res) => {
+    if (!res || !res.ok || !res.verdict) return;
+    const v = res.verdict;
+    const frozen = !!document.getElementById('verifyeye-banner');
+    if (v.phishing && !frozen) {
+      freeze();
+      showBanner();
+      guard();
+      report();
+    } else if (!v.phishing && v.credential_form && !v.off_domain && frozen) {
+      unfreeze();
+    }
+  });
 }
 
 // we will send the post alert to the backend
@@ -190,15 +219,18 @@ function scorePage(brands) {
 const FREEZE_THRESHOLD = 50;
 
 function runDetection(brands) {
-  if (scorePage(brands) >= FREEZE_THRESHOLD) {
+  const froze = scorePage(brands) >= FREEZE_THRESHOLD;
+
+  if (froze) {
     freeze()
     showBanner()
     guard()
     report()
-    return true;
   }
 
-  return false;
+  if (hasCredentialFields()) verifyWithAgent();
+
+  return froze;
 }
 
 chrome.storage.local.get("brands", (d) => {
@@ -217,6 +249,7 @@ chrome.storage.local.get("brands", (d) => {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       reported = false;
+      verified = false;
       runDetection(brands);
     }
   }, 1000)

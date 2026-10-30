@@ -7,19 +7,24 @@ function blockHost(url) {
     if (!url) return;
     try {
         const host = new URL(url).hostname;
-        chrome.declarativeNetRequest.updateDynamicRules({
-            addRules: [{
-                id: Math.floor(Math.random() * 1e6),  // random so we don't clash with an existing rule id
-                priority: 1,
-                action: {type: "block"},
-                condition: {
-                    urlFilter: `||${host}`,
-                    resourceTypes: ["main_frame", "sub_frame", "xmlhttprequest", "ping", "other"],
-                },
-            }],
-            removeRuleIds: [],
+        const filter = `||${host}`;
+        chrome.declarativeNetRequest.getDynamicRules().then(rules => {
+            if (rules.some(r => r.condition.urlFilter === filter)) return;
+            const id = rules.reduce((m, r) => Math.max(m, r.id), 0) + 1;
+            chrome.declarativeNetRequest.updateDynamicRules({
+                addRules: [{
+                    id,
+                    priority: 1,
+                    action: {type: "block"},
+                    condition: {
+                        urlFilter: filter,
+                        resourceTypes: ["main_frame", "sub_frame", "xmlhttprequest", "ping", "other"],
+                    },
+                }],
+                removeRuleIds: [],
+            });
         });
-    } catch (e) {}  // a weird/relative action url just means nothing to block
+    } catch (e) {}
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -34,6 +39,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })
         .then(r => r.json())
         .then(data => sendResponse({ok: true, data}))
+        .catch(err => sendResponse({ok: false, error: String(err)}));
+        return true
+    }
+
+    if (msg.type == "verify") {
+        fetch("http://localhost:8100/verify", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({url: msg.url}),
+        })
+        .then(r => r.json())
+        .then(verdict => sendResponse({ok: true, verdict}))
         .catch(err => sendResponse({ok: false, error: String(err)}));
         return true
     }
