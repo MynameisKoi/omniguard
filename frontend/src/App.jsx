@@ -100,7 +100,8 @@ function App({ user, onLogout, onUserChange }) {
     const [error, setError] = useState(null)
 
     // ui state
-    const [navOpen, setNavOpen] = useState(true)
+    // open by default on desktop, collapsed into a drawer on phones
+    const [navOpen, setNavOpen] = useState(() => window.innerWidth > 820)
     const [page, setPage] = useState("overview")   // always land on the dashboard
     const [selectedId, setSelectedId] = useState(null)
     const [filter, setFilter] = useState(null)
@@ -339,7 +340,7 @@ function App({ user, onLogout, onUserChange }) {
                                 <button
                                     key={item.id}
                                     className={`nav-item ${page === item.id || (page === "alert-detail" && item.id === "alerts") ? "active" : ""}`}
-                                    onClick={() => { setPage(item.id); setSelectedId(null); }}
+                                    onClick={() => { setPage(item.id); setSelectedId(null); if (window.innerWidth <= 820) setNavOpen(false); }}
                                     title={item.label}
                                 >
                                     <span className="nav-icon"><Icon /></span>
@@ -367,10 +368,16 @@ function App({ user, onLogout, onUserChange }) {
                 )}
             </nav>
 
+            {/* dims the page behind the mobile drawer; tap to close (hidden on desktop) */}
+            {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
+
             {/* ─── main column ──────────────────────── */}
             <div className="main">
 
                 <header className="topbar">
+                    <button className="topbar-burger" onClick={() => setNavOpen(!navOpen)} aria-label="Open navigation">
+                        <Menu size={18} />
+                    </button>
                     <div className="crumb">
                         {page === "alert-detail" ? (
                             <>
