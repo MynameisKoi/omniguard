@@ -1,10 +1,13 @@
-from fastapi import FastAPI, WebSocket,  WebSocketDisconnect
+from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException
 from starlette.concurrency import run_in_threadpool
 from events import manager
 from models import Alert, AlertCreate
 from db import database, brands_collection
-from ai import run_triage
+from ai import run_triage, answer_question
+from auth import check_login, update_user
 from status import check_mongo, check_neo4j, check_ollama
+from typing import Literal
+from pydantic import BaseModel, Field
 from graph import ingest_alert, get_overview_graph, get_host_graph
 
 from config import CORS_ORIGINS
@@ -30,6 +33,35 @@ app.add_middleware(
 def get_health():
     return {"status": "ok"}
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+# analyst login for the dashboard. same error for a wrong email or a wrong
+# password, so nobody can use it to find out which emails have accounts
+@app.post("/auth/login")
+async def login(payload: LoginRequest):
+    user = await run_in_threadpool(check_login, payload.email, payload.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    return user
+
+class ProfileUpdate(BaseModel):
+    email: str
+    current_password: str
+    name: str = Field(default="", max_length=80)
+    new_password: str | None = Field(default=None, min_length=8)
+
+# profile page: change display name and/or password
+@app.post("/auth/profile")
+async def update_profile(payload: ProfileUpdate):
+    user = await run_in_threadpool(
+        update_user, payload.email, payload.current_password, payload.name, payload.new_password
+    )
+    if not user:
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    return user
+
 # This is coming from our security system
 # They store the event here
 @app.post("/alerts", response_model=Alert, status_code=201)
@@ -40,8 +72,12 @@ async def create_alert(payload: AlertCreate) -> Alert:
     await run_in_threadpool(alerts_collection.insert_one, alert.model_dump())
 
     # now creating the graph in neo4j as well
-    # running in threadpool 
-    await run_in_threadpool(ingest_alert, alert)
+    # running in threadpool. if neo4j is down the alert is already saved in mongo,
+    # so log it and carry on — the dashboard should still get the live alert
+    try:
+        await run_in_threadpool(ingest_alert, alert)
+    except Exception as e:
+        print(f"graph write failed for alert {alert.alert_id}: {e}")
 
     # now broadcasting to all the websockets about the new alert
     await manager.broadcast(alert.model_dump(mode="json"))
@@ -103,3 +139,19 @@ async def get_status():
             "ingestion": mongo and alerts_collection.estimated_document_count() > 0,
         }
     return await run_in_threadpool(gather)
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "ai"]
+    text: str
+
+class ChatRequest(BaseModel):
+    question: str
+    history: list[ChatTurn] = Field(default_factory=list, max_length=10)
+
+@app.post("/ai/chat")
+async def ai_chat(payload: ChatRequest):
+    # newest first; counts use all of them, the prompt only lists the newest 50
+    alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(2000))
+    history = [t.model_dump() for t in payload.history]
+    answer = await run_in_threadpool(answer_question, payload.question, alerts, history)
+    return {"answer": answer}

@@ -49,14 +49,43 @@ function showBanner() {
   document.getElementById('ve-leave').addEventListener('click', () => { window.location.href = 'about:blank'; });
 }
 
+let guardObserver = null;
 function guard() {
-  const observer = new MutationObserver(() => {
-    // if the page re enables any field or deletes our banner we will put it back 
+  guardObserver = new MutationObserver(() => {
+    // if the page re enables any field or deletes our banner we will put it back
     const tampered = [...document.querySelectorAll('input')].some(el => !el.disabled)
       || !document.getElementById('verifyeye-banner');
     if (tampered) { freeze(); showBanner(); }
   })
-  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+  guardObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+}
+
+function unfreeze() {
+  if (guardObserver) guardObserver.disconnect();
+  document.querySelectorAll('input, textarea, select, button').forEach(el => {
+    el.disabled = false;
+    el.classList.remove('ve-flagged');
+  });
+  document.getElementById('verifyeye-banner')?.remove();
+}
+
+let verified = false;
+function verifyWithAgent() {
+  if (verified) return;
+  verified = true;
+  chrome.runtime.sendMessage({ type: "verify", url: location.href }, (res) => {
+    if (!res || !res.ok || !res.verdict) return;
+    const v = res.verdict;
+    const frozen = !!document.getElementById('verifyeye-banner');
+    if (v.phishing && !frozen) {
+      freeze();
+      showBanner();
+      guard();
+      report();
+    } else if (!v.phishing && v.credential_form && !v.off_domain && frozen) {
+      unfreeze();
+    }
+  });
 }
 
 // we will send the post alert to the backend
@@ -105,28 +134,103 @@ function detectBrand(brands) {
   return null;
 }
 
-// another function to check if the found text is actually corresponding to the domain 
+// another function to check if the found text is actually corresponding to the domain
 function isLegitDomain(brand) {
   const host = location.hostname.toLowerCase();
 
-  return brand.domains.some(domain => 
+  return brand.domains.some(domain =>
     host === domain || host.endsWith("." + domain)
-  ); 
+  );
 }
 
-// we will write a function to run the detection 
-function runDetection(brands) {
+function registrableDomain(host) {
+  return host.toLowerCase().split(".").slice(-2).join(".");
+}
+
+function submitsOffDomain() {
+  const field = document.querySelector('input[type="password"], input[type="email"]');
+  const action = field?.closest("form")?.getAttribute("action");
+  if (!action) return false;
+  let actionHost;
+  try {
+    actionHost = new URL(action, location.href).hostname;
+  } catch {
+    return false;
+  }
+  return registrableDomain(actionHost) !== registrableDomain(location.hostname);
+}
+
+function editDistance(a, b) {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function looksLikeTyposquat(brands) {
+  const host = registrableDomain(location.hostname);
+  return brands.some(brand =>
+    brand.domains.some(domain => {
+      const d = registrableDomain(domain);
+      const dist = editDistance(host, d);
+      return dist > 0 && dist <= 2;
+    })
+  );
+}
+
+function hasHomoglyphOrPunycode() {
+  const host = location.hostname.toLowerCase();
+  if (host.includes("xn--")) return true;
+  return /[^\u0000-\u007f]/.test(host);
+}
+
+function brandAsSubdomain(brands) {
+  const labels = location.hostname.toLowerCase().split(".");
+  const reg = registrableDomain(location.hostname);
+  return brands.some(brand =>
+    brand.domains.some(domain => {
+      const name = registrableDomain(domain).split(".")[0];
+      return labels.includes(name) && !reg.startsWith(name + ".") && reg.split(".")[0] !== name;
+    })
+  );
+}
+
+function scorePage(brands) {
+  if (!hasCredentialFields()) return 0;
+
+  let score = 0;
   const brand = detectBrand(brands);
 
-  if (hasCredentialFields() && brand && !isLegitDomain(brand)) {
+  if (brand && !isLegitDomain(brand)) score += 10;
+  if (submitsOffDomain()) score += 40;
+  if (looksLikeTyposquat(brands)) score += 30;
+  if (hasHomoglyphOrPunycode()) score += 30;
+  if (brandAsSubdomain(brands)) score += 25;
+
+  return score;
+}
+
+const FREEZE_THRESHOLD = 50;
+
+function runDetection(brands) {
+  const froze = scorePage(brands) >= FREEZE_THRESHOLD;
+
+  if (froze) {
     freeze()
     showBanner()
     guard()
     report()
-    return true;
   }
 
-  return false;
+  if (hasCredentialFields()) verifyWithAgent();
+
+  return froze;
 }
 
 chrome.storage.local.get("brands", (d) => {
@@ -145,6 +249,7 @@ chrome.storage.local.get("brands", (d) => {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       reported = false;
+      verified = false;
       runDetection(brands);
     }
   }, 1000)
