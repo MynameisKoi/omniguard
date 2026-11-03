@@ -1,13 +1,13 @@
 import "./App.css"
 import { API_URL, WS_URL } from "./config"
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import GraphCanvas from './GraphCanvas';
 import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
     ShieldAlert, Globe, Check, TriangleAlert, Inbox, X,
     Siren, Users, Activity, Target, TrendingUp, TrendingDown, Search, Bell,
-    UserRound, LogOut, Sparkles, RefreshCw,
+    UserRound, LogOut, Sparkles, RefreshCw, Send, Bot,
 } from 'lucide-react';
 import { Sparkline, StackedArea, BarRow, SampleBadge } from './charts';
 import { sampleThreatActivity, sampleSparkline, SAMPLE_DELTAS } from './sampleData';
@@ -77,7 +77,11 @@ const NAV = [
     ]},
 ];
 
-function App() {
+function App({ user, onLogout, onUserChange }) {
+    // shown in the account menu: name if set, otherwise the email
+    const displayName = user.name || user.email
+    const initials = displayName.split(/[\s.@]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("")
+
     // adding the state for alerts
     const [alerts, setAlerts] = useState([])
 
@@ -85,6 +89,9 @@ function App() {
     const [aiText, setAiText] = useState("")
     const [aiLoading, setAiLoading] = useState(false)
     const [aiError, setAiError] = useState(null)
+
+    const [chatMessages, setChatMessages] = useState([])
+    const [chatLoading, setChatLoading] = useState(false)
 
     // live service health for the status panel (starts from the initial rows)
     const [services, setServices] = useState(SERVICES)
@@ -94,7 +101,7 @@ function App() {
 
     // ui state
     const [navOpen, setNavOpen] = useState(true)
-    const [page, setPage] = useState("alerts")
+    const [page, setPage] = useState("overview")   // always land on the dashboard
     const [selectedId, setSelectedId] = useState(null)
     const [filter, setFilter] = useState(null)
     const [srcFilter, setSrcFilter] = useState(null)
@@ -131,22 +138,42 @@ function App() {
         return () => { alive = false; clearInterval(id) }
     }, []);
 
+    // live alerts. if the connection drops (backend restart, wifi blip) we retry
+    // every 3s, and on reconnect re-fetch the list so alerts sent meanwhile aren't lost
     useEffect(() => {
-        const socket = new WebSocket(`${WS_URL}/ws/alerts`)
+        let socket
         let closing = false
+        let retry
+        let dropped = false
 
-        socket.onmessage = (event) => {
-            const alert = JSON.parse(event.data)
-            setAlerts(prev => [alert, ...prev])
-        }
+        const connect = () => {
+            socket = new WebSocket(`${WS_URL}/ws/alerts`)
 
-        socket.onerror = () => { 
-            if (!closing) setError("Lost the live connection to the backend")
+            socket.onopen = () => {
+                setError(null)
+                if (dropped) {
+                    fetch(`${API_URL}/alerts`).then(res => res.json()).then(setAlerts).catch(() => {})
+                }
+            }
+
+            socket.onmessage = (event) => {
+                const alert = JSON.parse(event.data)
+                setAlerts(prev => [alert, ...prev])
+            }
+
+            socket.onclose = () => {
+                if (closing) return
+                dropped = true
+                setError("Lost the live connection to the backend — reconnecting…")
+                retry = setTimeout(connect, 3000)
+            }
         }
+        connect()
 
         return () => {
-            closing = true 
-            socket.close() 
+            closing = true
+            clearTimeout(retry)
+            socket.close()
         }
 
     }, [])
@@ -249,6 +276,8 @@ function App() {
 
     const pageLabel = page === "alert-detail"
         ? "Alerts"
+        : page === "profile"
+        ? "Profile"
         : NAV.flatMap(s => s.items).find(i => i.id === page)?.label ?? "Alerts";
 
 
@@ -265,6 +294,27 @@ function App() {
             setAiError(String(e))
         } finally {
             setAiLoading(false)
+        }
+    }
+
+    async function sendChat(question) {
+        // earlier turns go along so follow-ups ("what about that host?") have context
+        const history = chatMessages.slice(-6)
+        setChatMessages(prev => [...prev, { role: "user", text: question }])
+        setChatLoading(true)
+        try {
+            const res = await fetch(`${API_URL}/ai/chat`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question, history }),
+            })
+            if (!res.ok) throw new Error(res.status)
+            const data = await res.json()
+            setChatMessages(prev => [...prev, { role: "ai", text: data.answer }])
+        } catch {
+            setChatMessages(prev => [...prev, { role: "ai", text: "Couldn't reach the model — is Ollama running?" }])
+        } finally {
+            setChatLoading(false)
         }
     }
 
@@ -423,32 +473,28 @@ function App() {
                             onClick={() => setMenu(menu === "profile" ? null : "profile")}
                             aria-label="Account menu"
                         >
-                            <span className="avatar sm">AM</span>
+                            <span className="avatar sm">{initials}</span>
                             <span className="whoami-name">SOC Analyst</span>
                             <ChevronDown className="whoami-chev" />
                         </button>
                         {menu === "profile" && (
                             <div className="dropdown">
                                 <div className="dropdown-id">
-                                    <span className="avatar">AM</span>
+                                    <span className="avatar">{initials}</span>
                                     <span>
-                                        <b>A. Maharjan</b>
-                                        <em>Tier 2 analyst</em>
+                                        <b>{displayName}</b>
+                                        <em>{user.email}</em>
                                     </span>
                                 </div>
-                                <button className="dropdown-item" onClick={() => setMenu(null)}>
+                                <button className="dropdown-item" onClick={() => { setMenu(null); setPage("profile"); setSelectedId(null); }}>
                                     <UserRound /> Profile
                                 </button>
-                                <button className="dropdown-item" onClick={() => setMenu(null)}>
+                                <button className="dropdown-item" onClick={() => { setMenu(null); setPage("settings"); setSelectedId(null); }}>
                                     <Settings /> Preferences
                                 </button>
-                                <button className="dropdown-item danger" onClick={() => setMenu(null)}>
+                                <button className="dropdown-item danger" onClick={onLogout}>
                                     <LogOut /> Log out
                                 </button>
-                                <div className="dropdown-note">
-                                    <SampleBadge note="work needed" />
-                                    Placeholders — there's no auth yet.
-                                </div>
                             </div>
                         )}
                     </span>
@@ -1013,14 +1059,100 @@ function App() {
                                     <KV k="Alerts stored" v={String(alerts.length)} />
                                     <KV k="Contract" v="AlertCreate v0.2" />
                                     <KV k="Theme" v={theme} />
-                                    <KV k="Signed in as" v="A. Maharjan" />
+                                    <KV k="Signed in as" v={displayName} />
                                 </div>
                             </Panel>
                         </div>
                     )}
 
+                    {/* ── profile ── */}
+                    {page === "profile" && <ProfilePage user={user} onSaved={onUserChange} />}
+
                 </div>
             </div>
+
+            {/* rendered once, outside the pages: one chat, on every page,
+                and the conversation survives switching pages */}
+            <AiChat
+                messages={chatMessages}
+                loading={chatLoading}
+                onSend={sendChat}
+                onClear={() => setChatMessages([])}
+            />
+        </div>
+    )
+}
+
+/* Account page: shows who is signed in and lets them change their name and
+   password. Every save needs the current password (v1 has no tokens yet). */
+function ProfilePage({ user, onSaved }) {
+    const [name, setName] = useState(user.name || "")
+    const [current, setCurrent] = useState("")
+    const [next, setNext] = useState("")
+    const [confirm, setConfirm] = useState("")
+    const [msg, setMsg] = useState(null)        // { tone: "ok" | "bad", text }
+    const [saving, setSaving] = useState(false)
+
+    const save = (e) => {
+        e.preventDefault()
+        if (next && next.length < 8) return setMsg({ tone: "bad", text: "New password must be at least 8 characters." })
+        if (next !== confirm) return setMsg({ tone: "bad", text: "New passwords don't match." })
+        setSaving(true)
+        setMsg(null)
+        fetch(`${API_URL}/auth/profile`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: user.email, current_password: current, name, new_password: next || null }),
+        })
+        .then(res => {
+            if (res.status === 401) throw new Error("Current password is incorrect.")
+            if (!res.ok) throw new Error("Couldn't save — try again.")
+            return res.json()
+        })
+        .then(updated => {
+            onSaved(updated)
+            setCurrent(""); setNext(""); setConfirm("")
+            setMsg({ tone: "ok", text: next ? "Saved. Your password has been changed." : "Saved." })
+        })
+        .catch(err => setMsg({ tone: "bad", text: err.message === "Failed to fetch" ? "Can't reach the backend." : err.message }))
+        .finally(() => setSaving(false))
+    }
+
+    return (
+        <div className="cols">
+            <Panel title="Account">
+                <div className="kv">
+                    <KV k="Name" v={user.name} />
+                    <KV k="Email" v={user.email} />
+                    <KV k="Role" v="SOC analyst" />
+                </div>
+            </Panel>
+            <Panel title="Edit profile">
+                <form className="profile-form" onSubmit={save}>
+                    <label className="login-field">
+                        <span>Display name</span>
+                        <input value={name} onChange={e => setName(e.target.value)} maxLength={80} />
+                    </label>
+                    <label className="login-field">
+                        <span>New password <em>(leave blank to keep)</em></span>
+                        <input type="password" autoComplete="new-password" value={next} onChange={e => setNext(e.target.value)} />
+                    </label>
+                    {next && (
+                        <label className="login-field">
+                            <span>Confirm new password</span>
+                            <input type="password" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} />
+                        </label>
+                    )}
+                    <label className="login-field">
+                        <span>Current password <em>(required to save)</em></span>
+                        <input type="password" autoComplete="current-password" required value={current} onChange={e => setCurrent(e.target.value)} />
+                    </label>
+                    {msg && <div className={msg.tone === "ok" ? "profile-ok" : "login-error"}>{msg.text}</div>}
+                    <button className="login-btn" type="submit" disabled={saving}>
+                        {saving ? "Saving…" : "Save changes"}
+                    </button>
+                </form>
+            </Panel>
         </div>
     )
 }
@@ -1078,6 +1210,109 @@ function AiTriage({ text, loading, error, onRun }) {
                         Ask the local model to read every alert and write a summary with next steps.
                     </div>
                 )}
+            </div>
+        </section>
+    );
+}
+
+/* floating chat widget, bottom-right. Closed = round launcher button,
+   open = pop-up window. Messages live in App so closing doesn't lose them. */
+function AiChat({ messages, loading, onSend, onClear }) {
+    const [open, setOpen] = useState(false);
+    const [q, setQ] = useState("");
+    const logRef = useRef(null);
+    const inputRef = useRef(null);
+    // grow the text box with what's typed (capped by max-height in CSS)
+    useEffect(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = `${el.scrollHeight}px`;
+    }, [q, open]);
+    useEffect(() => {
+        if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+    }, [messages, loading, open]);
+    useEffect(() => {
+        if (!open) return;
+        const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [open]);
+    const submit = (e) => {
+        e.preventDefault();
+        const text = q.trim();
+        if (!text || loading) return;
+        onSend(text);
+        setQ("");
+    };
+
+    if (!open) {
+        return (
+            <button className="ai-chat-fab" onClick={() => setOpen(true)} aria-label="Open analyst chat">
+                <Bot />
+                {loading && <span className="ai-chat-fab-dot" />}
+            </button>
+        );
+    }
+
+    return (
+        <section className="ai-chat-pop" role="dialog" aria-label="Ask the analyst">
+            <div className="ai-head">
+                <span className="ai-icon"><Bot /></span>
+                <div className="ai-titles">
+                    <span className="ai-title">Ask the analyst</span>
+                    <span className="ai-sub">llama3.2:3b · answers from your alerts</span>
+                </div>
+                {messages.length > 0 && (
+                    <button className="ai-chat-clear" onClick={onClear} disabled={loading}>
+                        Clear
+                    </button>
+                )}
+                <button
+                    className={`ai-chat-close ${messages.length ? "" : "solo"}`}
+                    onClick={() => setOpen(false)}
+                    aria-label="Minimise chat"
+                >
+                    <ChevronDown />
+                </button>
+            </div>
+            <div className="ai-body">
+                <div className="ai-chat-log" ref={logRef}>
+                    {messages.length === 0 && !loading && (
+                        <div className="ai-note ai-empty">
+                            Ask about your alerts — e.g. &ldquo;which hosts are beaconing?&rdquo;
+                        </div>
+                    )}
+                    {messages.map((m, i) => (
+                        <div key={i} className={`ai-msg ai-msg-${m.role}`}>
+                            {m.role === "ai" ? <AiMarkdown text={m.text} /> : m.text}
+                        </div>
+                    ))}
+                    {loading && (
+                        <div className="ai-msg ai-msg-ai">
+                            <div className="ai-note ai-loading">
+                                <span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" /> Thinking&hellip;
+                            </div>
+                        </div>
+                    )}
+                </div>
+                <form className="ai-chat-input" onSubmit={submit}>
+                    <textarea
+                        ref={inputRef}
+                        autoFocus
+                        rows={1}
+                        value={q}
+                        onChange={e => setQ(e.target.value)}
+                        onKeyDown={e => {
+                            // Enter sends, Shift+Enter is a new line
+                            if (e.key === "Enter" && !e.shiftKey) submit(e);
+                        }}
+                        placeholder="Ask about your alerts…"
+                    />
+                    <button className="ai-run" type="submit" disabled={loading} aria-label="Send">
+                        <Send />
+                    </button>
+                </form>
             </div>
         </section>
     );

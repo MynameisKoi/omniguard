@@ -8,6 +8,7 @@ client = MongoClient(MONGO_URI)
 database = client[MONGO_DB]
 
 brands_collection = database["brands"]
+users_collection = database["users"]
 
 # the default signature set — seeded into Mongo on startup if empty, then
 # served to the extension. We are just adding the brands here later we can make small endpoints to add brands or add directly in mongodb(second one doesn't seem like a good idea tho)
