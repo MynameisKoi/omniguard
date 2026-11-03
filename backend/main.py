@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta
 from typing import Literal
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,7 @@ from events import manager
 from graph import get_host_graph, get_overview_graph, ingest_alert, update_alert_status
 from models import Alert, AlertCreate, AlertStatusUpdate
 from status import check_mongo, check_neo4j, check_ollama
+from dedup import compute_alert_simhash, find_matching_alert
 
 ws_manager = manager
 
@@ -77,7 +79,47 @@ async def update_profile(payload: ProfileUpdate):
 # They store the event here
 @app.post("/alerts", response_model=Alert, status_code=201)
 async def create_alert(payload: AlertCreate) -> Alert:
-    alert = Alert(**payload.model_dump())
+    now = datetime.now(timezone.utc)
+    sim_val, sim_hex = compute_alert_simhash(payload.model_dump())
+
+    # Sliding-window deduplication (AiSOC pattern):
+    # Check candidate recent alerts from the same host in the last 120s
+    cutoff = now - timedelta(seconds=120)
+    try:
+        recent = list(
+            alerts_collection.find(
+                {"host": payload.host, "timestamp": {"$gte": cutoff}},
+                {"_id": 0},
+            ).limit(50)
+        )
+    except Exception:
+        recent = []
+
+    match = find_matching_alert(sim_val, recent, max_hamming_distance=3)
+    if match:
+        updated = alerts_collection.find_one_and_update(
+            {"alert_id": match["alert_id"]},
+            {
+                "$inc": {"occurrence_count": 1},
+                "$set": {"last_seen": now},
+            },
+            return_document=True,
+        )
+        if updated:
+            updated.pop("_id", None)
+            fused_alert = Alert(**updated)
+            await manager.broadcast({
+                "type": "alert_fused",
+                "alert": fused_alert.model_dump(mode="json"),
+            })
+            return fused_alert
+
+    alert = Alert(
+        **payload.model_dump(),
+        simhash=sim_hex,
+        occurrence_count=1,
+        last_seen=now,
+    )
 
     # running in threadpool
     await run_in_threadpool(alerts_collection.insert_one, alert.model_dump())

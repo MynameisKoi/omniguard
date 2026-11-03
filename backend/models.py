@@ -127,6 +127,18 @@ class Alert(AlertCreate):
         default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp for when the alert was created"
     )
+    occurrence_count: int = Field(
+        1,
+        description="Number of fused near-duplicate occurrences within the deduplication window",
+    )
+    last_seen: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Timestamp of the most recent occurrence of this fused incident",
+    )
+    simhash: str | None = Field(
+        None,
+        description="64-bit Simhash fingerprint hex string used for perceptual deduplication",
+    )
 
 class AlertStatusUpdate(BaseModel):
     status: Literal["new", "triaged", "resolved"] = Field(
