@@ -9,6 +9,7 @@ from status import check_mongo, check_neo4j, check_ollama
 from typing import Literal
 from pydantic import BaseModel, Field
 from graph import ingest_alert, get_overview_graph, get_host_graph
+from agents import MultiAgentInvestigationPipeline
 
 from config import CORS_ORIGINS
 
@@ -155,3 +156,19 @@ async def ai_chat(payload: ChatRequest):
     history = [t.model_dump() for t in payload.history]
     answer = await run_in_threadpool(answer_question, payload.question, alerts, history)
     return {"answer": answer}
+
+
+class PipelineInvestigationRequest(BaseModel):
+    hostname: str
+
+
+@app.post("/ai/investigate/pipeline")
+async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
+    """
+    Runs multi-agent investigation workflow on a target host:
+    CorrelatorAgent -> TriageAgent -> ContainmentAgent.
+    """
+    alerts = list(alerts_collection.find({}, {"_id": 0}))
+    pipeline = MultiAgentInvestigationPipeline()
+    result = await run_in_threadpool(pipeline.investigate, payload.hostname, alerts)
+    return result
