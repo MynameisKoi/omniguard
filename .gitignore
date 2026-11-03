@@ -28,3 +28,14 @@ htmlcov/
 Thumbs.db
 # local notes — never pushed
 notes/
+
+# report build deps
+report/node_modules/
+report/*.pdf
+report/pg-*.jpg
+
+# local demo helpers
+demo/
+
+# dev stack logs
+.devlogs/

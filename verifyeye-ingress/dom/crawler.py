@@ -15,6 +15,10 @@ def _analyze_with_playwright(url: str) -> Dict[str, Any]:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        try:
+            page.wait_for_selector("input[type='password']", timeout=5000)
+        except Exception:
+            pass
 
         title = page.title()
         forms = page.locator("form")
