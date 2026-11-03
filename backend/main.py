@@ -21,6 +21,7 @@ from ledger import (
     get_ledger_for_entity,
     get_recent_ledger,
 )
+from agents import MultiAgentInvestigationPipeline
 
 ws_manager = manager
 
@@ -325,3 +326,21 @@ async def verify_ledger():
         "records_checked": total,
         "status": "verified" if is_valid else "tamper_detected",
     }
+
+
+# ── Multi-Agent Triage Pipeline Endpoint ────────────────────────────
+
+class PipelineInvestigationRequest(BaseModel):
+    hostname: str
+
+
+@app.post("/ai/investigate/pipeline")
+async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
+    """
+    Runs multi-agent investigation workflow on a target host:
+    CorrelatorAgent -> TriageAgent -> ContainmentAgent.
+    """
+    alerts = list(alerts_collection.find({}, {"_id": 0}))
+    pipeline = MultiAgentInvestigationPipeline()
+    result = await run_in_threadpool(pipeline.investigate, payload.hostname, alerts)
+    return result
