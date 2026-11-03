@@ -2253,4 +2253,233 @@ button { font: inherit; color: inherit; }
   .content { padding: 14px; }
   .grid-3, .grid-2 { grid-template-columns: 1fr; }
   .stats { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+/* ── AI chat panel ──────────────────────────────────────── */
+/* launcher button + pop-up window, fixed bottom-right on every page.
+   z-index sits above dropdowns (120) but below the fullscreen graph (200). */
+.ai-chat-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.ai-chat-fab:hover { transform: scale(1.06); }
+.ai-chat-fab svg { width: 24px; height: 24px; }
+.ai-chat-fab-dot {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 11px; height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--accent);
+  animation: ai-pulse 1.1s ease-in-out infinite;
+}
+
+.ai-chat-pop {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  height: 540px;
+  max-height: calc(100vh - 48px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: ai-chat-in 0.16s ease-out;
+}
+@keyframes ai-chat-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: none; }
+}
+.ai-chat-pop .ai-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 14px 12px;
+}
+@media (max-width: 600px) {
+  .ai-chat-fab { right: 16px; bottom: 16px; }
+  .ai-chat-pop { right: 16px; bottom: 16px; }
+}
+
+.ai-chat-close {
+  display: grid;
+  place-items: center;
+  width: 28px; height: 28px;
+  border: none;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+.ai-chat-close.solo { margin-left: auto; }
+.ai-chat-close:hover { background: var(--surface); color: var(--text); }
+.ai-chat-close svg { width: 17px; height: 17px; }
+
+.ai-chat-log {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+.ai-msg {
+  max-width: 85%;
+  padding: 9px 13px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ai-msg-user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+  white-space: pre-wrap; /* keep Shift+Enter line breaks */
+}
+.ai-msg-ai {
+  align-self: flex-start;
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-line);
+  border-bottom-left-radius: 4px;
+}
+.ai-msg-ai .ai-md { font-size: 14px; }
+.ai-msg-ai .ai-md > :last-child { margin-bottom: 0; }
+
+.ai-chat-clear {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--dim);
+  font-family: var(--sans);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.ai-chat-clear:hover { color: var(--text); border-color: var(--accent); }
+.ai-chat-clear:disabled { opacity: 0.6; cursor: default; }
+
+.ai-chat-input { display: flex; align-items: flex-end; gap: 8px; }
+/* wraps onto new lines and grows with the text (JS sets height), up to ~5 lines */
+.ai-chat-input textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  max-height: 120px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.ai-chat-input textarea:focus { outline: none; border-color: var(--accent); }
+.ai-chat-input .ai-run { flex: none; height: 38px; padding: 0 12px; }
+
+/* ─── login ──────────────────────────────────────── */
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+}
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg), var(--edge);
+}
+.login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.login-logo {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--r-md);
+  background: var(--accent-wash);
+  color: var(--accent-text);
+}
+.login-logo svg { width: 20px; height: 20px; }
+.login-sub { font-size: var(--t-sm); color: var(--dim); margin-top: 2px; }
+.login-field { display: flex; flex-direction: column; gap: 6px; font-size: var(--t-sm); color: var(--dim); }
+.login-field input {
+  height: 38px;
+  padding: 0 11px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--t-md);
+}
+.login-field input:focus { outline: none; border-color: var(--accent); }
+.login-error {
+  padding: 8px 11px;
+  border-radius: var(--r-md);
+  background: var(--critical-wash);
+  color: var(--critical);
+  font-size: var(--t-sm);
+}
+.login-btn {
+  height: 38px;
+  margin-top: 4px;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: var(--t-md);
+  font-weight: 600;
+  cursor: pointer;
+}
+.login-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.login-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ─── profile ────────────────────────────────────── */
+.profile-form { display: flex; flex-direction: column; gap: 14px; max-width: 380px; }
+.login-field em { font-style: normal; color: var(--faint); }
+.profile-ok {
+  padding: 8px 11px;
+  border-radius: var(--r-md);
+  background: var(--good-wash);
+  color: var(--good);
+  font-size: var(--t-sm);
 }
