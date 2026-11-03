@@ -147,3 +147,75 @@ def test_ai_summary():
         assert "Phishing surge detected" in data["triage"]
         assert data["alert_count"] == 1
 
+
+def test_auth_login_success():
+    with patch("main.check_login", return_value={"email": "analyst@omniguard.io", "name": "SOC Analyst"}):
+        res = client.post("/auth/login", json={"email": "analyst@omniguard.io", "password": "valid_password"})
+        assert res.status_code == 200
+        assert res.json() == {"email": "analyst@omniguard.io", "name": "SOC Analyst"}
+
+
+def test_auth_login_invalid_credentials():
+    with patch("main.check_login", return_value=None):
+        res = client.post("/auth/login", json={"email": "analyst@omniguard.io", "password": "wrong_password"})
+        assert res.status_code == 401
+        assert res.json()["detail"] == "Invalid email or password"
+
+
+def test_auth_profile_update_success():
+    with patch("main.update_user", return_value={"email": "analyst@omniguard.io", "name": "Senior Analyst"}):
+        res = client.post(
+            "/auth/profile",
+            json={
+                "email": "analyst@omniguard.io",
+                "current_password": "current_pass",
+                "name": "Senior Analyst",
+                "new_password": "new_secret_password_123",
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["name"] == "Senior Analyst"
+
+
+def test_auth_profile_update_wrong_password():
+    with patch("main.update_user", return_value=None):
+        res = client.post(
+            "/auth/profile",
+            json={
+                "email": "analyst@omniguard.io",
+                "current_password": "wrong_current_pass",
+                "name": "Senior Analyst",
+            },
+        )
+        assert res.status_code == 401
+        assert "Current password is incorrect" in res.json()["detail"]
+
+
+def test_ai_chat():
+    with patch.object(backend_main.alerts_collection, "find") as mock_find, \
+         patch("main.answer_question", return_value="The most affected host is LAPTOP-10 with 5 alerts."):
+        mock_cursor = MagicMock()
+        mock_cursor.sort.return_value = mock_cursor
+        mock_cursor.limit.return_value = [{"alert_id": "a-1", "host": "LAPTOP-10"}]
+        mock_find.return_value = mock_cursor
+
+        payload = {
+            "question": "Which host has the most alerts?",
+            "history": [{"role": "user", "text": "Hello"}],
+        }
+        res = client.post("/ai/chat", json=payload)
+        assert res.status_code == 200
+        data = res.json()
+        assert "answer" in data
+        assert "LAPTOP-10" in data["answer"]
+
+
+def test_seed_default_user_logic():
+    with patch("auth.users_collection.estimated_document_count", return_value=0), \
+         patch("auth.create_user") as mock_create:
+        from auth import seed_default_user
+        result = seed_default_user()
+        assert result is True
+        mock_create.assert_called_once()
+
+

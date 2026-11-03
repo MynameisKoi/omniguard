@@ -15,14 +15,17 @@ def hash_password(password):
     return f"{salt.hex()}:{digest.hex()}"
 
 def verify_password(password, stored):
-    salt_hex, digest_hex = stored.split(":")
-    digest = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt_hex), n=2**14, r=8, p=1)
-    # constant-time compare so timing doesn't leak how much matched
-    return hmac.compare_digest(digest.hex(), digest_hex)
+    try:
+        salt_hex, digest_hex = stored.split(":")
+        digest = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt_hex), n=2**14, r=8, p=1)
+        # constant-time compare so timing doesn't leak how much matched
+        return hmac.compare_digest(digest.hex(), digest_hex)
+    except Exception:
+        return False
 
 def check_login(email, password):
     user = users_collection.find_one({"email": email.strip().lower()})
-    if not user or not verify_password(password, user["password_hash"]):
+    if not user or not verify_password(password, user.get("password_hash", "")):
         return None
     return {"email": user["email"], "name": user.get("name", "")}
 
@@ -43,6 +46,17 @@ def create_user(email, password, name=""):
         {"$set": {"email": email, "name": name, "password_hash": hash_password(password)}},
         upsert=True,
     )
+
+def seed_default_user(email="analyst@omniguard.io", password="omniguard123", name="SOC Analyst"):
+    """Seeds a default SOC analyst user if the users collection is currently empty."""
+    try:
+        if users_collection.estimated_document_count() == 0:
+            create_user(email, password, name)
+            print(f"[auth] Seeded default SOC analyst account: {email}")
+            return True
+    except Exception as e:
+        print(f"[auth] Warning: could not check or seed default user: {e}")
+    return False
 
 # usage: python auth.py analyst@omniguard.io "password" "A. Maharjan"
 if __name__ == "__main__":

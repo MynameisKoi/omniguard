@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from typing import Literal
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,7 +6,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from ai import answer_question, run_triage
-from auth import check_login, update_user
+from auth import check_login, update_user, seed_default_user
 from config import CORS_ORIGINS
 from db import brands_collection, database
 from events import manager
@@ -15,15 +16,20 @@ from status import check_mongo, check_neo4j, check_ollama
 
 ws_manager = manager
 
-from config import CORS_ORIGINS
-
-from fastapi.middleware.cors import CORSMiddleware
-
 # getting the collection
 alerts_collection = database["alerts"]
 
 
-app = FastAPI(title="OmniGuard SOC API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        await run_in_threadpool(seed_default_user)
+    except Exception as e:
+        print(f"[startup] Notice: {e}")
+    yield
+
+
+app = FastAPI(title="OmniGuard SOC API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
