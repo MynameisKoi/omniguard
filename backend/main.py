@@ -22,6 +22,7 @@ from ledger import (
     get_recent_ledger,
 )
 from agents import MultiAgentInvestigationPipeline
+from ocsf import alert_to_ocsf, export_alerts_to_ocsf
 
 ws_manager = manager
 
@@ -150,6 +151,24 @@ def get_alerts() -> list[Alert]:
     alerts: list[Alert] = list(alerts_collection.find({}, {"_id": 0}))
     return alerts
 
+# ── OCSF Export Endpoints (Enterprise SIEM Integration) ─────────────
+
+@app.get("/alerts/export/ocsf")
+async def export_ocsf(limit: int = 200):
+    """Exports alerts in standardized OCSF v1.2.0 batch envelope for Splunk/AWS Security Lake."""
+    alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
+    return export_alerts_to_ocsf(alerts)
+
+
+@app.get("/alerts/{alert_id}/ocsf")
+async def get_alert_ocsf(alert_id: str):
+    """Retrieves an individual alert formatted as an OCSF Class 2001 (Security Finding)."""
+    alert = alerts_collection.find_one({"alert_id": alert_id}, {"_id": 0})
+    if not alert:
+        raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found")
+    return alert_to_ocsf(alert)
+
+
 @app.patch("/alerts/{alert_id}", response_model=Alert)
 async def patch_alert_status(alert_id: str, payload: AlertStatusUpdate) -> Alert:
     """Updates triage status for an alert in MongoDB and Neo4j, then broadcasts to active dashboards."""
@@ -169,19 +188,6 @@ async def patch_alert_status(alert_id: str, payload: AlertStatusUpdate) -> Alert
 
     await manager.broadcast({"type": "alert_updated", "alert": alert.model_dump(mode="json")})
     return alert
-
-@app.post("/hosts/{hostname}/isolate", status_code=202)
-def isolate_host(hostname: str):
-    """
-    EDR network containment action.
-    Isolates the host at the network layer to contain lateral movement and C2 traffic.
-    """
-    return {
-        "status": "isolated",
-        "host": hostname,
-        "action": "network_isolation",
-        "message": f"Host '{hostname}' successfully isolated from the corporate network.",
-    }
 
 # This is for graph to be shown in the frontend 
 @app.get("/graph")
