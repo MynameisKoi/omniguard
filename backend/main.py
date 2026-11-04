@@ -75,24 +75,28 @@ async def create_alert(payload: AlertCreate) -> Alert:
     # Check candidate recent alerts from the same host in the last 120s
     cutoff = now - timedelta(seconds=120)
     try:
-        recent = list(
-            alerts_collection.find(
-                {"host": payload.host, "timestamp": {"$gte": cutoff}},
-                {"_id": 0},
-            ).limit(50)
+        recent = await run_in_threadpool(
+            lambda: list(
+                alerts_collection.find(
+                    {"host": payload.host, "last_seen": {"$gte": cutoff}},
+                    {"_id": 0},
+                ).limit(50)
+            )
         )
     except Exception:
         recent = []
 
     match = find_matching_alert(sim_val, recent, max_hamming_distance=3)
     if match:
-        updated = alerts_collection.find_one_and_update(
-            {"alert_id": match["alert_id"]},
-            {
-                "$inc": {"occurrence_count": 1},
-                "$set": {"last_seen": now},
-            },
-            return_document=True,
+        updated = await run_in_threadpool(
+            lambda: alerts_collection.find_one_and_update(
+                {"alert_id": match["alert_id"]},
+                {
+                    "$inc": {"occurrence_count": 1},
+                    "$set": {"last_seen": now},
+                },
+                return_document=True,
+            )
         )
         if updated:
             updated.pop("_id", None)

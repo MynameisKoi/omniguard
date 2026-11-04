@@ -158,8 +158,13 @@ function App({ user, onLogout, onUserChange }) {
             }
 
             socket.onmessage = (event) => {
-                const alert = JSON.parse(event.data)
-                setAlerts(prev => [alert, ...prev])
+                const msg = JSON.parse(event.data)
+                if (msg.type === "alert_fused") {
+                    const fused = msg.alert
+                    setAlerts(prev => [fused, ...prev.filter(a => a.alert_id !== fused.alert_id)])
+                } else {
+                    setAlerts(prev => [msg, ...prev])
+                }
             }
 
             socket.onclose = () => {

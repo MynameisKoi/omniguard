@@ -65,6 +65,8 @@ def compute_alert_simhash(alert_data: Dict[str, Any]) -> Tuple[int, str]:
     host = alert_data.get("host") or ""
     domain = alert_data.get("domain") or ""
     mitre = alert_data.get("mitre_technique") or ""
+    brand = alert_data.get("brand_target") or ""
+    dst_ip = alert_data.get("dst_ip") or ""
 
     if source:
         features.extend([f"src:{source.lower()}"] * 3)
@@ -76,10 +78,10 @@ def compute_alert_simhash(alert_data: Dict[str, Any]) -> Tuple[int, str]:
         features.extend([f"dom:{domain.lower()}"] * 4)
     if mitre:
         features.extend([f"mit:{mitre.lower()}"] * 2)
-
-    desc = alert_data.get("description") or ""
-    for tok in tokenize(desc):
-        features.append(f"desc:{tok}")
+    if brand:
+        features.extend([f"brd:{brand.lower()}"] * 4)
+    if dst_ip:
+        features.extend([f"dip:{dst_ip.lower()}"] * 4)
 
     val = simhash(features)
     return val, f"{val:016x}"
