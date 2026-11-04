@@ -6,9 +6,17 @@ from db import database, brands_collection
 from ai import run_triage, answer_question
 from auth import check_login, update_user
 from status import check_mongo, check_neo4j, check_ollama
+from datetime import datetime, timezone, timedelta
 from typing import Literal
 from pydantic import BaseModel, Field
 from graph import ingest_alert, get_overview_graph, get_host_graph
+from dedup import compute_alert_simhash, find_matching_alert
+from ledger import (
+    append_ledger_entry,
+    verify_ledger_integrity,
+    get_ledger_for_entity,
+    get_recent_ledger,
+)
 from agents import MultiAgentInvestigationPipeline
 
 from config import CORS_ORIGINS
@@ -67,7 +75,51 @@ async def update_profile(payload: ProfileUpdate):
 # They store the event here
 @app.post("/alerts", response_model=Alert, status_code=201)
 async def create_alert(payload: AlertCreate) -> Alert:
-    alert = Alert(**payload.model_dump())
+    now = datetime.now(timezone.utc)
+    sim_val, sim_hex = compute_alert_simhash(payload.model_dump())
+
+    # Sliding-window deduplication (AiSOC pattern):
+    # Check candidate recent alerts from the same host in the last 120s
+    cutoff = now - timedelta(seconds=120)
+    try:
+        recent = await run_in_threadpool(
+            lambda: list(
+                alerts_collection.find(
+                    {"host": payload.host, "last_seen": {"$gte": cutoff}},
+                    {"_id": 0},
+                ).limit(50)
+            )
+        )
+    except Exception:
+        recent = []
+
+    match = find_matching_alert(sim_val, recent, max_hamming_distance=3)
+    if match:
+        updated = await run_in_threadpool(
+            lambda: alerts_collection.find_one_and_update(
+                {"alert_id": match["alert_id"]},
+                {
+                    "$inc": {"occurrence_count": 1},
+                    "$set": {"last_seen": now},
+                },
+                return_document=True,
+            )
+        )
+        if updated:
+            updated.pop("_id", None)
+            fused_alert = Alert(**updated)
+            await manager.broadcast({
+                "type": "alert_fused",
+                "alert": fused_alert.model_dump(mode="json"),
+            })
+            return fused_alert
+
+    alert = Alert(
+        **payload.model_dump(),
+        simhash=sim_hex,
+        occurrence_count=1,
+        last_seen=now,
+    )
 
     # running in threadpool
     await run_in_threadpool(alerts_collection.insert_one, alert.model_dump())
@@ -155,6 +207,21 @@ async def ai_chat(payload: ChatRequest):
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(2000))
     history = [t.model_dump() for t in payload.history]
     answer = await run_in_threadpool(answer_question, payload.question, alerts, history)
+
+    # Record to replayable decision ledger
+    try:
+        await run_in_threadpool(
+            append_ledger_entry,
+            entity_type="SYSTEM",
+            entity_id="SOC_AI_CHAT",
+            stage="AI_ANALYST_CONSULTATION",
+            action_taken="ANSWER_QUERY",
+            reasoning_output=answer,
+            input_context={"question": payload.question, "alerts_evaluated": len(alerts)},
+        )
+    except Exception as e:
+        print(f"Ledger write notice: {e}")
+
     return {"answer": answer}
 
 
@@ -168,7 +235,69 @@ async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
     Runs multi-agent investigation workflow on a target host:
     CorrelatorAgent -> TriageAgent -> ContainmentAgent.
     """
-    alerts = list(alerts_collection.find({}, {"_id": 0}))
+    alerts = await run_in_threadpool(lambda: list(alerts_collection.find({}, {"_id": 0})))
     pipeline = MultiAgentInvestigationPipeline()
     result = await run_in_threadpool(pipeline.investigate, payload.hostname, alerts)
     return result
+
+
+@app.post("/hosts/{hostname}/isolate", status_code=202)
+async def isolate_host(hostname: str):
+    """
+    Host containment (DEMO STUB).
+    Records the containment decision to the immutable ledger and returns what the
+    dashboard would show. It does NOT yet perform real network isolation or update
+    the attack graph — real EDR enforcement + Neo4j graph isolation are planned.
+    """
+    msg = f"Containment requested for '{hostname}'. Simulated for now — no real network action is taken yet."
+    try:
+        await run_in_threadpool(
+            append_ledger_entry,
+            entity_type="HOST",
+            entity_id=hostname,
+            stage="EDR_CONTAINMENT",
+            action_taken="NETWORK_ISOLATION_SIMULATED",
+            reasoning_output=msg,
+            analyst_user="analyst@omniguard.io",
+        )
+    except Exception as e:
+        print(f"Ledger write notice: {e}")
+
+    return {
+        "status": "isolation_requested",
+        "simulated": True,
+        "host": hostname,
+        "action": "network_isolation",
+        "message": msg,
+    }
+
+
+# ── Decision Ledger Audit Endpoints ─────────────────────────────────
+
+@app.get("/investigations/ledger")
+async def read_ledger(limit: int = 50):
+    """Retrieves newest entries from the replayable investigation decision ledger."""
+    records = await run_in_threadpool(get_recent_ledger, limit)
+    return {"records": records, "count": len(records)}
+
+
+@app.get("/investigations/ledger/host/{hostname}")
+async def read_host_ledger(hostname: str):
+    """Retrieves all decision ledger records associated with a specific host."""
+    records = await run_in_threadpool(get_ledger_for_entity, hostname)
+    return {"host": hostname, "records": records, "count": len(records)}
+
+
+@app.get("/investigations/ledger/verify")
+async def verify_ledger():
+    """
+    Cryptographic verification endpoint:
+    Audits the entire SHA-256 hash chain to verify zero tampering or dropped records.
+    """
+    is_valid, failing_id, total = await run_in_threadpool(verify_ledger_integrity)
+    return {
+        "valid": is_valid,
+        "failing_ledger_id": failing_id,
+        "records_checked": total,
+        "status": "verified" if is_valid else "tamper_detected",
+    }
