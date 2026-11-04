@@ -227,18 +227,19 @@ async def ai_chat(payload: ChatRequest):
 @app.post("/hosts/{hostname}/isolate", status_code=202)
 async def isolate_host(hostname: str):
     """
-    EDR network containment action.
-    Isolates the host at the network layer to contain lateral movement and C2 traffic.
-    Logs immutable audit record to the decision ledger.
+    Host containment (DEMO STUB).
+    Records the containment decision to the immutable ledger and returns what the
+    dashboard would show. It does NOT yet perform real network isolation or update
+    the attack graph — real EDR enforcement + Neo4j graph isolation are planned.
     """
-    msg = f"Host '{hostname}' successfully isolated from the corporate network."
+    msg = f"Containment requested for '{hostname}'. Simulated for now — no real network action is taken yet."
     try:
         await run_in_threadpool(
             append_ledger_entry,
             entity_type="HOST",
             entity_id=hostname,
             stage="EDR_CONTAINMENT",
-            action_taken="NETWORK_ISOLATION",
+            action_taken="NETWORK_ISOLATION_SIMULATED",
             reasoning_output=msg,
             analyst_user="analyst@omniguard.io",
         )
@@ -246,7 +247,8 @@ async def isolate_host(hostname: str):
         print(f"Ledger write notice: {e}")
 
     return {
-        "status": "isolated",
+        "status": "isolation_requested",
+        "simulated": True,
         "host": hostname,
         "action": "network_isolation",
         "message": msg,
