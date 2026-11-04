@@ -17,6 +17,7 @@ from ledger import (
     get_ledger_for_entity,
     get_recent_ledger,
 )
+from agents import MultiAgentInvestigationPipeline
 
 from config import CORS_ORIGINS
 
@@ -222,6 +223,22 @@ async def ai_chat(payload: ChatRequest):
         print(f"Ledger write notice: {e}")
 
     return {"answer": answer}
+
+
+class PipelineInvestigationRequest(BaseModel):
+    hostname: str
+
+
+@app.post("/ai/investigate/pipeline")
+async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
+    """
+    Runs multi-agent investigation workflow on a target host:
+    CorrelatorAgent -> TriageAgent -> ContainmentAgent.
+    """
+    alerts = await run_in_threadpool(lambda: list(alerts_collection.find({}, {"_id": 0})))
+    pipeline = MultiAgentInvestigationPipeline()
+    result = await run_in_threadpool(pipeline.investigate, payload.hostname, alerts)
+    return result
 
 
 @app.post("/hosts/{hostname}/isolate", status_code=202)
