@@ -11,6 +11,12 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from graph import ingest_alert, get_overview_graph, get_host_graph
 from dedup import compute_alert_simhash, find_matching_alert
+from ledger import (
+    append_ledger_entry,
+    verify_ledger_integrity,
+    get_ledger_for_entity,
+    get_recent_ledger,
+)
 
 from config import CORS_ORIGINS
 
@@ -200,4 +206,81 @@ async def ai_chat(payload: ChatRequest):
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(2000))
     history = [t.model_dump() for t in payload.history]
     answer = await run_in_threadpool(answer_question, payload.question, alerts, history)
+
+    # Record to replayable decision ledger
+    try:
+        await run_in_threadpool(
+            append_ledger_entry,
+            entity_type="SYSTEM",
+            entity_id="SOC_AI_CHAT",
+            stage="AI_ANALYST_CONSULTATION",
+            action_taken="ANSWER_QUERY",
+            reasoning_output=answer,
+            input_context={"question": payload.question, "alerts_evaluated": len(alerts)},
+        )
+    except Exception as e:
+        print(f"Ledger write notice: {e}")
+
     return {"answer": answer}
+
+
+@app.post("/hosts/{hostname}/isolate", status_code=202)
+async def isolate_host(hostname: str):
+    """
+    Host containment (DEMO STUB).
+    Records the containment decision to the immutable ledger and returns what the
+    dashboard would show. It does NOT yet perform real network isolation or update
+    the attack graph — real EDR enforcement + Neo4j graph isolation are planned.
+    """
+    msg = f"Containment requested for '{hostname}'. Simulated for now — no real network action is taken yet."
+    try:
+        await run_in_threadpool(
+            append_ledger_entry,
+            entity_type="HOST",
+            entity_id=hostname,
+            stage="EDR_CONTAINMENT",
+            action_taken="NETWORK_ISOLATION_SIMULATED",
+            reasoning_output=msg,
+            analyst_user="analyst@omniguard.io",
+        )
+    except Exception as e:
+        print(f"Ledger write notice: {e}")
+
+    return {
+        "status": "isolation_requested",
+        "simulated": True,
+        "host": hostname,
+        "action": "network_isolation",
+        "message": msg,
+    }
+
+
+# ── Decision Ledger Audit Endpoints ─────────────────────────────────
+
+@app.get("/investigations/ledger")
+async def read_ledger(limit: int = 50):
+    """Retrieves newest entries from the replayable investigation decision ledger."""
+    records = await run_in_threadpool(get_recent_ledger, limit)
+    return {"records": records, "count": len(records)}
+
+
+@app.get("/investigations/ledger/host/{hostname}")
+async def read_host_ledger(hostname: str):
+    """Retrieves all decision ledger records associated with a specific host."""
+    records = await run_in_threadpool(get_ledger_for_entity, hostname)
+    return {"host": hostname, "records": records, "count": len(records)}
+
+
+@app.get("/investigations/ledger/verify")
+async def verify_ledger():
+    """
+    Cryptographic verification endpoint:
+    Audits the entire SHA-256 hash chain to verify zero tampering or dropped records.
+    """
+    is_valid, failing_id, total = await run_in_threadpool(verify_ledger_integrity)
+    return {
+        "valid": is_valid,
+        "failing_ledger_id": failing_id,
+        "records_checked": total,
+        "status": "verified" if is_valid else "tamper_detected",
+    }
