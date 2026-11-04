@@ -70,6 +70,7 @@ const NAV = [
     { group: "Investigate", items: [
         { id: "assets", icon: Server, label: "Hosts & assets" },
         { id: "users",  icon: Users,  label: "Users" },
+        { id: "ledger", icon: Activity, label: "Audit ledger" },
     ]},
     { group: "System", items: [
         { id: "engines",  icon: Cpu,      label: "Engines" },
@@ -619,12 +620,10 @@ function App({ user, onLogout, onUserChange }) {
                                         <KV k="Dest IP"    v={selected.dst_ip} />
                                         <KV k="MITRE"      v={selected.mitre_technique} />
                                         <KV k="Confidence" v={selected.confidence != null ? `${Math.round(selected.confidence * 100)}%` : null} />
+                                        <KV k="Occurrences" v={selected.occurrence_count != null ? `${selected.occurrence_count}×` : null} />
                                         <KV k="Alert ID"   v={selected.alert_id} />
                                     </div>
-                                    <div className="actions">
-                                        <button className="btn">Mark triaged</button>
-                                        <button className="btn danger">Isolate host</button>
-                                    </div>
+                                    <AlertActions alert={selected} />
                                 </Panel>
                             </div>
                         </>
@@ -1080,6 +1079,9 @@ function App({ user, onLogout, onUserChange }) {
                     {/* ── profile ── */}
                     {page === "profile" && <ProfilePage user={user} onSaved={onUserChange} />}
 
+                    {/* ── audit ledger ── */}
+                    {page === "ledger" && <LedgerPage />}
+
                 </div>
             </div>
 
@@ -1166,6 +1168,247 @@ function ProfilePage({ user, onSaved }) {
                 </form>
             </Panel>
         </div>
+    )
+}
+
+// alert-detail response actions: AI investigation, OCSF export, and the
+// (simulated) host isolation. each keeps its own result inline.
+function AlertActions({ alert }) {
+    const [busy, setBusy] = useState(null)
+    const [investigation, setInvestigation] = useState(null)
+    const [isolation, setIsolation] = useState(null)
+    const [ocsf, setOcsf] = useState(null)
+    const [err, setErr] = useState(null)
+
+    const run = (kind, fn) => {
+        setBusy(kind); setErr(null)
+        fn().catch(() => setErr("Request failed — is the backend up?")).finally(() => setBusy(null))
+    }
+
+    const investigate = () => run("investigate", async () => {
+        const res = await fetch(`${API_URL}/ai/investigate/pipeline`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hostname: alert.host }),
+        })
+        if (!res.ok) throw new Error()
+        setInvestigation(await res.json())
+    })
+    const isolate = () => run("isolate", async () => {
+        const res = await fetch(`${API_URL}/hosts/${encodeURIComponent(alert.host)}/isolate`, { method: "POST" })
+        if (!res.ok) throw new Error()
+        setIsolation(await res.json())
+    })
+    const exportOcsf = () => run("ocsf", async () => {
+        const res = await fetch(`${API_URL}/alerts/${alert.alert_id}/ocsf`)
+        if (!res.ok) throw new Error()
+        setOcsf(await res.json())
+    })
+
+    return (
+        <>
+            <div className="actions">
+                <button className="btn" onClick={investigate} disabled={busy}>
+                    {busy === "investigate" ? "Investigating…" : "Investigate (AI)"}
+                </button>
+                <button className="btn" onClick={exportOcsf} disabled={busy}>
+                    {busy === "ocsf" ? "Exporting…" : "Export OCSF"}
+                </button>
+                <button className="btn danger" onClick={isolate} disabled={busy}>
+                    {busy === "isolate" ? "Isolating…" : "Isolate host"}
+                </button>
+            </div>
+            {err && <div className="login-error" style={{ marginTop: 8 }}>{err}</div>}
+            {isolation && (
+                <div className="action-result">
+                    <strong>Containment</strong> — {isolation.message}
+                    {isolation.simulated && <span className="tag">simulated</span>}
+                </div>
+            )}
+            {investigation && <InvestigationResult data={investigation} />}
+            {ocsf && (
+                <div className="action-result">
+                    <div className="action-result-head">
+                        <strong>OCSF Class {ocsf.class_uid} — {ocsf.class_name}</strong>
+                        <button className="btn" onClick={() => setOcsf(null)}>Close</button>
+                    </div>
+                    <pre className="code-block">{JSON.stringify(ocsf, null, 2)}</pre>
+                </div>
+            )}
+        </>
+    )
+}
+
+// renders the multi-agent pipeline result (correlation -> triage -> containment)
+function InvestigationResult({ data }) {
+    const cor = data.correlation || {}, t = data.triage || {}, c = data.containment || {}
+    const tone = t.risk_score >= 70 ? "bad" : t.risk_score >= 40 ? "warn" : "good"
+    return (
+        <div className="action-result">
+            <div className="action-result-head">
+                <strong>AI investigation — {data.host}</strong>
+                <span className={`risk-badge ${tone}`}>risk {t.risk_score}/100</span>
+            </div>
+            <div className="kv">
+                <KV k="Classification" v={t.classification} />
+                <KV k="Confidence" v={t.confidence != null ? `${Math.round(t.confidence * 100)}%` : null} />
+                <KV k="Blast radius" v={cor.blast_radius} />
+                <KV k="Multi-vector" v={cor.is_multi_vector ? "yes" : "no"} />
+                <KV k="MITRE" v={(cor.mitre_techniques || []).join(", ")} />
+            </div>
+            <div className="rec-title">
+                Recommended actions
+                {c.requires_human_approval && <span className="tag">needs human approval</span>}
+            </div>
+            <ul className="rec-list">
+                {(c.recommended_actions || []).map((a, i) => (
+                    <li key={i}>
+                        <span className={`urg ${(a.urgency || "").toLowerCase()}`}>{a.urgency}</span>
+                        <strong>{a.action}</strong> — {a.description}
+                    </li>
+                ))}
+            </ul>
+        </div>
+    )
+}
+
+// the decision ledger: lists hash-chained entries and verifies the chain
+const shortHash = (h) => h ? `${h.slice(0, 10)}…${h.slice(-6)}` : "—"
+
+function LedgerPage() {
+    const [records, setRecords] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [verify, setVerify] = useState(null)
+    const [verifying, setVerifying] = useState(false)
+    const [err, setErr] = useState(null)
+    const [selected, setSelected] = useState(null)   // a ledger entry → detail view
+
+    const load = () => {
+        setLoading(true); setErr(null)
+        fetch(`${API_URL}/investigations/ledger?limit=50`)
+            .then(r => r.json())
+            .then(d => setRecords(d.records || []))
+            .catch(() => setErr("Can't reach the backend."))
+            .finally(() => setLoading(false))
+    }
+    useEffect(load, [])
+
+    const runVerify = () => {
+        setVerifying(true); setVerify(null)
+        fetch(`${API_URL}/investigations/ledger/verify`)
+            .then(r => r.json())
+            .then(setVerify)
+            .catch(() => setErr("Verify failed."))
+            .finally(() => setVerifying(false))
+    }
+
+    if (selected) {
+        return (
+            <LedgerEntryDetail
+                entry={selected}
+                all={records}
+                verify={verify}
+                blockNo={records.length - records.findIndex(r => r.ledger_id === selected.ledger_id)}
+                onBack={() => setSelected(null)}
+                onOpen={setSelected}
+            />
+        )
+    }
+
+    return (
+        <Panel title="Decision ledger" note="immutable SHA-256 hash-chained audit trail" action="Refresh" actionIcon={RefreshCw} onAction={load}>
+                {err && <div className="login-error">{err}</div>}
+                <div className="actions" style={{ marginBottom: 14 }}>
+                    <button className="btn" onClick={runVerify} disabled={verifying}>
+                        {verifying ? "Verifying…" : "Verify chain integrity"}
+                    </button>
+                    {verify && (
+                        <span className={`verify-badge ${verify.valid ? "good" : "bad"}`}>
+                            {verify.valid
+                                ? `✓ Verified — ${verify.records_checked} blocks, no tampering`
+                                : `✗ Tamper detected (id ${verify.failing_ledger_id})`}
+                        </span>
+                    )}
+                </div>
+                {loading ? <p className="note">Loading…</p> : records.length === 0 ? (
+                    <p className="note">No ledger entries yet. Isolate a host or ask the AI analyst to create one.</p>
+                ) : (
+                    <div className="chain-list">
+                        {records.map((e, i) => (
+                            <button className="chain-row" key={e.ledger_id || i} onClick={() => setSelected(e)}>
+                                <span className="chain-ico"><Activity /></span>
+                                <div className="chain-col chain-id">
+                                    <span className="chain-hash">{shortHash(e.entry_hash)}</span>
+                                    <span className="chain-sub">{e.timestamp ? timeAgo(e.timestamp) : "—"}</span>
+                                </div>
+                                <div className="chain-col">
+                                    <span className="chain-line"><span className="chain-k">Stage</span> {e.stage}</span>
+                                    <span className="chain-line chain-sub">{e.action_taken}</span>
+                                </div>
+                                <div className="chain-col">
+                                    <span className="chain-line"><span className="chain-k">Entity</span> {e.entity_type}: {e.entity_id}</span>
+                                    <span className="chain-line chain-sub">by {e.analyst_user}</span>
+                                </div>
+                                <span className="chain-block">#{records.length - i}</span>
+                            </button>
+                        ))}
+                    </div>
+                )}
+        </Panel>
+    )
+}
+
+// Etherscan-style detail for one ledger entry ("transaction")
+function LedgerEntryDetail({ entry, all, verify, blockNo, onBack, onOpen }) {
+    const prev = all.find(e => e.entry_hash === entry.prev_hash)
+    const isGenesis = /^0+$/.test(entry.prev_hash || "")
+    const copy = (t) => { try { navigator.clipboard.writeText(t) } catch (e) {} }
+    const hasContext = entry.input_context && Object.keys(entry.input_context).length > 0
+
+    return (
+        <>
+            <button className="detail-back" onClick={onBack}><ArrowRight style={{ transform: "rotate(180deg)" }} /> Decision ledger</button>
+            <Panel title={`Ledger entry · block #${blockNo}`} note="replayable, hash-chained decision record">
+                <div className="tx-head">
+                    <span className="chain-ico big"><Activity /></span>
+                    <div className="tx-head-main">
+                        <div className="tx-hash mono" onClick={() => copy(entry.entry_hash)} title="click to copy">{entry.entry_hash}</div>
+                        <div className="chain-sub">{entry.timestamp ? `${new Date(entry.timestamp).toLocaleString()} · ${timeAgo(entry.timestamp)}` : "—"}</div>
+                    </div>
+                    {verify && (
+                        <span className={`verify-badge ${verify.valid ? "good" : "bad"}`}>
+                            {verify.valid ? "✓ chain verified" : "✗ tamper detected"}
+                        </span>
+                    )}
+                </div>
+
+                <div className="tx-grid">
+                    <div className="tx-row"><span className="tx-k">Stage</span><span>{entry.stage}</span></div>
+                    <div className="tx-row"><span className="tx-k">Action</span><span>{entry.action_taken}</span></div>
+                    <div className="tx-row"><span className="tx-k">Entity</span><span>{entry.entity_type}: {entry.entity_id}</span></div>
+                    <div className="tx-row"><span className="tx-k">Actor</span><span>{entry.analyst_user}</span></div>
+                    <div className="tx-row"><span className="tx-k">Incident</span><span>{entry.incident_id || "—"}</span></div>
+                    <div className="tx-row"><span className="tx-k">Reasoning</span><span>{entry.reasoning_output}</span></div>
+                    <div className="tx-row"><span className="tx-k">Entry hash</span><span className="mono wrap">{entry.entry_hash}</span></div>
+                    <div className="tx-row">
+                        <span className="tx-k">Previous hash</span>
+                        {isGenesis ? (
+                            <span className="mono wrap">{entry.prev_hash} <span className="tag">genesis</span></span>
+                        ) : prev ? (
+                            <button className="link mono wrap" onClick={() => onOpen(prev)}>{entry.prev_hash} ↗</button>
+                        ) : (
+                            <span className="mono wrap">{entry.prev_hash}</span>
+                        )}
+                    </div>
+                </div>
+
+                {hasContext && (
+                    <>
+                        <div className="rec-title">Input context</div>
+                        <pre className="code-block">{JSON.stringify(entry.input_context, null, 2)}</pre>
+                    </>
+                )}
+            </Panel>
+        </>
     )
 }
 
@@ -1389,7 +1632,7 @@ function CardEmpty({ glyph: Glyph, text, cta, onCta }) {
 }
 
 /* collapsible panel — the whole header is the hit target */
-function Panel({ title, note, children, flush = false, defaultOpen = true, action, onAction, wide = false }) {
+function Panel({ title, note, children, flush = false, defaultOpen = true, action, onAction, actionIcon: ActionIcon = ArrowRight, wide = false }) {
     const [open, setOpen] = useState(defaultOpen);
     return (
         <section className={`panel ${open ? "" : "closed"} ${wide ? "panel-wide" : ""}`}>
@@ -1401,7 +1644,7 @@ function Panel({ title, note, children, flush = false, defaultOpen = true, actio
                 </button>
                 {action && (
                     <button className="panel-action" onClick={onAction}>
-                        {action} <ArrowRight />
+                        {action} <ActionIcon />
                     </button>
                 )}
             </div>
