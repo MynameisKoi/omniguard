@@ -137,3 +137,4 @@ def test_api_pipeline_endpoint():
             assert data["host"] == "TARGET-PC"
             assert "triage" in data
             assert "containment" in data
+

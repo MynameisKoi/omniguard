@@ -138,3 +138,4 @@ def test_api_ocsf_endpoints(sample_verifyeye_alert):
             data2 = res2.json()
             assert data2["count"] == 1
             assert data2["ocsf_version"] == "1.2.0"
+

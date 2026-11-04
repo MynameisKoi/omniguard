@@ -115,3 +115,4 @@ def test_mcp_unknown_method():
     assert resp is not None
     assert "error" in resp
     assert resp["error"]["code"] == -32601
+

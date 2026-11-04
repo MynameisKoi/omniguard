@@ -67,3 +67,4 @@ You can test the stdio server directly:
 ```bash
 echo '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}' | python3 mcp_server/server.py
 ```
+

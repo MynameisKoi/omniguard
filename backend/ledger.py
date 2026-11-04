@@ -129,3 +129,4 @@ def get_ledger_for_entity(entity_id: str) -> List[Dict[str, Any]]:
 def get_recent_ledger(limit: int = 50) -> List[Dict[str, Any]]:
     """Retrieves the newest decision ledger records."""
     return list(ledger_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
+
