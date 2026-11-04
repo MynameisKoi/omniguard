@@ -94,24 +94,28 @@ async def create_alert(payload: AlertCreate) -> Alert:
     # Check candidate recent alerts from the same host in the last 120s
     cutoff = now - timedelta(seconds=120)
     try:
-        recent = list(
-            alerts_collection.find(
-                {"host": payload.host, "timestamp": {"$gte": cutoff}},
-                {"_id": 0},
-            ).limit(50)
+        recent = await run_in_threadpool(
+            lambda: list(
+                alerts_collection.find(
+                    {"host": payload.host, "last_seen": {"$gte": cutoff}},
+                    {"_id": 0},
+                ).limit(50)
+            )
         )
     except Exception:
         recent = []
 
     match = find_matching_alert(sim_val, recent, max_hamming_distance=3)
     if match:
-        updated = alerts_collection.find_one_and_update(
-            {"alert_id": match["alert_id"]},
-            {
-                "$inc": {"occurrence_count": 1},
-                "$set": {"last_seen": now},
-            },
-            return_document=True,
+        updated = await run_in_threadpool(
+            lambda: alerts_collection.find_one_and_update(
+                {"alert_id": match["alert_id"]},
+                {
+                    "$inc": {"occurrence_count": 1},
+                    "$set": {"last_seen": now},
+                },
+                return_document=True,
+            )
         )
         if updated:
             updated.pop("_id", None)
@@ -274,21 +278,38 @@ async def ai_chat(payload: ChatRequest):
     return {"answer": answer}
 
 
+class PipelineInvestigationRequest(BaseModel):
+    hostname: str
+
+
+@app.post("/ai/investigate/pipeline")
+async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
+    """
+    Runs multi-agent investigation workflow on a target host:
+    CorrelatorAgent -> TriageAgent -> ContainmentAgent.
+    """
+    alerts = await run_in_threadpool(lambda: list(alerts_collection.find({}, {"_id": 0})))
+    pipeline = MultiAgentInvestigationPipeline()
+    result = await run_in_threadpool(pipeline.investigate, payload.hostname, alerts)
+    return result
+
+
 @app.post("/hosts/{hostname}/isolate", status_code=202)
 async def isolate_host(hostname: str):
     """
-    EDR network containment action.
-    Isolates the host at the network layer to contain lateral movement and C2 traffic.
-    Logs immutable audit record to the decision ledger.
+    Host containment (DEMO STUB).
+    Records the containment decision to the immutable ledger and returns what the
+    dashboard would show. It does NOT yet perform real network isolation or update
+    the attack graph — real EDR enforcement + Neo4j graph isolation are planned.
     """
-    msg = f"Host '{hostname}' successfully isolated from the corporate network."
+    msg = f"Containment requested for '{hostname}'. Simulated for now — no real network action is taken yet."
     try:
         await run_in_threadpool(
             append_ledger_entry,
             entity_type="HOST",
             entity_id=hostname,
             stage="EDR_CONTAINMENT",
-            action_taken="NETWORK_ISOLATION",
+            action_taken="NETWORK_ISOLATION_SIMULATED",
             reasoning_output=msg,
             analyst_user="analyst@omniguard.io",
         )
@@ -296,7 +317,8 @@ async def isolate_host(hostname: str):
         print(f"Ledger write notice: {e}")
 
     return {
-        "status": "isolated",
+        "status": "isolation_requested",
+        "simulated": True,
         "host": hostname,
         "action": "network_isolation",
         "message": msg,
@@ -332,21 +354,3 @@ async def verify_ledger():
         "records_checked": total,
         "status": "verified" if is_valid else "tamper_detected",
     }
-
-
-# ── Multi-Agent Triage Pipeline Endpoint ────────────────────────────
-
-class PipelineInvestigationRequest(BaseModel):
-    hostname: str
-
-
-@app.post("/ai/investigate/pipeline")
-async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
-    """
-    Runs multi-agent investigation workflow on a target host:
-    CorrelatorAgent -> TriageAgent -> ContainmentAgent.
-    """
-    alerts = list(alerts_collection.find({}, {"_id": 0}))
-    pipeline = MultiAgentInvestigationPipeline()
-    result = await run_in_threadpool(pipeline.investigate, payload.hostname, alerts)
-    return result

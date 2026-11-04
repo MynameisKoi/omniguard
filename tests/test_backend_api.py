@@ -35,10 +35,11 @@ def test_isolate_host():
     response = client.post("/hosts/WORKSTATION-CORP-99/isolate")
     assert response.status_code == 202
     data = response.json()
-    assert data["status"] == "isolated"
+    assert data["status"] == "isolation_requested"
+    assert data["simulated"] is True
     assert data["host"] == "WORKSTATION-CORP-99"
     assert data["action"] == "network_isolation"
-    assert "isolated from the corporate network" in data["message"]
+    assert "Containment requested for 'WORKSTATION-CORP-99'" in data["message"]
 
 
 def test_create_and_patch_alert():
