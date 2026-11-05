@@ -2906,3 +2906,6 @@ button { font: inherit; color: inherit; }
 
 /* in-panel centered spinner (ledger load, etc.) — matters once there are thousands of rows */
 .panel-loading { display: grid; place-items: center; min-height: 160px; }
+
+/* spinner scoped to the content region (sidebar + topbar stay visible) */
+.content-spinner { display: grid; place-items: center; min-height: 65vh; }

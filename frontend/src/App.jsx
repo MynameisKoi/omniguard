@@ -667,11 +667,10 @@ function App({ user, onLogout, onUserChange }) {
 
                 <div className="content" ref={contentRef}>
 
-                    {filtering && (
-                        <div className="loading-overlay">
-                            <div className="spinner" />
-                        </div>
-                    )}
+                    {filtering ? (
+                        <div className="content-spinner"><div className="spinner" /></div>
+                    ) : (
+                    <>
 
                     {(filter || srcFilter) && (page === "overview" || page === "alerts") && (
                         <div className="active-filters">
@@ -1350,6 +1349,9 @@ function App({ user, onLogout, onUserChange }) {
                         </>
                     )}
 
+                    </>
+                    )}
+
                 </div>
             </div>
 
@@ -1698,7 +1700,7 @@ function LedgerPage() {
     }
     useEffect(load, [])
 
-    if (switching) return <div className="loading-overlay"><div className="spinner" /></div>
+    if (switching) return <div className="content-spinner"><div className="spinner" /></div>
 
     const runVerify = () => {
         setVerifying(true); setVerify(null)
