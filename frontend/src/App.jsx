@@ -60,6 +60,13 @@ function timeAgo(ts) {
     return days < 30 ? `${days}d ago` : new Date(ts).toLocaleDateString();
 }
 
+// full stored timestamp, for tooltips and the detail view (#10/#11)
+function exactTime(ts) {
+    if (!ts) return "";
+    try { return new Date(ts).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }); }
+    catch { return ""; }
+}
+
 const NAV = [
     { group: "Monitor", items: [
         { id: "overview",  icon: LayoutDashboard, label: "Dashboard" },
@@ -103,8 +110,21 @@ function App({ user, onLogout, onUserChange }) {
     // ui state
     // open by default on desktop, collapsed into a drawer on phones
     const [navOpen, setNavOpen] = useState(() => window.innerWidth > 820)
-    const [page, setPage] = useState("overview")   // always land on the dashboard
-    const [selectedId, setSelectedId] = useState(null)
+    // restore the last tab + open alert on reload instead of snapping back to the dashboard
+    const [page, setPage] = useState(() => { try { return localStorage.getItem("og_page") || "overview" } catch { return "overview" } })
+    const [selectedId, setSelectedId] = useState(() => { try { return localStorage.getItem("og_selectedId") || null } catch { return null } })
+
+    // remember the current tab + open alert across reloads
+    useEffect(() => { try { localStorage.setItem("og_page", page) } catch {} }, [page])
+    useEffect(() => {
+        try { selectedId ? localStorage.setItem("og_selectedId", selectedId) : localStorage.removeItem("og_selectedId") } catch {}
+    }, [selectedId])
+    // if the remembered alert is gone (e.g. it was deleted), fall back to the list
+    useEffect(() => {
+        if (page === "alert-detail" && selectedId && alerts.length && !alerts.find(a => a.alert_id === selectedId)) {
+            setPage("alerts"); setSelectedId(null)
+        }
+    }, [page, selectedId, alerts])
     const [filter, setFilter] = useState(null)
     const [srcFilter, setSrcFilter] = useState(null)
     const [assetTab, setAssetTab] = useState("hosts")
@@ -568,7 +588,7 @@ function App({ user, onLogout, onUserChange }) {
                                                             <span className={`cell-mark ${a.severity}`} />
                                                             <span className="cell-main">
                                                                 <span className="cell-top">{a.event_type}</span>
-                                                                <span className="cell-sub">{timeAgo(a.timestamp)}</span>
+                                                                <span className="cell-sub">{timeAgo(a.timestamp)} · {exactTime(a.timestamp)}</span>
                                                             </span>
                                                         </span>
                                                     </td>
@@ -599,7 +619,7 @@ function App({ user, onLogout, onUserChange }) {
                                 <h2>{selected.event_type}</h2>
                                 <span className="tag">{selected.source}</span>
                                 <span className="tag">{selected.status}</span>
-                                <span className="when">{new Date(selected.timestamp).toLocaleString()}</span>
+                                <span className="when" title={new Date(selected.timestamp).toLocaleString()}>{exactTime(selected.timestamp)} · {timeAgo(selected.timestamp)}</span>
                             </div>
 
                             <div className="split">
@@ -778,7 +798,7 @@ function App({ user, onLogout, onUserChange }) {
                                             <tbody>
                                                 {recent.map(a => (
                                                     <tr key={a.alert_id} onClick={() => openAlert(a.alert_id)}>
-                                                        <td className="td-mono td-faint">{timeAgo(a.timestamp)}</td>
+                                                        <td className="td-mono td-faint" title={exactTime(a.timestamp)}>{timeAgo(a.timestamp)}</td>
                                                         <td><span className={`sev ${a.severity}`}>{a.severity}</span></td>
                                                         <td className="td-mono">{a.event_type}</td>
                                                         <td className="td-mono td-dim">{a.host}</td>
@@ -840,7 +860,7 @@ function App({ user, onLogout, onUserChange }) {
                                                         {engines.map(e => <span className="tag" key={e}>{e}</span>)}
                                                     </td>
                                                     <td className="td-mono td-dim">{h.score}</td>
-                                                    <td className="td-wide td-faint td-mono">{timeAgo(last)}</td>
+                                                    <td className="td-wide td-faint td-mono" title={exactTime(last)}>{timeAgo(last)}</td>
                                                 </tr>
                                             );
                                         })}
@@ -887,7 +907,7 @@ function App({ user, onLogout, onUserChange }) {
                                                     <td><span className={`sev ${worst}`}>{worst}</span></td>
                                                     <td className="td-mono td-dim">{n}</td>
                                                     <td className="td-mono td-dim">{hosts.join(", ")}</td>
-                                                    <td className="td-wide td-faint td-mono">{timeAgo(last)}</td>
+                                                    <td className="td-wide td-faint td-mono" title={exactTime(last)}>{timeAgo(last)}</td>
                                                 </tr>
                                             );
                                         })}
@@ -1007,7 +1027,7 @@ function App({ user, onLogout, onUserChange }) {
                                                         <td><span className={`sev ${worst}`}>{worst}</span></td>
                                                         <td className="td-mono td-dim">{n}</td>
                                                         <td className="td-mono td-dim td-wide">{hosts.join(", ")}</td>
-                                                        <td className="td-mono td-faint">{timeAgo(last)}</td>
+                                                        <td className="td-mono td-faint" title={exactTime(last)}>{timeAgo(last)}</td>
                                                     </tr>
                                                 );
                                             })}
@@ -1224,49 +1244,177 @@ function AlertActions({ alert }) {
                     {isolation.simulated && <span className="tag">simulated</span>}
                 </div>
             )}
-            {investigation && <InvestigationResult data={investigation} />}
+            {investigation && (
+                <Modal onClose={() => setInvestigation(null)}>
+                    <InvestigationResult data={investigation} onClose={() => setInvestigation(null)} />
+                </Modal>
+            )}
             {ocsf && (
-                <div className="action-result">
-                    <div className="action-result-head">
-                        <strong>OCSF Class {ocsf.class_uid} — {ocsf.class_name}</strong>
-                        <button className="btn" onClick={() => setOcsf(null)}>Close</button>
-                    </div>
-                    <pre className="code-block">{JSON.stringify(ocsf, null, 2)}</pre>
-                </div>
+                <Modal onClose={() => setOcsf(null)}>
+                    <OcsfCard data={ocsf} alertId={alert.alert_id} onClose={() => setOcsf(null)} />
+                </Modal>
             )}
         </>
     )
 }
 
-// renders the multi-agent pipeline result (correlation -> triage -> containment)
-function InvestigationResult({ data }) {
-    const cor = data.correlation || {}, t = data.triage || {}, c = data.containment || {}
-    const tone = t.risk_score >= 70 ? "bad" : t.risk_score >= 40 ? "warn" : "good"
+// centered modal dialog: backdrop click or Escape closes it
+function Modal({ onClose, children }) {
+    useEffect(() => {
+        const onKey = (e) => { if (e.key === "Escape") onClose() }
+        window.addEventListener("keydown", onKey)
+        return () => window.removeEventListener("keydown", onKey)
+    }, [onClose])
     return (
-        <div className="action-result">
-            <div className="action-result-head">
-                <strong>AI investigation — {data.host}</strong>
-                <span className={`risk-badge ${tone}`}>risk {t.risk_score}/100</span>
+        <div className="modal-backdrop" onClick={onClose}>
+            <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+                {children}
             </div>
-            <div className="kv">
-                <KV k="Classification" v={t.classification} />
-                <KV k="Confidence" v={t.confidence != null ? `${Math.round(t.confidence * 100)}%` : null} />
-                <KV k="Blast radius" v={cor.blast_radius} />
-                <KV k="Multi-vector" v={cor.is_multi_vector ? "yes" : "no"} />
-                <KV k="MITRE" v={(cor.mitre_techniques || []).join(", ")} />
+        </div>
+    )
+}
+
+// a readable OCSF Class 2001 Security Finding card (not a raw JSON dump),
+// with the raw form tucked behind a toggle + copy / download.
+function OcsfCard({ data, alertId, onClose }) {
+    const [showRaw, setShowRaw] = useState(false)
+    const [copied, setCopied] = useState(false)
+    const fi = data.finding_info || {}
+    const dev = data.device || {}
+    const sevTone = data.severity_id >= 5 ? "critical" : data.severity_id >= 4 ? "high" : data.severity_id >= 3 ? "medium" : "low"
+    const when = data.time ? new Date(data.time).toLocaleString() : "—"
+
+    const copy = () => {
+        try { navigator.clipboard.writeText(JSON.stringify(data, null, 2)); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch (e) {}
+    }
+    const download = () => {
+        try {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement("a")
+            a.href = url; a.download = `ocsf-${alertId || "finding"}.json`; a.click()
+            URL.revokeObjectURL(url)
+        } catch (e) {}
+    }
+
+    return (
+        <div className="ocsf-card">
+            <div className="ocsf-top">
+                <div className="ocsf-title">
+                    <span className={`sev ${sevTone}`}>{data.severity}</span>
+                    <div className="ocsf-titletext">
+                        <strong>{fi.title || "Security Finding"}</strong>
+                        <span className="ocsf-badge">OCSF {data.metadata?.version || "1.2"} · Class {data.class_uid}</span>
+                    </div>
+                </div>
+                <button className="icon-btn" onClick={onClose} aria-label="Close"><X /></button>
             </div>
-            <div className="rec-title">
-                Recommended actions
-                {c.requires_human_approval && <span className="tag">needs human approval</span>}
+
+            {fi.desc && <p className="note ocsf-desc">{fi.desc}</p>}
+
+            <div className="ocsf-grid">
+                <div className="ocsf-f"><span className="ocsf-k">Class</span>{data.class_name} ({data.class_uid})</div>
+                <div className="ocsf-f"><span className="ocsf-k">Activity</span>{data.activity_name}</div>
+                <div className="ocsf-f"><span className="ocsf-k">Status</span>{data.status}</div>
+                <div className="ocsf-f"><span className="ocsf-k">Confidence</span>{data.confidence_score}%</div>
+                <div className="ocsf-f"><span className="ocsf-k">Severity</span>{data.severity} ({data.severity_id})</div>
+                <div className="ocsf-f"><span className="ocsf-k">Time</span>{when}</div>
+                <div className="ocsf-f"><span className="ocsf-k">Device</span>{dev.hostname}{dev.ip ? ` · ${dev.ip}` : ""}</div>
+                <div className="ocsf-f"><span className="ocsf-k">Product</span>{data.metadata?.product?.name} · {data.metadata?.product?.feature?.name}</div>
+                <div className="ocsf-f ocsf-wide"><span className="ocsf-k">Finding UID</span><span className="mono">{fi.uid}</span></div>
             </div>
-            <ul className="rec-list">
-                {(c.recommended_actions || []).map((a, i) => (
-                    <li key={i}>
-                        <span className={`urg ${(a.urgency || "").toLowerCase()}`}>{a.urgency}</span>
-                        <strong>{a.action}</strong> — {a.description}
-                    </li>
-                ))}
-            </ul>
+
+            {Array.isArray(data.attacks) && data.attacks.length > 0 && (
+                <div className="ocsf-section">
+                    <div className="ocsf-sec-title">MITRE ATT&CK</div>
+                    <div className="chip-row">
+                        {data.attacks.map((a, i) => (
+                            <span className="mitre-chip" key={i}>
+                                {a.technique?.uid} · {a.technique?.name}
+                                <span className="mitre-tactic">{a.tactic?.name}</span>
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {Array.isArray(data.resources) && data.resources.length > 0 && (
+                <div className="ocsf-section">
+                    <div className="ocsf-sec-title">Affected resources</div>
+                    <div className="chip-row">
+                        {data.resources.map((r, i) => (
+                            <span className="res-chip" key={i}><Globe /> {r.name} <span className="res-type">{r.type}</span></span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <div className="ocsf-foot">
+                <button className="btn" onClick={() => setShowRaw(v => !v)}>{showRaw ? "Hide raw JSON" : "View raw JSON"}</button>
+                <button className="btn" onClick={copy}>{copied ? "Copied ✓" : "Copy JSON"}</button>
+                <button className="btn" onClick={download}>Download .json</button>
+            </div>
+            {showRaw && <pre className="code-block">{JSON.stringify(data, null, 2)}</pre>}
+        </div>
+    )
+}
+
+// renders the multi-agent pipeline result (correlation -> triage -> containment)
+function InvestigationResult({ data, onClose }) {
+    const cor = data.correlation || {}, t = data.triage || {}, c = data.containment || {}
+    const score = t.risk_score ?? 0
+    const tone = score >= 70 ? "critical" : score >= 40 ? "high" : "good"
+    return (
+        <div className="invest-card">
+            <div className="invest-head">
+                <div className="invest-head-text">
+                    <span className="invest-eyebrow"><Sparkles /> AI investigation</span>
+                    <strong>{data.host}</strong>
+                </div>
+                {onClose && <button className="icon-btn" onClick={onClose} aria-label="Close"><X /></button>}
+            </div>
+
+            <div className={`risk-hero ${tone}`}>
+                <div className="risk-score">
+                    <span className="risk-num">{score}</span>
+                    <span className="risk-den">/100</span>
+                </div>
+                <div className="risk-meta">
+                    <div className="risk-class">{t.classification || "—"}</div>
+                    <div className="risk-bar"><span style={{ width: `${Math.max(0, Math.min(100, score))}%` }} /></div>
+                    <div className="risk-sub">
+                        {t.confidence != null && <span>confidence {Math.round(t.confidence * 100)}%</span>}
+                        {t.false_positive_probability != null && <span>false-positive {Math.round(t.false_positive_probability * 100)}%</span>}
+                    </div>
+                </div>
+            </div>
+
+            <div className="ocsf-grid">
+                <div className="ocsf-f"><span className="ocsf-k">Blast radius</span>{cor.blast_radius || "—"}</div>
+                <div className="ocsf-f"><span className="ocsf-k">Multi-vector</span>{cor.is_multi_vector ? "Yes" : "No"}</div>
+                <div className="ocsf-f"><span className="ocsf-k">Alerts correlated</span>{cor.alert_count ?? "—"}</div>
+                <div className="ocsf-f"><span className="ocsf-k">Engines</span>{(cor.sources || []).join(", ") || "—"}</div>
+                <div className="ocsf-f ocsf-wide"><span className="ocsf-k">MITRE techniques</span>{(cor.mitre_techniques || []).join(", ") || "—"}</div>
+            </div>
+
+            <div className="ocsf-section">
+                <div className="ocsf-sec-title">
+                    Recommended actions
+                    {c.requires_human_approval && <span className="tag">needs human approval</span>}
+                </div>
+                <div className="rec-cards">
+                    {(c.recommended_actions || []).map((a, i) => (
+                        <div className="rec-card" key={i}>
+                            <div className="rec-card-head">
+                                <span className={`urg ${(a.urgency || "").toLowerCase()}`}>{a.urgency}</span>
+                                <strong>{a.action}</strong>
+                                {a.automated_executable && <span className="rec-auto">automatable</span>}
+                            </div>
+                            <p className="rec-desc">{a.description}</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
         </div>
     )
 }
@@ -1632,23 +1780,21 @@ function CardEmpty({ glyph: Glyph, text, cta, onCta }) {
 }
 
 /* collapsible panel — the whole header is the hit target */
-function Panel({ title, note, children, flush = false, defaultOpen = true, action, onAction, actionIcon: ActionIcon = ArrowRight, wide = false }) {
-    const [open, setOpen] = useState(defaultOpen);
+function Panel({ title, note, children, flush = false, action, onAction, actionIcon: ActionIcon = ArrowRight, wide = false }) {
     return (
-        <section className={`panel ${open ? "" : "closed"} ${wide ? "panel-wide" : ""}`}>
+        <section className={`panel ${wide ? "panel-wide" : ""}`}>
             <div className="panel-head">
-                <button className="panel-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>
-                    <span className="chev"><ChevronDown /></span>
+                <div className="panel-heading">
                     <span className="panel-title">{title}</span>
                     {note && <span className="panel-note">{note}</span>}
-                </button>
+                </div>
                 {action && (
                     <button className="panel-action" onClick={onAction}>
                         {action} <ActionIcon />
                     </button>
                 )}
             </div>
-            {open && (flush ? children : <div className="panel-body">{children}</div>)}
+            {flush ? children : <div className="panel-body">{children}</div>}
         </section>
     );
 }

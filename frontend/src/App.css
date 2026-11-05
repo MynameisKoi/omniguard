@@ -1486,10 +1486,15 @@ button { font: inherit; color: inherit; }
   border-radius: var(--r-md);
   padding: 6px 12px;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 
-.btn:hover { background: var(--hover); }
+.btn:hover {
+  background: var(--accent-wash);
+  border-color: var(--accent-line);
+  color: var(--accent-text);
+}
+.btn:active { transform: translateY(1px); }
 .btn.danger { color: var(--critical); background: var(--critical-wash); border-color: transparent; }
 .btn.danger:hover { background: var(--critical); color: #fff; }
 
@@ -2636,3 +2641,131 @@ button { font: inherit; color: inherit; }
 }
 .detail-back:hover { background: var(--hover); color: var(--text); border-color: var(--accent-line); }
 .detail-back svg { width: 15px; height: 15px; }
+
+/* ── OCSF Security Finding card (#27: readable, not a raw JSON dump) ── */
+.ocsf-card { padding: 0; }
+.ocsf-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ocsf-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ocsf-title strong { font-size: 14px; }
+.ocsf-top-right { display: flex; align-items: center; gap: 8px; flex: none; }
+.ocsf-badge {
+    padding: 3px 9px; border-radius: 999px;
+    background: var(--accent-wash); color: var(--accent-text);
+    font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.icon-btn {
+    display: grid; place-items: center;
+    width: 28px; height: 28px; border: 0; border-radius: 7px;
+    background: transparent; color: var(--dim); cursor: pointer;
+}
+.icon-btn:hover { background: var(--hover); color: var(--text); }
+.icon-btn svg { width: 16px; height: 16px; }
+.ocsf-desc { margin: 10px 0 2px; }
+.ocsf-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 1px; margin: 12px 0 4px;
+    background: var(--line-soft); border: 1px solid var(--line-soft);
+    border-radius: 8px; overflow: hidden;
+}
+.ocsf-f {
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 9px 12px; background: var(--surface);
+    font-size: 12.5px; color: var(--text); min-width: 0;
+    word-break: break-word;
+}
+.ocsf-f.ocsf-wide { grid-column: 1 / -1; }
+.ocsf-k { color: var(--faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.ocsf-section { margin-top: 14px; }
+.ocsf-sec-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); margin-bottom: 8px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.mitre-chip, .res-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 10px; border-radius: 8px;
+    background: var(--raised); border: 1px solid var(--line);
+    font-size: 12px; color: var(--text);
+}
+.mitre-chip { font-family: ui-monospace, Menlo, monospace; }
+.mitre-tactic, .res-type {
+    padding: 1px 7px; border-radius: 5px;
+    background: var(--hover); color: var(--dim);
+    font-size: 10.5px; font-family: var(--font, inherit);
+}
+.res-chip svg { width: 13px; height: 13px; color: var(--g-domain); }
+.ocsf-foot { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+/* ── modal dialog (OCSF card + AI investigation pop centered, no scrolling to find them) ── */
+.modal-backdrop {
+    position: fixed; inset: 0; z-index: 300;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    animation: modal-fade 0.12s ease;
+}
+.modal {
+    width: 100%; max-width: 640px;
+    max-height: 85vh; overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-lg);
+    padding: 20px 22px;
+    animation: modal-pop 0.14s ease-out;
+}
+@keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-pop { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: none; } }
+.modal .ocsf-card, .modal .invest-card { padding: 0; font-size: 13px; }
+
+/* give the OCSF title + badge breathing room (stack, don't jam together) */
+.ocsf-titletext { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.ocsf-titletext strong { line-height: 1.3; }
+.ocsf-top { align-items: flex-start; padding-bottom: 4px; }
+
+/* panels are static now (no collapse/chevron) — plain header, title left, note/action right */
+.panel-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    padding: 12px 16px;
+}
+.panel-heading .panel-note { padding-right: 0; }
+
+/* ── AI investigation modal polish (#26) ── */
+.invest-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.invest-head-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.invest-eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-text); }
+.invest-eyebrow svg { width: 13px; height: 13px; }
+.invest-head-text strong { font-size: 16px; font-family: ui-monospace, Menlo, monospace; }
+
+.risk-hero {
+    display: flex; align-items: center; gap: 18px;
+    padding: 16px 18px; border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--raised);
+}
+.risk-hero.critical { background: var(--critical-wash); border-color: rgba(242,85,91,0.3); }
+.risk-hero.high { background: var(--high-wash); border-color: rgba(239,140,62,0.3); }
+.risk-hero.good { background: var(--good-wash); border-color: rgba(63,185,122,0.3); }
+.risk-score { display: flex; align-items: baseline; flex: none; }
+.risk-num { font-size: 42px; font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+.risk-hero.critical .risk-num { color: var(--critical); }
+.risk-hero.high .risk-num { color: var(--high); }
+.risk-hero.good .risk-num { color: var(--good); }
+.risk-den { font-size: 15px; color: var(--faint); margin-left: 2px; }
+.risk-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.risk-class { font-size: 13px; font-weight: 600; color: var(--text); }
+.risk-bar { height: 7px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.risk-bar span { display: block; height: 100%; border-radius: 999px; }
+.risk-hero.critical .risk-bar span { background: var(--critical); }
+.risk-hero.high .risk-bar span { background: var(--high); }
+.risk-hero.good .risk-bar span { background: var(--good); }
+.risk-sub { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11.5px; color: var(--dim); }
+.invest-card .ocsf-grid { margin: 14px 0 0; }
+
+.rec-cards { display: flex; flex-direction: column; gap: 8px; }
+.rec-card { padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.rec-card-head { display: flex; align-items: center; gap: 9px; }
+.rec-card-head strong { font-size: 13px; }
+.rec-auto { margin-left: auto; padding: 1px 7px; border-radius: 5px; background: var(--accent-wash); color: var(--accent-text); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.rec-desc { margin: 7px 0 0; font-size: 12.5px; color: var(--dim); line-height: 1.5; }
