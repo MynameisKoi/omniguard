@@ -187,7 +187,7 @@ function App({ user, onLogout, onUserChange }) {
         if (contentRef.current) contentRef.current.scrollTo({ top: 0, behavior: "smooth" });
         const t = setTimeout(() => setFiltering(false), 240);
         return () => clearTimeout(t);
-    }, [searchTerm]);
+    }, [searchTerm, page]);
     // which top-bar dropdown is open: null | "search" | "bell" | "profile"
     const [menu, setMenu] = useState(null)
     const [theme, setTheme] = useState(() => {
@@ -1678,6 +1678,16 @@ function LedgerPage() {
     const [err, setErr] = useState(null)
     const [selected, setSelected] = useState(null)   // a ledger entry → detail view
 
+    // brief spinner when moving between the ledger list and an entry detail
+    const [switching, setSwitching] = useState(false)
+    const didMountSel = useRef(false)
+    useEffect(() => {
+        if (!didMountSel.current) { didMountSel.current = true; return; }
+        setSwitching(true)
+        const t = setTimeout(() => setSwitching(false), 240)
+        return () => clearTimeout(t)
+    }, [selected])
+
     const load = () => {
         setLoading(true); setErr(null)
         fetch(`${API_URL}/investigations/ledger?limit=50`)
@@ -1687,6 +1697,8 @@ function LedgerPage() {
             .finally(() => setLoading(false))
     }
     useEffect(load, [])
+
+    if (switching) return <div className="loading-overlay"><div className="spinner" /></div>
 
     const runVerify = () => {
         setVerifying(true); setVerify(null)
