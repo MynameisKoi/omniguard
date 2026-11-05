@@ -10,7 +10,6 @@ import {
     UserRound, LogOut, Sparkles, RefreshCw, Send, Bot,
 } from 'lucide-react';
 import { Sparkline, StackedArea, BarRow, SampleBadge } from './charts';
-import { sampleThreatActivity, sampleSparkline, SAMPLE_DELTAS } from './sampleData';
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const SOURCES = ["verifyeye", "spectrac2", "manual"];
@@ -65,6 +64,44 @@ function exactTime(ts) {
     if (!ts) return "";
     try { return new Date(ts).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }); }
     catch { return ""; }
+}
+
+// real time-series from the alerts: n buckets from the earliest alert to now,
+// counted by severity (replaces the sampleData threat-activity placeholder)
+function buildActivity(alerts, n = 14) {
+    const times = (alerts || []).map(a => new Date(a.timestamp).getTime()).filter(t => !isNaN(t));
+    if (!times.length) return [];
+    const min = Math.min(...times);
+    const max = Math.max(Date.now(), ...times);
+    const span = Math.max(max - min, 1);
+    const byDay = span > 2 * 864e5; // span over 2 days → label by date, else by hour
+    const buckets = Array.from({ length: n }, () => ({ critical: 0, high: 0, medium: 0, low: 0 }));
+    for (const a of alerts) {
+        const t = new Date(a.timestamp).getTime();
+        if (isNaN(t)) continue;
+        let idx = Math.floor(((t - min) / span) * n);
+        idx = Math.max(0, Math.min(n - 1, idx));
+        const sev = (a.severity || "low").toLowerCase();
+        if (buckets[idx][sev] != null) buckets[idx][sev]++;
+    }
+    return buckets.map((b, i) => {
+        const at = new Date(min + (span * (i + 0.5)) / n);
+        const label = byDay
+            ? at.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+            : at.toLocaleTimeString(undefined, { hour: "2-digit" });
+        return { label, ...b };
+    });
+}
+
+// % change between the first half and second half of a series (real delta)
+function trendDelta(series) {
+    const n = (series || []).length;
+    if (n < 2) return null;
+    const half = Math.floor(n / 2);
+    const a = series.slice(0, half).reduce((s, x) => s + x, 0);
+    const b = series.slice(half).reduce((s, x) => s + x, 0);
+    if (a === 0) return b > 0 ? 100 : 0;
+    return Math.round(((b - a) / a) * 100);
 }
 
 const NAV = [
@@ -128,7 +165,11 @@ function App({ user, onLogout, onUserChange }) {
     const [filter, setFilter] = useState(null)
     const [srcFilter, setSrcFilter] = useState(null)
     const [assetTab, setAssetTab] = useState("hosts")
-    const [query, setQuery] = useState("")
+    const [query, setQuery] = useState("")          // live text in the search box
+    const [searchTerm, setSearchTerm] = useState("") // committed term (Enter) -> search page
+    const [recentSearches, setRecentSearches] = useState(() => {
+        try { return JSON.parse(localStorage.getItem("og_recent_searches") || "[]") } catch { return [] }
+    })
     // which top-bar dropdown is open: null | "search" | "bell" | "profile"
     const [menu, setMenu] = useState(null)
     const [theme, setTheme] = useState(() => {
@@ -225,17 +266,38 @@ function App({ user, onLogout, onUserChange }) {
     }, [menu]);
 
     // free-text search across the fields an analyst would actually type
-    const q = query.trim().toLowerCase();
-    const matchesQuery = (a) => !q || [
-        a.host, a.user, a.event_type, a.domain, a.src_ip, a.dst_ip,
-        a.source, a.mitre_technique, a.description,
-    ].some(v => v && String(v).toLowerCase().includes(q));
+    const matchesTerm = (a, term) => {
+        const t = (term || "").trim().toLowerCase();
+        if (!t) return true;
+        return [
+            a.host, a.user, a.event_type, a.domain, a.src_ip, a.dst_ip,
+            a.source, a.mitre_technique, a.description, a.brand_target,
+        ].some(v => v && String(v).toLowerCase().includes(t));
+    };
+    // live typeahead (as you type) and the committed results (after Enter)
+    const liveHits = query.trim() ? alerts.filter(a => matchesTerm(a, query)) : [];
+    const searchHits = alerts
+        .filter(a => matchesTerm(a, searchTerm))
+        .sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
 
-    // one filter set, scoping everything below it
+    // run a search: open the dedicated results page and remember the term
+    const runSearch = (term) => {
+        const t = (term || "").trim();
+        if (!t) return;
+        setSearchTerm(t); setQuery(t); setSelectedId(null); setPage("search"); setMenu(null);
+        setRecentSearches(prev => {
+            const next = [t, ...prev.filter(x => x.toLowerCase() !== t.toLowerCase())].slice(0, 8);
+            try { localStorage.setItem("og_recent_searches", JSON.stringify(next)) } catch {}
+            return next;
+        });
+    };
+    const clearRecent = () => { setRecentSearches([]); try { localStorage.removeItem("og_recent_searches") } catch {} };
+
+    // the dashboard/alert filters no longer react to the live search text —
+    // only the severity + engine filters scope the panels below
     const scoped = alerts.filter(a =>
         (!filter || a.severity === filter) &&
-        (!srcFilter || a.source === srcFilter) &&
-        matchesQuery(a)
+        (!srcFilter || a.source === srcFilter)
     );
 
     const countOf = (sev) => scoped.filter(a => a.severity === sev).length;
@@ -259,13 +321,24 @@ function App({ user, onLogout, onUserChange }) {
     const maxCount = Math.max(1, ...SEVERITIES.map(countOf));
     const engineCounts = countBy("source");
 
+    // extra chart data (#25): detections by engine, top impersonated brands, triage status
+    const engines = Object.entries(engineCounts).sort((a, b) => b[1] - a[1]);
+    const engineMax = Math.max(1, ...engines.map(e => e[1]));
+    const brands = topN("brand_target", 5);
+    const brandMax = Math.max(1, ...brands.map(b => b[1]));
+    const STATUSES = ["new", "triaged", "resolved"];
+    const statusCounts = STATUSES.map(s => [s, scoped.filter(a => a.status === s).length]);
+    const statusMax = Math.max(1, ...statusCounts.map(s => s[1]));
+
     const byNewest = [...scoped].sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
     const recent = byNewest.slice(0, 7);
     const criticals = byNewest.filter(a => a.severity === "critical").slice(0, 3);
     const untriaged = scoped.filter(a => a.status === "new").length;
 
-    // placeholder until GET /stats/timeseries exists — see sampleData.js
-    const activity = sampleThreatActivity();
+    // real alert volume over time, bucketed by severity
+    const activity = buildActivity(alerts);
+    const totalSeries = activity.map(b => b.critical + b.high + b.medium + b.low);
+    const sevSeries = (k) => activity.map(b => b[k] || 0);
 
     const techniques = topN("mitre_technique", 5);
     const techniqueMax = Math.max(1, ...techniques.map(([, n]) => n));
@@ -305,6 +378,8 @@ function App({ user, onLogout, onUserChange }) {
         ? "Alerts"
         : page === "profile"
         ? "Profile"
+        : page === "search"
+        ? "Search"
         : NAV.flatMap(s => s.items).find(i => i.id === page)?.label ?? "Alerts";
 
 
@@ -417,10 +492,11 @@ function App({ user, onLogout, onUserChange }) {
                         <Search />
                         <input
                             className="search"
-                            placeholder="Search hosts, alerts, users, IPs…"
+                            placeholder="Search alerts, hosts, domains, IPs… (Enter)"
                             value={query}
                             onChange={e => setQuery(e.target.value)}
                             onFocus={() => setMenu("search")}
+                            onKeyDown={e => { if (e.key === "Enter") runSearch(query); }}
                         />
                         {query && (
                             <button className="search-clear" onClick={() => setQuery("")} aria-label="Clear search">
@@ -429,29 +505,48 @@ function App({ user, onLogout, onUserChange }) {
                         )}
                         {menu === "search" && (
                             <div className="dropdown wide">
-                                <div className="dropdown-head">Search</div>
                                 {query ? (
-                                    <div className="dropdown-row">
-                                        <span className="dropdown-title">
-                                            {scoped.length} alert{scoped.length === 1 ? "" : "s"} match “{query}”
-                                        </span>
-                                        <span className="dropdown-sub">
-                                            Filtering every panel below. Press Escape to close this.
-                                        </span>
-                                    </div>
+                                    <>
+                                        <button className="dropdown-item search-all" onMouseDown={() => runSearch(query)}>
+                                            <Search />
+                                            <span>See all {liveHits.length} result{liveHits.length === 1 ? "" : "s"} for “{query}”</span>
+                                            <span className="kbd">Enter</span>
+                                        </button>
+                                        {liveHits.slice(0, 6).map(a => (
+                                            <button
+                                                key={a.alert_id}
+                                                className="dropdown-item search-hit"
+                                                onMouseDown={() => { openAlert(a.alert_id); setMenu(null); }}
+                                            >
+                                                <span className={`sev ${a.severity}`}>{a.severity}</span>
+                                                <span className="search-hit-main">
+                                                    <span className="search-hit-title">{a.event_type}</span>
+                                                    <span className="search-hit-sub">{a.host}{a.domain ? ` · ${a.domain}` : ""}</span>
+                                                </span>
+                                            </button>
+                                        ))}
+                                        {liveHits.length === 0 && <div className="dropdown-empty-row">No matches.</div>}
+                                    </>
+                                ) : recentSearches.length > 0 ? (
+                                    <>
+                                        <div className="dropdown-head">
+                                            Recent searches
+                                            <button className="dropdown-head-action" onMouseDown={clearRecent}>Clear</button>
+                                        </div>
+                                        {recentSearches.map(term => (
+                                            <button key={term} className="dropdown-item search-recent" onMouseDown={() => runSearch(term)}>
+                                                <Search /> <span>{term}</span>
+                                            </button>
+                                        ))}
+                                    </>
                                 ) : (
                                     <div className="dropdown-row">
-                                        <span className="dropdown-title">Type to filter the dashboard</span>
+                                        <span className="dropdown-title">Search the SOC</span>
                                         <span className="dropdown-sub">
-                                            Matches host, user, event type, domain, IP, engine, technique and description.
+                                            Matches host, user, event type, domain, IP, engine, technique, brand and description. Press Enter for full results.
                                         </span>
                                     </div>
                                 )}
-                                <div className="dropdown-note">
-                                    <SampleBadge note="work needed" />
-                                    Full search — jump straight to a host or run a saved query — comes
-                                    with the search endpoint.
-                                </div>
                             </div>
                         )}
                     </div>
@@ -673,12 +768,12 @@ function App({ user, onLogout, onUserChange }) {
                             </div>
 
                             <div className="stats">
-                                <Stat icon={Flag}        label="Total alerts" value={scoped.length}         series="total"    />
-                                <Stat icon={ShieldAlert} label="Critical"     value={countOf("critical")}   series="critical" tone="critical" />
-                                <Stat icon={TriangleAlert} label="High"       value={countOf("high")}       series="high"     tone="high" />
-                                <Stat icon={Activity}    label="Medium"       value={countOf("medium")}     series="medium"   tone="medium" />
-                                <Stat icon={Inbox}       label="Low"          value={countOf("low")}        series="low"      tone="low" />
-                                <Stat icon={Target}      label="Untriaged"    value={untriaged}             series="incidents" tone="accent" />
+                                <Stat icon={Flag}        label="Total alerts" value={scoped.length}       spark={totalSeries}        onClick={() => { setFilter(null); setSrcFilter(null); setPage("alerts"); }} />
+                                <Stat icon={ShieldAlert} label="Critical"     value={countOf("critical")} spark={sevSeries("critical")} tone="critical" onClick={() => { setFilter("critical"); setPage("alerts"); }} />
+                                <Stat icon={TriangleAlert} label="High"       value={countOf("high")}     spark={sevSeries("high")}   tone="high"   onClick={() => { setFilter("high"); setPage("alerts"); }} />
+                                <Stat icon={Activity}    label="Medium"       value={countOf("medium")}   spark={sevSeries("medium")} tone="medium" onClick={() => { setFilter("medium"); setPage("alerts"); }} />
+                                <Stat icon={Inbox}       label="Low"          value={countOf("low")}      spark={sevSeries("low")}    tone="low"    onClick={() => { setFilter("low"); setPage("alerts"); }} />
+                                <Stat icon={Target}      label="Untriaged"    value={untriaged}           spark={totalSeries}         tone="accent" onClick={() => { setFilter(null); setPage("alerts"); }} />
                             </div>
 
                             <AiTriage
@@ -693,7 +788,7 @@ function App({ user, onLogout, onUserChange }) {
                             <div className="grid-3">
                                 <Panel
                                     title="Threat activity"
-                                    note={<><SampleBadge />last 24 hours</>}
+                                    note={`${alerts.length} alerts by severity`}
                                     wide
                                 >
                                     <div className="chart-legend">
@@ -730,6 +825,53 @@ function App({ user, onLogout, onUserChange }) {
                                             ))}
                                         </div>
                                     )}
+                                </Panel>
+                            </div>
+
+                            <div className="grid-3">
+                                <Panel title="Detections by engine" note={`${countDistinct("source")} engine${countDistinct("source") === 1 ? "" : "s"}`}>
+                                    {engines.length === 0 ? (
+                                        <div className="empty">No detections yet.</div>
+                                    ) : (
+                                        <div className="barrows">
+                                            {engines.map(([src, n]) => (
+                                                <BarRow
+                                                    key={src}
+                                                    label={src}
+                                                    sub={ENGINE_ROLE[src] || ""}
+                                                    value={n}
+                                                    max={engineMax}
+                                                    tone={src === "spectrac2" ? "critical" : src === "verifyeye" ? "low" : "medium"}
+                                                />
+                                            ))}
+                                        </div>
+                                    )}
+                                </Panel>
+
+                                <Panel title="Top impersonated brands" note="phishing targets">
+                                    {brands.length === 0 ? (
+                                        <div className="empty">No brand impersonation seen.</div>
+                                    ) : (
+                                        <div className="barrows">
+                                            {brands.map(([b, n]) => (
+                                                <BarRow key={b} label={b} value={n} max={brandMax} tone="high" />
+                                            ))}
+                                        </div>
+                                    )}
+                                </Panel>
+
+                                <Panel title="Triage status" note={`${scoped.length} alerts`}>
+                                    <div className="barrows">
+                                        {statusCounts.map(([s, n]) => (
+                                            <BarRow
+                                                key={s}
+                                                label={s}
+                                                value={n}
+                                                max={statusMax}
+                                                tone={s === "resolved" ? "low" : s === "triaged" ? "medium" : "critical"}
+                                            />
+                                        ))}
+                                    </div>
                                 </Panel>
                             </div>
 
@@ -892,7 +1034,7 @@ function App({ user, onLogout, onUserChange }) {
                                             const hosts = [...new Set(mine.map(a => a.host))];
                                             const last = mine.map(a => new Date(a.timestamp)).sort((x, y) => y - x)[0];
                                             return (
-                                                <tr key={user}>
+                                                <tr key={user} className="row-link" onClick={() => { setQuery(user); setFilter(null); setSrcFilter(null); setPage("alerts"); }}>
                                                     <td>
                                                         <span className="cell">
                                                             <span className={`cell-mark ${worst}`} />
@@ -964,7 +1106,7 @@ function App({ user, onLogout, onUserChange }) {
                                                 const domains = [...new Set(mine.map(a => a.domain).filter(Boolean))];
                                                 const last = mine.map(a => new Date(a.timestamp)).sort((x, y) => y - x)[0];
                                                 return (
-                                                    <tr key={host}>
+                                                    <tr key={host} className="row-link" onClick={() => { setQuery(host); setFilter(null); setSrcFilter(null); setPage("alerts"); }}>
                                                         <td className="td-mono">{host}</td>
                                                         <td><span className={`sev ${worst}`}>{worst}</span></td>
                                                         <td className="td-mono td-dim">{n}</td>
@@ -993,7 +1135,7 @@ function App({ user, onLogout, onUserChange }) {
                                                 const worst = SEVERITIES.find(s => mine.some(a => a.severity === s));
                                                 const hosts = [...new Set(mine.map(a => a.host))];
                                                 return (
-                                                    <tr key={user}>
+                                                    <tr key={user} className="row-link" onClick={() => { setQuery(user); setFilter(null); setSrcFilter(null); setPage("alerts"); }}>
                                                         <td className="td-mono">{user}</td>
                                                         <td><span className={`sev ${worst}`}>{worst}</span></td>
                                                         <td className="td-mono td-dim">{n}</td>
@@ -1022,7 +1164,7 @@ function App({ user, onLogout, onUserChange }) {
                                                 const hosts = [...new Set(mine.map(a => a.host))];
                                                 const last = mine.map(a => new Date(a.timestamp)).sort((x, y) => y - x)[0];
                                                 return (
-                                                    <tr key={domain}>
+                                                    <tr key={domain} className="row-link" onClick={() => { setQuery(domain); setFilter(null); setSrcFilter(null); setPage("alerts"); }}>
                                                         <td className="td-mono">{domain}</td>
                                                         <td><span className={`sev ${worst}`}>{worst}</span></td>
                                                         <td className="td-mono td-dim">{n}</td>
@@ -1052,7 +1194,7 @@ function App({ user, onLogout, onUserChange }) {
                                         const mine = alerts.filter(a => a.source === src);
                                         const last = mine.map(a => new Date(a.timestamp)).sort((x, y) => y - x)[0];
                                         return (
-                                            <tr key={src}>
+                                            <tr key={src} className="row-link" onClick={() => { setSrcFilter(src); setFilter(null); setQuery(""); setPage("alerts"); }}>
                                                 <td>
                                                     <span style={{ display: "inline-grid", gridTemplateColumns: "9px auto", gap: "8px", alignItems: "center" }}>
                                                         <span className={`swatch eng-${src}`} />
@@ -1101,6 +1243,41 @@ function App({ user, onLogout, onUserChange }) {
 
                     {/* ── audit ledger ── */}
                     {page === "ledger" && <LedgerPage />}
+
+                    {/* ── search results ── */}
+                    {page === "search" && (
+                        <Panel
+                            title="Search results"
+                            note={`${searchHits.length} match${searchHits.length === 1 ? "" : "es"} for “${searchTerm}”`}
+                            flush
+                        >
+                            {searchHits.length === 0 ? (
+                                <CardEmpty glyph={Search} text={`No alerts match “${searchTerm}”`} />
+                            ) : (
+                                <table className="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Time</th><th>Severity</th><th>Type</th><th>Host</th>
+                                            <th>User</th><th className="td-wide">Domain / description</th><th>Engine</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {searchHits.map(a => (
+                                            <tr key={a.alert_id} className="row-link" onClick={() => openAlert(a.alert_id)}>
+                                                <td className="td-mono td-faint" title={exactTime(a.timestamp)}>{timeAgo(a.timestamp)}</td>
+                                                <td><span className={`sev ${a.severity}`}>{a.severity}</span></td>
+                                                <td className="td-mono">{a.event_type}</td>
+                                                <td className="td-mono td-dim">{a.host}</td>
+                                                <td className="td-mono td-dim">{a.user || "—"}</td>
+                                                <td className="td-wide td-dim td-clip">{a.domain || a.description || "—"}</td>
+                                                <td className="td-mono td-dim">{a.source}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </Panel>
+                    )}
 
                 </div>
             </div>
@@ -1799,15 +1976,23 @@ function Panel({ title, note, children, flush = false, action, onAction, actionI
     );
 }
 
-/* `series` and the delta come from sampleData — both are placeholders until
-   GET /stats/timeseries exists. The value itself is real. */
-function Stat({ icon: Icon, label, value, tone, foot, series }) {
-    const delta = series ? SAMPLE_DELTAS[series] : null;
+/* `spark` is a real per-bucket series from buildActivity; the delta is derived
+   from it. `onClick` makes the card a drill-down into the filtered alert list. */
+function Stat({ icon: Icon, label, value, tone, foot, spark, onClick }) {
+    const hasSpark = Array.isArray(spark) && spark.length >= 2;
+    const delta = hasSpark ? trendDelta(spark) : null;
     const up = delta != null && delta >= 0;
     const colour = tone && tone !== "accent" ? `var(--fill-${tone})` : "var(--accent)";
+    const clickable = typeof onClick === "function";
 
     return (
-        <div className="stat">
+        <div
+            className={`stat ${clickable ? "clickable" : ""}`}
+            onClick={onClick}
+            role={clickable ? "button" : undefined}
+            tabIndex={clickable ? 0 : undefined}
+            onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+        >
             <div className="stat-head">
                 <span className="stat-label">{label}</span>
                 {Icon && <span className={`stat-icon ${tone || ""}`}><Icon /></span>}
@@ -1815,14 +2000,14 @@ function Stat({ icon: Icon, label, value, tone, foot, series }) {
 
             <div className="stat-row">
                 <span className={`stat-value ${tone || ""}`}>{value}</span>
-                {series && <Sparkline values={sampleSparkline(series)} stroke={colour} />}
+                {hasSpark && <Sparkline values={spark} stroke={colour} />}
             </div>
 
             {delta != null ? (
-                <div className={`stat-delta ${up ? "up" : "down"}`} title="Placeholder — needs GET /stats/timeseries">
+                <div className={`stat-delta ${up ? "up" : "down"}`} title="first half vs second half of the shown period">
                     {up ? <TrendingUp /> : <TrendingDown />}
                     {Math.abs(delta)}%
-                    <em>vs yesterday</em>
+                    <em>over period</em>
                 </div>
             ) : foot ? (
                 <div className="stat-foot">{foot}</div>

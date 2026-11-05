@@ -2769,3 +2769,28 @@ button { font: inherit; color: inherit; }
 .rec-card-head strong { font-size: 13px; }
 .rec-auto { margin-left: auto; padding: 1px 7px; border-radius: 5px; background: var(--accent-wash); color: var(--accent-text); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
 .rec-desc { margin: 7px 0 0; font-size: 12.5px; color: var(--dim); line-height: 1.5; }
+
+/* clickable stat cards drill into the filtered alert list (#28) */
+.stat.clickable { cursor: pointer; transition: border-color 0.12s, background 0.12s, transform 0.08s; }
+.stat.clickable:hover { border-color: var(--accent-line); background: var(--hover); }
+.stat.clickable:active { transform: translateY(1px); }
+.stat.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* drill-through rows (hosts/users/domains/engines) + search results (#28/#24) */
+.row-link { cursor: pointer; }
+.search-hit { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; }
+.search-hit-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.search-hit-title { font-size: 13px; color: var(--text); font-family: ui-monospace, Menlo, monospace; }
+.search-hit-sub { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dropdown-empty-row { padding: 10px 14px; font-size: 12.5px; color: var(--faint); }
+
+/* search dropdown: "see all", recent searches, Enter hint (#24) */
+.search-all { display: flex; align-items: center; gap: 9px; width: 100%; font-weight: 500; }
+.search-all svg { width: 15px; height: 15px; color: var(--accent-text); }
+.search-all .kbd { margin-left: auto; }
+.kbd { padding: 1px 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--raised); color: var(--faint); font-size: 10.5px; font-family: ui-monospace, Menlo, monospace; }
+.search-recent { display: flex; align-items: center; gap: 9px; width: 100%; color: var(--dim); }
+.search-recent svg { width: 14px; height: 14px; color: var(--faint); }
+.dropdown-head { display: flex; align-items: center; justify-content: space-between; }
+.dropdown-head-action { border: 0; background: 0; color: var(--accent-text); font-size: 11px; cursor: pointer; }
+.dropdown-head-action:hover { text-decoration: underline; }
