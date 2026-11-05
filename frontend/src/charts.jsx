@@ -108,10 +108,18 @@ export function StackedArea({ data, height = 190 }) {
 
 /* ---- labelled horizontal bar, used for techniques and assets ---- */
 
-export function BarRow({ label, sub, value, max, tone }) {
+export function BarRow({ label, sub, value, max, tone, onClick }) {
     const pct = max ? Math.max(2, (value / max) * 100) : 0;
+    const clickable = typeof onClick === "function";
     return (
-        <div className="barrow">
+        <div
+            className={`barrow ${clickable ? "clickable" : ""}`}
+            onClick={onClick}
+            role={clickable ? "button" : undefined}
+            tabIndex={clickable ? 0 : undefined}
+            onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+            title={clickable ? `Filter by ${label}` : undefined}
+        >
             <span className="barrow-label">
                 {label}
                 {sub && <em>{sub}</em>}

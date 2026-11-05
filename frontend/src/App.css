@@ -2829,3 +2829,80 @@ button { font: inherit; color: inherit; }
 }
 .scoped-filterbar .reset svg { width: 13px; height: 13px; stroke-width: 2.5; }
 .scoped-filterbar .reset:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* clickable charts (#30): bars + donut arcs/legend filter the dashboard */
+.barrow.clickable { cursor: pointer; border-radius: var(--r-sm); transition: background 0.12s; }
+.barrow.clickable:hover { background: var(--hover); }
+.barrow.clickable:hover .barrow-label { color: var(--accent-text); }
+.barrow.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.donut-arc.clickable { cursor: pointer; transition: opacity 0.12s; }
+.donut-arc.clickable:hover { opacity: 0.82; }
+.donut-arc.dim { opacity: 0.3; }
+.donut-row.clickable { cursor: pointer; border-radius: var(--r-sm); padding: 2px 4px; margin: 0 -4px; transition: background 0.12s; }
+.donut-row.clickable:hover { background: var(--hover); }
+.donut-row.active { background: var(--accent-wash); }
+.donut-row.active .donut-key { color: var(--accent-text); font-weight: 600; }
+.donut-row.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* filter feedback: brief loading sweep + active-filter banner (so in-place changes read clearly) */
+.filter-progress {
+    position: relative; height: 3px; border-radius: 999px;
+    margin-bottom: 14px; background: var(--accent-wash); overflow: hidden;
+}
+.filter-progress::after {
+    content: ""; position: absolute; inset: 0; width: 35%;
+    background: var(--accent); border-radius: 999px;
+    animation: filter-sweep 0.5s ease-in-out;
+}
+@keyframes filter-sweep { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
+
+.active-filters {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 16px; padding: 10px 14px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.af-label { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.af-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 11px; border-radius: 999px;
+    border: 1px solid var(--accent-line); background: var(--accent-wash);
+    color: var(--accent-text); font-size: 12.5px; font-weight: 600;
+    cursor: pointer; text-transform: capitalize;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.af-chip:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.af-chip svg { width: 13px; height: 13px; }
+.af-chip .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.af-chip .dot.sev-critical { background: var(--fill-critical); }
+.af-chip .dot.sev-high { background: var(--fill-high); }
+.af-chip .dot.sev-medium { background: var(--fill-medium); }
+.af-chip .dot.sev-low { background: var(--fill-low); }
+.af-clear { margin-left: auto; border: 0; background: 0; color: var(--dim); font-size: 12.5px; cursor: pointer; }
+.af-clear:hover { color: var(--text); text-decoration: underline; }
+
+/* full-screen loading spinner: blank the view, then reveal the updated dashboard */
+.loading-overlay {
+    position: fixed; inset: 0; z-index: 400;
+    background: var(--bg);
+    display: grid; place-items: center;
+    animation: overlay-fade 0.1s ease;
+}
+@keyframes overlay-fade { from { opacity: 0; } to { opacity: 1; } }
+.spinner {
+    width: 44px; height: 44px;
+    border: 3px solid var(--line);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.55s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* "Filtered by X" headline on the scoped (chart-click) view */
+.filter-headline { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.filter-headline > span { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+
+.search-head-right { display: flex; align-items: center; gap: 12px; flex: none; }
+
+/* in-panel centered spinner (ledger load, etc.) — matters once there are thousands of rows */
+.panel-loading { display: grid; place-items: center; min-height: 160px; }

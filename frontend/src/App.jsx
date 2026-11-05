@@ -170,10 +170,24 @@ function App({ user, onLogout, onUserChange }) {
     const [assetTab, setAssetTab] = useState("hosts")
     const [query, setQuery] = useState("")          // live text in the search box
     const [searchTerm, setSearchTerm] = useState(() => { try { return localStorage.getItem("og_searchTerm") || "" } catch { return "" } }) // committed term (Enter)
+    const [searchKind, setSearchKind] = useState("search") // "search" (typed) | "filter" (chart click)
     const [recentSearches, setRecentSearches] = useState(() => {
         try { return JSON.parse(localStorage.getItem("og_recent_searches") || "[]") } catch { return [] }
     })
     useEffect(() => { try { localStorage.setItem("og_searchTerm", searchTerm) } catch {} }, [searchTerm])
+
+    // brief "something changed" flash + scroll-to-top when a filter is applied,
+    // so an in-place dashboard change is perceptible instead of silently instant
+    const contentRef = useRef(null);
+    const [filtering, setFiltering] = useState(false);
+    const didMountFilter = useRef(false);
+    useEffect(() => {
+        if (!didMountFilter.current) { didMountFilter.current = true; return; } // skip first render
+        setFiltering(true);
+        if (contentRef.current) contentRef.current.scrollTo({ top: 0, behavior: "smooth" });
+        const t = setTimeout(() => setFiltering(false), 240);
+        return () => clearTimeout(t);
+    }, [searchTerm]);
     // which top-bar dropdown is open: null | "search" | "bell" | "profile"
     const [menu, setMenu] = useState(null)
     const [theme, setTheme] = useState(() => {
@@ -288,6 +302,7 @@ function App({ user, onLogout, onUserChange }) {
     const runSearch = (term) => {
         const t = (term || "").trim();
         if (!t) return;
+        setSearchKind("search");
         setSearchTerm(t); setQuery(t); setSelectedId(null); setPage("search"); setMenu(null);
         setRecentSearches(prev => {
             const next = [t, ...prev.filter(x => x.toLowerCase() !== t.toLowerCase())].slice(0, 8);
@@ -296,6 +311,13 @@ function App({ user, onLogout, onUserChange }) {
         });
     };
     const clearRecent = () => { setRecentSearches([]); try { localStorage.removeItem("og_recent_searches") } catch {} };
+    // a chart-click "filter" (technique/brand/host): same scoped view, framed as a filter you can remove
+    const filterBy = (term) => {
+        const t = (term || "").trim();
+        if (!t) return;
+        setSearchKind("filter");
+        setSearchTerm(t); setQuery(""); setSelectedId(null); setPage("search"); setMenu(null);
+    };
 
     // the dashboard/alert filters no longer react to the live search text —
     // only the severity + engine filters scope the panels below
@@ -394,7 +416,7 @@ function App({ user, onLogout, onUserChange }) {
         : page === "profile"
         ? "Profile"
         : page === "search"
-        ? "Search"
+        ? (searchKind === "filter" ? "Filtered" : "Search")
         : NAV.flatMap(s => s.items).find(i => i.id === page)?.label ?? "Alerts";
 
 
@@ -643,7 +665,32 @@ function App({ user, onLogout, onUserChange }) {
                     </span>
                 </header>
 
-                <div className="content">
+                <div className="content" ref={contentRef}>
+
+                    {filtering && (
+                        <div className="loading-overlay">
+                            <div className="spinner" />
+                        </div>
+                    )}
+
+                    {(filter || srcFilter) && (page === "overview" || page === "alerts") && (
+                        <div className="active-filters">
+                            <span className="af-label">Filtered by</span>
+                            {filter && (
+                                <button className="af-chip" onClick={() => setFilter(null)}>
+                                    <span className={`dot sev-${filter}`} /> {filter}
+                                    <X />
+                                </button>
+                            )}
+                            {srcFilter && (
+                                <button className="af-chip" onClick={() => setSrcFilter(null)}>
+                                    {srcFilter}
+                                    <X />
+                                </button>
+                            )}
+                            <button className="af-clear" onClick={() => { setFilter(null); setSrcFilter(null); }}>Clear all</button>
+                        </div>
+                    )}
 
                     {error && (
                         <div className="error">
@@ -822,8 +869,10 @@ function App({ user, onLogout, onUserChange }) {
 
                                 <Panel title="Severity distribution" note={`${scoped.length} alerts`}>
                                     <Donut
-                                        total={scoped.length}
-                                        slices={SEVERITIES.map(sev => ({ key: sev, n: countOf(sev) }))}
+                                        total={sevScoped.length}
+                                        slices={SEVERITIES.map(sev => ({ key: sev, n: sevCount(sev) }))}
+                                        onSlice={(key) => setFilter(f => f === key ? null : key)}
+                                        activeKey={filter}
                                     />
                                 </Panel>
 
@@ -839,6 +888,7 @@ function App({ user, onLogout, onUserChange }) {
                                                     sub={id}
                                                     value={n}
                                                     max={techniqueMax}
+                                                    onClick={() => filterBy(id)}
                                                 />
                                             ))}
                                         </div>
@@ -860,6 +910,7 @@ function App({ user, onLogout, onUserChange }) {
                                                     value={n}
                                                     max={engineMax}
                                                     tone={src === "spectrac2" ? "critical" : src === "verifyeye" ? "low" : "medium"}
+                                                    onClick={() => setSrcFilter(f => f === src ? null : src)}
                                                 />
                                             ))}
                                         </div>
@@ -872,7 +923,7 @@ function App({ user, onLogout, onUserChange }) {
                                     ) : (
                                         <div className="barrows">
                                             {brands.map(([b, n]) => (
-                                                <BarRow key={b} label={b} value={n} max={brandMax} tone="high" />
+                                                <BarRow key={b} label={b} value={n} max={brandMax} tone="high" onClick={() => filterBy(b)} />
                                             ))}
                                         </div>
                                     )}
@@ -925,6 +976,7 @@ function App({ user, onLogout, onUserChange }) {
                                                     value={h.score}
                                                     max={100}
                                                     tone={h.worst}
+                                                    onClick={() => filterBy(h.host)}
                                                 />
                                             ))}
                                         </div>
@@ -1265,13 +1317,31 @@ function App({ user, onLogout, onUserChange }) {
                     {/* ── search results: a full dashboard scoped to the term ── */}
                     {page === "search" && (
                         <>
-                            <div className="search-result-head">
-                                <div>
-                                    <span className="search-eyebrow">Search</span>
-                                    <h2>Results for “{searchTerm}”</h2>
+                            <button className="detail-back" onClick={() => setPage("overview")}>
+                                <ArrowRight style={{ transform: "rotate(180deg)" }} /> Back to dashboard
+                            </button>
+                            {searchKind === "filter" ? (
+                                <div className="search-result-head">
+                                    <div>
+                                        <span className="search-eyebrow">Filtered view</span>
+                                        <div className="filter-headline">
+                                            <span>Filtered by</span>
+                                            <button className="af-chip" onClick={() => setPage("overview")} title="Remove filter">
+                                                {searchTerm} <X />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <span className="search-result-count">{searchHits.length} alert{searchHits.length === 1 ? "" : "s"}</span>
                                 </div>
-                                <span className="search-result-count">{searchHits.length} alert{searchHits.length === 1 ? "" : "s"}</span>
-                            </div>
+                            ) : (
+                                <div className="search-result-head">
+                                    <div>
+                                        <span className="search-eyebrow">Search</span>
+                                        <h2>Results for “{searchTerm}”</h2>
+                                    </div>
+                                    <span className="search-result-count">{searchHits.length} alert{searchHits.length === 1 ? "" : "s"}</span>
+                                </div>
+                            )}
                             {searchHits.length === 0 ? (
                                 <CardEmpty glyph={Search} text={`No alerts match “${searchTerm}”`} />
                             ) : (
@@ -1655,7 +1725,7 @@ function LedgerPage() {
                         </span>
                     )}
                 </div>
-                {loading ? <p className="note">Loading…</p> : records.length === 0 ? (
+                {loading ? <div className="panel-loading"><div className="spinner" /></div> : records.length === 0 ? (
                     <p className="note">No ledger entries yet. Isolate a host or ask the AI analyst to create one.</p>
                 ) : (
                     <div className="chain-list">
@@ -2152,10 +2222,11 @@ function Seg({ label, value, onChange, options }) {
 
 /* part-to-whole ring. Presentational — it draws whatever slices it is handed.
    Each slice: { key, n }; the key doubles as the CSS class for its colour. */
-function Donut({ slices, total, size = 132, thickness = 14 }) {
+function Donut({ slices, total, size = 132, thickness = 14, onSlice, activeKey }) {
     const r = (size - thickness) / 2;
     const circumference = 2 * Math.PI * r;
     const sum = slices.reduce((acc, s) => acc + s.n, 0);
+    const clickable = typeof onSlice === "function";
 
     let offset = 0;
     const arcs = slices
@@ -2180,7 +2251,7 @@ function Donut({ slices, total, size = 132, thickness = 14 }) {
                     {arcs.map(a => (
                         <circle
                             key={a.key}
-                            className={`donut-arc sev-${a.key}`}
+                            className={`donut-arc sev-${a.key} ${clickable ? "clickable" : ""} ${activeKey && activeKey !== a.key ? "dim" : ""}`}
                             cx={size / 2} cy={size / 2} r={r}
                             fill="none"
                             strokeWidth={thickness}
@@ -2188,6 +2259,7 @@ function Donut({ slices, total, size = 132, thickness = 14 }) {
                             strokeDashoffset={-a.offset}
                             /* start at 12 o'clock instead of 3 */
                             transform={`rotate(-90 ${size / 2} ${size / 2})`}
+                            onClick={clickable ? () => onSlice(a.key) : undefined}
                         >
                             <title>{`${a.key}: ${a.n}`}</title>
                         </circle>
@@ -2201,7 +2273,14 @@ function Donut({ slices, total, size = 132, thickness = 14 }) {
 
             <div className="donut-legend">
                 {slices.map(s => (
-                    <div className="donut-row" key={s.key}>
+                    <div
+                        className={`donut-row ${clickable ? "clickable" : ""} ${activeKey === s.key ? "active" : ""}`}
+                        key={s.key}
+                        onClick={clickable ? () => onSlice(s.key) : undefined}
+                        role={clickable ? "button" : undefined}
+                        tabIndex={clickable ? 0 : undefined}
+                        onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSlice(s.key); } } : undefined}
+                    >
                         <span className={`donut-swatch sev-${s.key}`} />
                         <span className="donut-key">{s.key}</span>
                         <span className="donut-n">{s.n}</span>
