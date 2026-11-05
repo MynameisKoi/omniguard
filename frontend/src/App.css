@@ -2794,3 +2794,38 @@ button { font: inherit; color: inherit; }
 .dropdown-head { display: flex; align-items: center; justify-content: space-between; }
 .dropdown-head-action { border: 0; background: 0; color: var(--accent-text); font-size: 11px; cursor: pointer; }
 .dropdown-head-action:hover { text-decoration: underline; }
+
+/* keep the absolute-positioned search icon from leaking into the dropdown items */
+.searchbox .dropdown svg { position: static; left: auto; }
+
+/* search results page header */
+.search-result-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.search-eyebrow { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-text); margin-bottom: 2px; }
+.search-result-head h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.search-result-count { font-size: 13px; color: var(--dim); font-family: ui-monospace, Menlo, monospace; flex: none; }
+
+/* active (selected) stat card + the scoped filter bar */
+.stat.active { border-color: var(--accent); background: var(--accent-wash); }
+.stat.active .stat-value { color: var(--accent-text); }
+.scoped-filterbar {
+    display: flex; align-items: center; gap: 9px;
+    margin: -4px 0 16px;
+    font-size: 13px; color: var(--dim);
+}
+.scoped-filterbar .reset {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 6px;
+    padding: 6px 13px;
+    border: 1px solid var(--accent-line);
+    border-radius: var(--r-md);
+    background: var(--accent-wash);
+    color: var(--accent-text);
+    font-size: var(--t-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.scoped-filterbar .reset svg { width: 13px; height: 13px; stroke-width: 2.5; }
+.scoped-filterbar .reset:hover { background: var(--accent); border-color: var(--accent); color: #fff; }

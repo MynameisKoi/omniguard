@@ -150,12 +150,15 @@ function App({ user, onLogout, onUserChange }) {
     // restore the last tab + open alert on reload instead of snapping back to the dashboard
     const [page, setPage] = useState(() => { try { return localStorage.getItem("og_page") || "overview" } catch { return "overview" } })
     const [selectedId, setSelectedId] = useState(() => { try { return localStorage.getItem("og_selectedId") || null } catch { return null } })
+    // which page the open alert was reached from, so "back" returns there
+    const [cameFrom, setCameFrom] = useState(() => { try { return localStorage.getItem("og_cameFrom") || "alerts" } catch { return "alerts" } })
 
     // remember the current tab + open alert across reloads
     useEffect(() => { try { localStorage.setItem("og_page", page) } catch {} }, [page])
     useEffect(() => {
         try { selectedId ? localStorage.setItem("og_selectedId", selectedId) : localStorage.removeItem("og_selectedId") } catch {}
     }, [selectedId])
+    useEffect(() => { try { localStorage.setItem("og_cameFrom", cameFrom) } catch {} }, [cameFrom])
     // if the remembered alert is gone (e.g. it was deleted), fall back to the list
     useEffect(() => {
         if (page === "alert-detail" && selectedId && alerts.length && !alerts.find(a => a.alert_id === selectedId)) {
@@ -166,10 +169,11 @@ function App({ user, onLogout, onUserChange }) {
     const [srcFilter, setSrcFilter] = useState(null)
     const [assetTab, setAssetTab] = useState("hosts")
     const [query, setQuery] = useState("")          // live text in the search box
-    const [searchTerm, setSearchTerm] = useState("") // committed term (Enter) -> search page
+    const [searchTerm, setSearchTerm] = useState(() => { try { return localStorage.getItem("og_searchTerm") || "" } catch { return "" } }) // committed term (Enter)
     const [recentSearches, setRecentSearches] = useState(() => {
         try { return JSON.parse(localStorage.getItem("og_recent_searches") || "[]") } catch { return [] }
     })
+    useEffect(() => { try { localStorage.setItem("og_searchTerm", searchTerm) } catch {} }, [searchTerm])
     // which top-bar dropdown is open: null | "search" | "bell" | "profile"
     const [menu, setMenu] = useState(null)
     const [theme, setTheme] = useState(() => {
@@ -302,6 +306,11 @@ function App({ user, onLogout, onUserChange }) {
 
     const countOf = (sev) => scoped.filter(a => a.severity === sev).length;
 
+    // severity counts that ignore the active severity filter, so the stat cards
+    // keep showing every severity (and stay clickable) while a filter is applied
+    const sevScoped = alerts.filter(a => (!srcFilter || a.source === srcFilter));
+    const sevCount = (sev) => sevScoped.filter(a => a.severity === sev).length;
+
     // { value: count } for any alert field, ignoring nulls
     const countBy = (field) => scoped.reduce((acc, a) => {
         const v = a[field];
@@ -363,7 +372,13 @@ function App({ user, onLogout, onUserChange }) {
         .sort((a, b) => b.score - a.score)
         .slice(0, 6);
 
-    const openAlert = (id) => { setSelectedId(id); setPage("alert-detail"); };
+    // labels for the pages an alert can be opened from
+    const pageTitle = (p) => p === "search" ? "Search" : p === "overview" ? "Dashboard"
+        : (NAV.flatMap(s => s.items).find(i => i.id === p)?.label ?? "Alerts");
+    const openAlert = (id) => {
+        if (page !== "alert-detail") setCameFrom(page);
+        setSelectedId(id); setPage("alert-detail");
+    };
 
     // TODO: derive these from `scoped`.
     // Shape: { tone: "bad" | "warn" | "good" | "", body: <JSX> }
@@ -375,7 +390,7 @@ function App({ user, onLogout, onUserChange }) {
     const findings = [];
 
     const pageLabel = page === "alert-detail"
-        ? "Alerts"
+        ? pageTitle(cameFrom)
         : page === "profile"
         ? "Profile"
         : page === "search"
@@ -440,7 +455,7 @@ function App({ user, onLogout, onUserChange }) {
                             return (
                                 <button
                                     key={item.id}
-                                    className={`nav-item ${page === item.id || (page === "alert-detail" && item.id === "alerts") ? "active" : ""}`}
+                                    className={`nav-item ${page === item.id || (page === "alert-detail" && item.id === cameFrom) ? "active" : ""}`}
                                     onClick={() => { setPage(item.id); setSelectedId(null); if (window.innerWidth <= 820) setNavOpen(false); }}
                                     title={item.label}
                                 >
@@ -482,7 +497,7 @@ function App({ user, onLogout, onUserChange }) {
                     <div className="crumb">
                         {page === "alert-detail" ? (
                             <>
-                                <button className="back" onClick={() => setPage("alerts")}>Alerts</button>
+                                <button className="back" onClick={() => setPage(cameFrom)}>{pageTitle(cameFrom)}</button>
                                 <span className="slash">/</span>
                                 {selected ? selected.event_type : "detail"}
                             </>
@@ -709,6 +724,9 @@ function App({ user, onLogout, onUserChange }) {
                     {/* ── single alert ── */}
                     {page === "alert-detail" && selected && (
                         <>
+                            <button className="detail-back" onClick={() => setPage(cameFrom)}>
+                                <ArrowRight style={{ transform: "rotate(180deg)" }} /> Back to {pageTitle(cameFrom)}
+                            </button>
                             <div className="detail-title">
                                 <span className={`sev ${selected.severity}`}>{selected.severity}</span>
                                 <h2>{selected.event_type}</h2>
@@ -768,12 +786,12 @@ function App({ user, onLogout, onUserChange }) {
                             </div>
 
                             <div className="stats">
-                                <Stat icon={Flag}        label="Total alerts" value={scoped.length}       spark={totalSeries}        onClick={() => { setFilter(null); setSrcFilter(null); setPage("alerts"); }} />
-                                <Stat icon={ShieldAlert} label="Critical"     value={countOf("critical")} spark={sevSeries("critical")} tone="critical" onClick={() => { setFilter("critical"); setPage("alerts"); }} />
-                                <Stat icon={TriangleAlert} label="High"       value={countOf("high")}     spark={sevSeries("high")}   tone="high"   onClick={() => { setFilter("high"); setPage("alerts"); }} />
-                                <Stat icon={Activity}    label="Medium"       value={countOf("medium")}   spark={sevSeries("medium")} tone="medium" onClick={() => { setFilter("medium"); setPage("alerts"); }} />
-                                <Stat icon={Inbox}       label="Low"          value={countOf("low")}      spark={sevSeries("low")}    tone="low"    onClick={() => { setFilter("low"); setPage("alerts"); }} />
-                                <Stat icon={Target}      label="Untriaged"    value={untriaged}           spark={totalSeries}         tone="accent" onClick={() => { setFilter(null); setPage("alerts"); }} />
+                                <Stat icon={Flag}        label="Total alerts" value={sevScoped.length}    spark={totalSeries}        onClick={() => setFilter(null)} active={!filter} />
+                                <Stat icon={ShieldAlert} label="Critical"     value={sevCount("critical")} spark={sevSeries("critical")} tone="critical" onClick={() => setFilter(f => f === "critical" ? null : "critical")} active={filter === "critical"} />
+                                <Stat icon={TriangleAlert} label="High"       value={sevCount("high")}    spark={sevSeries("high")}   tone="high"   onClick={() => setFilter(f => f === "high" ? null : "high")} active={filter === "high"} />
+                                <Stat icon={Activity}    label="Medium"       value={sevCount("medium")}  spark={sevSeries("medium")} tone="medium" onClick={() => setFilter(f => f === "medium" ? null : "medium")} active={filter === "medium"} />
+                                <Stat icon={Inbox}       label="Low"          value={sevCount("low")}     spark={sevSeries("low")}    tone="low"    onClick={() => setFilter(f => f === "low" ? null : "low")} active={filter === "low"} />
+                                <Stat icon={Target}      label="Untriaged"    value={untriaged}           spark={totalSeries}         tone="accent" />
                             </div>
 
                             <AiTriage
@@ -1244,39 +1262,22 @@ function App({ user, onLogout, onUserChange }) {
                     {/* ── audit ledger ── */}
                     {page === "ledger" && <LedgerPage />}
 
-                    {/* ── search results ── */}
+                    {/* ── search results: a full dashboard scoped to the term ── */}
                     {page === "search" && (
-                        <Panel
-                            title="Search results"
-                            note={`${searchHits.length} match${searchHits.length === 1 ? "" : "es"} for “${searchTerm}”`}
-                            flush
-                        >
+                        <>
+                            <div className="search-result-head">
+                                <div>
+                                    <span className="search-eyebrow">Search</span>
+                                    <h2>Results for “{searchTerm}”</h2>
+                                </div>
+                                <span className="search-result-count">{searchHits.length} alert{searchHits.length === 1 ? "" : "s"}</span>
+                            </div>
                             {searchHits.length === 0 ? (
                                 <CardEmpty glyph={Search} text={`No alerts match “${searchTerm}”`} />
                             ) : (
-                                <table className="table">
-                                    <thead>
-                                        <tr>
-                                            <th>Time</th><th>Severity</th><th>Type</th><th>Host</th>
-                                            <th>User</th><th className="td-wide">Domain / description</th><th>Engine</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {searchHits.map(a => (
-                                            <tr key={a.alert_id} className="row-link" onClick={() => openAlert(a.alert_id)}>
-                                                <td className="td-mono td-faint" title={exactTime(a.timestamp)}>{timeAgo(a.timestamp)}</td>
-                                                <td><span className={`sev ${a.severity}`}>{a.severity}</span></td>
-                                                <td className="td-mono">{a.event_type}</td>
-                                                <td className="td-mono td-dim">{a.host}</td>
-                                                <td className="td-mono td-dim">{a.user || "—"}</td>
-                                                <td className="td-wide td-dim td-clip">{a.domain || a.description || "—"}</td>
-                                                <td className="td-mono td-dim">{a.source}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                <ScopedDashboard alerts={searchHits} term={searchTerm} onOpen={openAlert} />
                             )}
-                        </Panel>
+                        </>
                     )}
 
                 </div>
@@ -1978,7 +1979,7 @@ function Panel({ title, note, children, flush = false, action, onAction, actionI
 
 /* `spark` is a real per-bucket series from buildActivity; the delta is derived
    from it. `onClick` makes the card a drill-down into the filtered alert list. */
-function Stat({ icon: Icon, label, value, tone, foot, spark, onClick }) {
+function Stat({ icon: Icon, label, value, tone, foot, spark, onClick, active }) {
     const hasSpark = Array.isArray(spark) && spark.length >= 2;
     const delta = hasSpark ? trendDelta(spark) : null;
     const up = delta != null && delta >= 0;
@@ -1987,7 +1988,7 @@ function Stat({ icon: Icon, label, value, tone, foot, spark, onClick }) {
 
     return (
         <div
-            className={`stat ${clickable ? "clickable" : ""}`}
+            className={`stat ${clickable ? "clickable" : ""} ${active ? "active" : ""}`}
             onClick={onClick}
             role={clickable ? "button" : undefined}
             tabIndex={clickable ? 0 : undefined}
@@ -2013,6 +2014,111 @@ function Stat({ icon: Icon, label, value, tone, foot, spark, onClick }) {
                 <div className="stat-foot">{foot}</div>
             ) : null}
         </div>
+    );
+}
+
+/* a dashboard scoped to a subset of alerts (used by the search results page):
+   stats + charts + the full matching list, all computed from `alerts`. */
+function ScopedDashboard({ alerts, term, onOpen }) {
+    const SEV = ["critical", "high", "medium", "low"];
+    const [sevFilter, setSevFilter] = useState(null);
+    const toggleSev = (s) => setSevFilter(prev => prev === s ? null : s);
+
+    // stat values stay on the full subset so every severity is always visible + clickable
+    const countOf = (s) => alerts.filter(a => a.severity === s).length;
+    const untriaged = alerts.filter(a => a.status === "new").length;
+    const fullActivity = buildActivity(alerts);
+    const totalSeries = fullActivity.map(b => b.critical + b.high + b.medium + b.low);
+    const sevSeries = (k) => fullActivity.map(b => b[k] || 0);
+
+    // everything below the stat row reflects the active severity filter
+    const view = sevFilter ? alerts.filter(a => a.severity === sevFilter) : alerts;
+    const vcountOf = (s) => view.filter(a => a.severity === s).length;
+    const countBy = (field) => view.reduce((acc, a) => { const v = a[field]; if (v) acc[v] = (acc[v] || 0) + 1; return acc; }, {});
+    const topN = (field, n) => Object.entries(countBy(field)).sort((x, y) => y[1] - x[1]).slice(0, n);
+    const activity = buildActivity(view);
+    const engines = Object.entries(countBy("source")).sort((a, b) => b[1] - a[1]);
+    const engineMax = Math.max(1, ...engines.map(e => e[1]));
+    const brands = topN("brand_target", 5);
+    const brandMax = Math.max(1, ...brands.map(b => b[1]));
+    const sorted = [...view].sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
+
+    return (
+        <>
+            <div className="stats">
+                <Stat icon={Flag}          label="Matches"   value={alerts.length}       spark={totalSeries} onClick={() => setSevFilter(null)} active={!sevFilter} />
+                <Stat icon={ShieldAlert}   label="Critical"  value={countOf("critical")} spark={sevSeries("critical")} tone="critical" onClick={() => toggleSev("critical")} active={sevFilter === "critical"} />
+                <Stat icon={TriangleAlert} label="High"      value={countOf("high")}     spark={sevSeries("high")}     tone="high"   onClick={() => toggleSev("high")}   active={sevFilter === "high"} />
+                <Stat icon={Activity}      label="Medium"    value={countOf("medium")}   spark={sevSeries("medium")}   tone="medium" onClick={() => toggleSev("medium")} active={sevFilter === "medium"} />
+                <Stat icon={Inbox}         label="Low"       value={countOf("low")}      spark={sevSeries("low")}      tone="low"    onClick={() => toggleSev("low")}    active={sevFilter === "low"} />
+                <Stat icon={Target}        label="Untriaged" value={untriaged}           tone="accent" />
+            </div>
+
+            {sevFilter && (
+                <div className="scoped-filterbar">
+                    Showing <span className={`sev ${sevFilter}`}>{sevFilter}</span> only
+                    <button className="reset" onClick={() => setSevFilter(null)}><X /> Clear</button>
+                </div>
+            )}
+
+            <div className="grid-3">
+                <Panel title="Threat activity" note={`${view.length} by severity`} wide>
+                    <div className="chart-legend">
+                        {SEV.map(s => (<span className="chart-legend-item" key={s}><span className={`chart-legend-dot sev-${s}`} />{s}</span>))}
+                    </div>
+                    <StackedArea data={activity} />
+                </Panel>
+                <Panel title="Severity distribution" note={`${view.length} alerts`}>
+                    <Donut total={view.length} slices={SEV.map(s => ({ key: s, n: vcountOf(s) }))} />
+                </Panel>
+                <Panel title="Detections by engine" note="sources">
+                    {engines.length === 0 ? <div className="empty">No detections.</div> : (
+                        <div className="barrows">
+                            {engines.map(([src, n]) => (
+                                <BarRow key={src} label={src} sub={ENGINE_ROLE[src] || ""} value={n} max={engineMax}
+                                    tone={src === "spectrac2" ? "critical" : src === "verifyeye" ? "low" : "medium"} />
+                            ))}
+                        </div>
+                    )}
+                </Panel>
+            </div>
+
+            {brands.length > 0 && (
+                <div className="grid-1">
+                    <Panel title="Impersonated brands in these results" note="phishing targets">
+                        <div className="barrows">
+                            {brands.map(([b, n]) => (<BarRow key={b} label={b} value={n} max={brandMax} tone="high" />))}
+                        </div>
+                    </Panel>
+                </div>
+            )}
+
+            <div className="grid-1">
+                <Panel title="All matching alerts" note={`${sorted.length} alert${sorted.length === 1 ? "" : "s"}`} flush>
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th>Time</th><th>Severity</th><th>Type</th><th>Host</th>
+                                <th>User</th><th className="td-wide">Domain / description</th><th>Engine</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {sorted.map(a => (
+                                <tr key={a.alert_id} className="row-link" onClick={() => onOpen(a.alert_id)}>
+                                    <td className="td-mono td-faint" title={exactTime(a.timestamp)}>{timeAgo(a.timestamp)}</td>
+                                    <td><span className={`sev ${a.severity}`}>{a.severity}</span></td>
+                                    <td className="td-mono">{a.event_type}</td>
+                                    <td className="td-mono td-dim">{a.host}</td>
+                                    <td className="td-mono td-dim">{a.user || "—"}</td>
+                                    <td className="td-wide td-dim td-clip">{a.domain || a.description || "—"}</td>
+                                    <td className="td-mono td-dim">{a.source}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </Panel>
+            </div>
+        </>
     );
 }
 
