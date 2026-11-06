@@ -3926,3 +3926,14 @@ html:has(.landing) { scroll-behavior: smooth; }
 .alerts-search .search-clear { position: absolute; right: 22px; }
 /* the matched text inside a row */
 mark.hl-match { background: var(--accent-wash); color: var(--accent-text); border-radius: 3px; padding: 0 1px; }
+
+/* entity names inside "What needs attention" open their drill-down */
+.att-link {
+  background: none; border: 0; padding: 0;
+  font: inherit; font-family: var(--mono); font-size: 0.95em;
+  color: var(--accent-text); cursor: pointer;
+  text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 3px;
+  transition: color var(--t-fast) var(--ease), text-decoration-color var(--t-fast) var(--ease);
+}
+.att-link:hover { color: var(--text); text-decoration-color: currentColor; }
+.attention li b { font-weight: 600; color: var(--text); }

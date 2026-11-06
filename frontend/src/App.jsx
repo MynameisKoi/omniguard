@@ -186,6 +186,12 @@ function App({ user, onLogout, onUserChange }) {
     }, [searchTerm, page]);
     // which top-bar dropdown is open: null | "search" | "bell" | "profile"
     const [menu, setMenu] = useState(null)
+    // the current time, refreshed each minute, for "in the last 24 hours" checks
+    const [now, setNow] = useState(() => Date.now())
+    useEffect(() => {
+        const id = setInterval(() => setNow(Date.now()), 60000)
+        return () => clearInterval(id)
+    }, [])
     // "See in network graph": entities to light up on the graph tab, and what they came from
     const [graphFocus, setGraphFocus] = useState(null)   // { label, ids: [...] } | null
     const [theme, setTheme] = useState(() => {
@@ -449,14 +455,72 @@ function App({ user, onLogout, onUserChange }) {
         setSelectedId(id); setPage("alert-detail");
     };
 
-    // TODO: derive these from `scoped`.
-    // Shape: { tone: "bad" | "warn" | "good" | "", body: <JSX> }
-    // Ideas worth surfacing:
-    //   - a host with alerts from more than one engine  (two tools agreeing)
-    //   - a domain contacted by more than one host      (shared C2 infrastructure)
-    //   - how many criticals, and on which hosts
-    //   - how much of the queue is still untriaged
+    // "What needs attention": the few things worth acting on first, worked out
+    // from the alerts in view (so it follows the dashboard's filters).
+    // Each finding: { tone: "bad" | "warn" | "good", body: <JSX> }
     const findings = [];
+    // entity names in a finding open that entity's drill-down
+    const entityLinks = (names) => names.map((n, i) => (
+        <Fragment key={n}>{i ? ", " : ""}<button className="att-link" onClick={() => filterBy(n)}>{n}</button></Fragment>
+    ));
+    const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+    // lab / loopback addresses aren't attacker infrastructure
+    const isLocal = (v) => /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(v || "");
+    const hostsOf = (pred) => [...new Set(scoped.filter(pred).map(a => a.host).filter(Boolean))];
+    const byHost = (list) => Object.entries(list.reduce((m, a) => (m[a.host] = (m[a.host] || 0) + 1, m), {}))
+        .sort((x, y) => y[1] - x[1]);
+
+    // 1. two different engines flagging the same machine
+    const engineHosts = {};
+    scoped.forEach(a => { if (a.host) (engineHosts[a.host] ||= new Set()).add(a.source); });
+    const corroborated = Object.keys(engineHosts).filter(h => engineHosts[h].has("verifyeye") && engineHosts[h].has("spectrac2"));
+    if (corroborated.length) findings.push({ tone: "bad", body: <>
+        <b>{entityLinks(corroborated)}</b> {corroborated.length === 1 ? "has" : "have"} both a phishing and a C2 alert.
+        Two engines agreeing on one machine usually means a real compromise — investigate first.
+    </> });
+
+    // 2. outside infrastructure that several hosts talk to
+    const shared = [];
+    [["domain", "domain"], ["dst_ip", "IP"]].forEach(([field, kind]) => {
+        const hosts = {};
+        scoped.forEach(a => { const v = a[field]; if (v && a.host && !isLocal(v)) (hosts[v] ||= new Set()).add(a.host); });
+        Object.entries(hosts).filter(([, hs]) => hs.size > 1).forEach(([v, hs]) => shared.push({ v, kind, n: hs.size }));
+    });
+    shared.sort((x, y) => y.n - x.n).slice(0, 2).forEach(({ v, kind, n }) => findings.push({ tone: "bad", body: <>
+        The {kind} <b>{entityLinks([v])}</b> is contacted by {plural(n, "host")} — shared attacker
+        infrastructure. Blocking it cuts them all off at once.
+    </> }));
+
+    // 3. criticals nobody has looked at yet
+    const openCrit = scoped.filter(a => a.severity === "critical" && a.status === "new");
+    if (openCrit.length) {
+        const top = byHost(openCrit).slice(0, 3);
+        findings.push({ tone: "bad", body: <>
+            <b>{plural(openCrit.length, "critical alert")}</b> still untriaged — most on{" "}
+            {top.map(([h, n], i) => <Fragment key={h}>{i ? ", " : ""}<button className="att-link" onClick={() => filterBy(h)}>{h}</button> ({n})</Fragment>)}.
+        </> });
+    }
+
+    // 4. what's new since yesterday
+    const lastDay = scoped.filter(a => now - new Date(a.timestamp).getTime() < 864e5);
+    if (lastDay.length) {
+        const hosts = hostsOf(a => now - new Date(a.timestamp).getTime() < 864e5);
+        findings.push({ tone: "warn", body: <>
+            <b>{plural(lastDay.length, "new alert")}</b> in the last 24 hours
+            {hosts.length ? <>, on {entityLinks(hosts.slice(0, 3))}{hosts.length > 3 ? ` and ${hosts.length - 3} more` : ""}</> : null}.
+        </> });
+    }
+
+    // 5. the rest of the untriaged queue
+    const openOther = scoped.filter(a => a.status === "new" && a.severity !== "critical").length;
+    if (openOther) findings.push({ tone: "warn", body: <>
+        <b>{openOther}</b> other {openOther === 1 ? "alert is" : "alerts are"} waiting for triage
+        ({Math.round((scoped.filter(a => a.status === "new").length / Math.max(1, scoped.length)) * 100)}% of the queue).
+    </> });
+
+    if (!findings.length && scoped.length) findings.push({ tone: "good", body: <>
+        All clear — no machines flagged by both engines, no shared attacker infrastructure, and every critical alert has been triaged.
+    </> });
 
     const pageLabel = page === "alert-detail"
         ? pageTitle(cameFrom)
