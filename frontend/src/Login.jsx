@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ShieldAlert } from 'lucide-react';
+import { ShieldAlert, AlertTriangle } from 'lucide-react';
 import { API_URL } from "./config"
 
 // v1 analyst login: checks email + password against the backend, then
@@ -47,8 +47,9 @@ export default function Login({ onLogin }) {
                         autoComplete="username"
                         autoFocus
                         required
+                        className={error ? "field-error" : ""}
                         value={email}
-                        onChange={e => setEmail(e.target.value)}
+                        onChange={e => { setEmail(e.target.value); if (error) setError(null) }}
                     />
                 </label>
                 <label className="login-field">
@@ -57,12 +58,18 @@ export default function Login({ onLogin }) {
                         type="password"
                         autoComplete="current-password"
                         required
+                        className={error ? "field-error" : ""}
                         value={password}
-                        onChange={e => setPassword(e.target.value)}
+                        onChange={e => { setPassword(e.target.value); if (error) setError(null) }}
                     />
                 </label>
 
-                {error && <div className="login-error">{error}</div>}
+                {error && (
+                    <div className="login-error" role="alert">
+                        <AlertTriangle />
+                        <span>{error}</span>
+                    </div>
+                )}
 
                 <button className="login-btn" type="submit" disabled={loading}>
                     {loading ? "Signing in…" : "Sign in"}

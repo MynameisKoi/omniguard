@@ -167,6 +167,7 @@ function App({ user, onLogout, onUserChange }) {
     }, [page, selectedId, alerts])
     const [filter, setFilter] = useState(null)
     const [srcFilter, setSrcFilter] = useState(null)
+    const [dateFilter, setDateFilter] = useState(null)   // null | "today" | "7d" | "30d" (alerts page)
     const [assetTab, setAssetTab] = useState("hosts")
     const [query, setQuery] = useState("")          // live text in the search box
     const [searchTerm, setSearchTerm] = useState(() => { try { return localStorage.getItem("og_searchTerm") || "" } catch { return "" } }) // committed term (Enter)
@@ -347,7 +348,16 @@ function App({ user, onLogout, onUserChange }) {
     const countDistinct = (field) => Object.keys(countBy(field)).length;
 
     // newest alerts first on the Alerts page
-    const visible = [...scoped].sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
+    const inDateRange = (a) => {
+        if (!dateFilter) return true;
+        const t = new Date(a.timestamp).getTime();
+        if (isNaN(t)) return false;
+        if (dateFilter === "today") { const d = new Date(); d.setHours(0, 0, 0, 0); return t >= d.getTime(); }
+        if (dateFilter === "7d") return t >= Date.now() - 7 * 864e5;
+        if (dateFilter === "30d") return t >= Date.now() - 30 * 864e5;
+        return true;
+    };
+    const visible = [...scoped].filter(inDateRange).sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
     const selected = alerts.find(a => a.alert_id === selectedId);
     const maxCount = Math.max(1, ...SEVERITIES.map(countOf));
     const engineCounts = countBy("source");
@@ -617,19 +627,38 @@ function App({ user, onLogout, onUserChange }) {
                             {untriaged > 0 && <span className="bell-badge">{untriaged > 99 ? "99+" : untriaged}</span>}
                         </button>
                         {menu === "bell" && (
-                            <div className="dropdown">
-                                <div className="dropdown-head">Notifications</div>
-                                <div className="dropdown-empty">
-                                    <Bell />
-                                    <p>Notifications will arrive here when implemented.</p>
-                                    <span>
-                                        {untriaged} alert{untriaged === 1 ? "" : "s"} currently untriaged.
-                                    </span>
+                            <div className="dropdown wide">
+                                <div className="dropdown-head">
+                                    Notifications
+                                    {untriaged > 0 && <span className="dropdown-head-count">{untriaged} new</span>}
                                 </div>
-                                <div className="dropdown-note">
-                                    <SampleBadge note="work needed" />
-                                    Needs a read/unread store so a notification can be dismissed.
-                                </div>
+                                {(() => {
+                                    const notifs = [...alerts]
+                                        .filter(a => a.status === "new")
+                                        .sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp))
+                                        .slice(0, 7);
+                                    return notifs.length === 0 ? (
+                                        <div className="dropdown-empty"><Bell /><p>You're all caught up.</p></div>
+                                    ) : notifs.map(a => (
+                                        <button
+                                            key={a.alert_id}
+                                            className="dropdown-item notif-item"
+                                            onMouseDown={() => { openAlert(a.alert_id); setMenu(null); }}
+                                        >
+                                            <span className={`notif-dot sev-${a.severity}`} />
+                                            <span className="notif-main">
+                                                <span className="notif-title">{a.event_type}</span>
+                                                <span className="notif-sub">{a.host} · {timeAgo(a.timestamp)}</span>
+                                            </span>
+                                            <span className={`sev ${a.severity}`}>{a.severity}</span>
+                                        </button>
+                                    ));
+                                })()}
+                                {untriaged > 0 && (
+                                    <button className="dropdown-item notif-all" onMouseDown={() => { setFilter(null); setSrcFilter(null); setMenu(null); setPage("alerts"); }}>
+                                        View all alerts →
+                                    </button>
+                                )}
                             </div>
                         )}
                     </span>
@@ -727,6 +756,14 @@ function App({ user, onLogout, onUserChange }) {
                                     {SEVERITIES.map(sev => (
                                         <button key={sev} className={`chip ${filter === sev ? "on" : ""}`} onClick={() => setFilter(sev)}>
                                             {sev}
+                                        </button>
+                                    ))}
+                                    <span className="filterbar-sep" />
+                                    <span className="label">When</span>
+                                    <button className={`chip ${dateFilter === null ? "on" : ""}`} onClick={() => setDateFilter(null)}>all time</button>
+                                    {[["today", "today"], ["7d", "7 days"], ["30d", "30 days"]].map(([k, label]) => (
+                                        <button key={k} className={`chip ${dateFilter === k ? "on" : ""}`} onClick={() => setDateFilter(k)}>
+                                            {label}
                                         </button>
                                     ))}
                                 </div>

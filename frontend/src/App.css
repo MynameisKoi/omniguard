@@ -2968,3 +2968,38 @@ button { font: inherit; color: inherit; }
 .vbar.sev-low { background: var(--fill-low); }
 .vbar-col.clickable:hover .vbar { opacity: 0.82; }
 .vbar-label { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; text-align: center; }
+
+/* #15 better wrong-password UX: icon + shake error banner, red input borders */
+.login-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid rgba(242, 85, 91, 0.4);
+    animation: err-shake 0.35s ease;
+}
+.login-error svg { width: 16px; height: 16px; flex: none; }
+@keyframes err-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-5px); }
+    40% { transform: translateX(5px); }
+    60% { transform: translateX(-3px); }
+    80% { transform: translateX(3px); }
+}
+.login-field input.field-error { border-color: var(--critical); }
+
+/* #16 real notifications in the bell dropdown */
+.dropdown-head-count { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--accent-text); background: var(--accent-wash); padding: 1px 8px; border-radius: 999px; }
+.notif-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; }
+.notif-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.notif-dot.sev-critical { background: var(--fill-critical); }
+.notif-dot.sev-high { background: var(--fill-high); }
+.notif-dot.sev-medium { background: var(--fill-medium); }
+.notif-dot.sev-low { background: var(--fill-low); }
+.notif-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.notif-title { font-size: 13px; color: var(--text); font-family: ui-monospace, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notif-sub { font-size: 11.5px; color: var(--faint); }
+.notif-all { justify-content: center; color: var(--accent-text); font-weight: 500; border-top: 1px solid var(--line-soft); }
+
+/* #12 date filter: divider between the severity and date chip groups */
+.filterbar-sep { width: 1px; align-self: stretch; min-height: 20px; background: var(--line); margin: 0 6px; }
