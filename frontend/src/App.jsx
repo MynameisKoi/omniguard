@@ -292,7 +292,7 @@ function App({ user, onLogout, onUserChange }) {
         if (!t) return true;
         return [
             a.host, a.user, a.event_type, a.domain, a.src_ip, a.dst_ip,
-            a.source, a.mitre_technique, a.description, a.brand_target,
+            a.source, a.mitre_technique, a.description, a.brand_target, a.status,
         ].some(v => v && String(v).toLowerCase().includes(t));
     };
     // live typeahead (as you type) and the committed results (after Enter)
@@ -978,6 +978,7 @@ function App({ user, onLogout, onUserChange }) {
                                 <Panel title="Triage status" note={`${scoped.length} alerts`}>
                                     <PieChart
                                         slices={statusCounts.map(([s, n]) => ({ key: s, n, fill: s === "new" ? "var(--fill-critical)" : s === "triaged" ? "var(--fill-medium)" : "var(--good)" }))}
+                                        onSlice={(key) => filterBy(key)}
                                     />
                                 </Panel>
                             </div>
@@ -1412,7 +1413,7 @@ function App({ user, onLogout, onUserChange }) {
                             {searchHits.length === 0 ? (
                                 <CardEmpty glyph={Search} text={`No alerts match “${searchTerm}”`} />
                             ) : (
-                                <ScopedDashboard alerts={searchHits} term={searchTerm} onOpen={openAlert} />
+                                <ScopedDashboard alerts={searchHits} term={searchTerm} onOpen={openAlert} onFilter={filterBy} />
                             )}
                         </>
                     )}
@@ -2171,7 +2172,7 @@ function Stat({ icon: Icon, label, value, tone, foot, spark, onClick, active }) 
 
 /* a dashboard scoped to a subset of alerts (used by the search results page):
    stats + charts + the full matching list, all computed from `alerts`. */
-function ScopedDashboard({ alerts, term, onOpen }) {
+function ScopedDashboard({ alerts, term, onOpen, onFilter }) {
     const SEV = ["critical", "high", "medium", "low"];
     const [sevFilter, setSevFilter] = useState(null);
     const toggleSev = (s) => setSevFilter(prev => prev === s ? null : s);
@@ -2233,7 +2234,10 @@ function ScopedDashboard({ alerts, term, onOpen }) {
                     />
                 </Panel>
                 <Panel title="Detections by engine" note="sources">
-                    <PieChart slices={engines.map(([src, n]) => ({ key: src, n, fill: src === "verifyeye" ? "var(--eng-1)" : src === "spectrac2" ? "var(--eng-2)" : "var(--eng-3)" }))} />
+                    <PieChart
+                        slices={engines.map(([src, n]) => ({ key: src, n, fill: src === "verifyeye" ? "var(--eng-1)" : src === "spectrac2" ? "var(--eng-2)" : "var(--eng-3)" }))}
+                        onSlice={onFilter ? (key) => onFilter(key) : undefined}
+                    />
                 </Panel>
             </div>
 
@@ -2241,19 +2245,19 @@ function ScopedDashboard({ alerts, term, onOpen }) {
                 <Panel title="Top targeted domains" note="by alert count">
                     {domains.length === 0 ? <div className="empty">No domains.</div> : (
                         <div className="barrows">
-                            {domains.map(([d, n]) => (<BarRow key={d} label={d} value={n} max={domainMax} tone="high" />))}
+                            {domains.map(([d, n]) => (<BarRow key={d} label={d} value={n} max={domainMax} tone="high" onClick={onFilter ? () => onFilter(d) : undefined} />))}
                         </div>
                     )}
                 </Panel>
                 <Panel title="Alerts by user" note="most affected">
                     {users.length === 0 ? <div className="empty">No users attributed.</div> : (
-                        <BarChart data={users.map(([u, n]) => ({ label: u, value: n, fill: "var(--accent)" }))} />
+                        <BarChart data={users.map(([u, n]) => ({ label: u, value: n, fill: "var(--accent)" }))} onBar={onFilter ? (d) => onFilter(d.label) : undefined} />
                     )}
                 </Panel>
                 <Panel title="Impersonated brands" note="phishing targets">
                     {brands.length === 0 ? <div className="empty">None in these results.</div> : (
                         <div className="barrows">
-                            {brands.map(([b, n]) => (<BarRow key={b} label={b} value={n} max={brandMax} tone="high" />))}
+                            {brands.map(([b, n]) => (<BarRow key={b} label={b} value={n} max={brandMax} tone="high" onClick={onFilter ? () => onFilter(b) : undefined} />))}
                         </div>
                     )}
                 </Panel>
