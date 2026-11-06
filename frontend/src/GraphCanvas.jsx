@@ -1,9 +1,30 @@
 import { useRef, useEffect, useState, useMemo }  from 'react'
 import cytoscape from 'cytoscape'
+import fcose from 'cytoscape-fcose'
 import { API_URL } from "./config"
 import { Maximize2, Minimize2, Plus, Minus, Scan, Shuffle } from 'lucide-react'
 import { buildGraphStyle, attachGraphInteractions, NODE_TYPES, TOKEN } from './graphStyle'
 import { scopeIds } from './graphScope'
+
+// fcose: a much faster force layout than the built-in cose (cose is roughly
+// quadratic — ~8s for 600 entities — and freezes the page while it runs)
+cytoscape.use(fcose)
+
+// fcose settings shared by first draw, live updates and "tidy". Above ~1500
+// entities its default mode slows sharply (≈10s at 4000); draft stays ~1s
+function forceLayout(n, extra) {
+    return {
+        name: "fcose",
+        quality: n > 1500 ? "draft" : "default",
+        animate: false,
+        padding: 40,
+        // roomier than fcose's defaults: our nodes carry labels underneath
+        nodeRepulsion: 30000,
+        idealEdgeLength: 130,
+        nodeSeparation: 110,
+        ...extra,
+    }
+}
 
 /* The cytoscape canvas: fetching, live sync, fullscreen and zoom controls.
  * The explorer (GraphExplorer) drives it from outside through these props:
@@ -14,9 +35,13 @@ import { scopeIds } from './graphScope'
  *   note           replaces the "N entities · M connections" text
  *   children       overlays drawn on top of the canvas (detail panel, empty state)
  * and the smaller dashboard graphs use:
- *   scope          a list of alerts: only the entities they touch are shown
- *                  (null = the whole graph). Lets a filtered view filter the graph too. */
-function GraphCanvas({ compact = false, refreshKey, host, onReady, onGraph, toolbar, hiddenTypes, onToggleType, note, scope = null, children }) {
+ *   scope          a list of alerts: only the entities they touch are fetched
+ *                  (null = the whole graph). Lets a filtered view filter the graph too.
+ * what gets fetched (graph at scale, #13 — the browser layout slows down fast,
+ * so ask the backend for only what will be drawn):
+ *   limit          the N most-connected entities (null = all)
+ *   include        entity ids that must be in it anyway (what "See in graph" lights up) */
+function GraphCanvas({ compact = false, refreshKey, host, onReady, onGraph, toolbar, hiddenTypes, onToggleType, note, scope = null, limit = null, include = null, children }) {
     // going to write useRef
     const containerRef = useRef(null);
 
@@ -32,26 +57,43 @@ function GraphCanvas({ compact = false, refreshKey, host, onReady, onGraph, tool
     // node ids in scope, and a stable key so we only refit when the scope really changes
     // (callers pass a fresh array every render, so key on the ids, not the array)
     const scopeKey = scope ? "s:" + [...scopeIds(scope)].sort().join("\n") : ""
-    const scoped = useMemo(
-        () => scopeKey ? new Set(scopeKey.slice(2).split("\n").filter(Boolean)) : null,
+    const scopedIds = useMemo(
+        () => scopeKey ? scopeKey.slice(2).split("\n").filter(Boolean) : null,
         [scopeKey],
     )
+    const includeKey = include?.length ? [...include].sort().join("\n") : ""
     const fittedKey = useRef(null)
-    // how many in-scope entities exist in the graph (null = not scoped)
-    const shownCount = scoped ? graph.nodes.filter(n => scoped.has(n.id)).length : null
+    // how many in-scope entities came back (null = not scoped)
+    const shownCount = scopedIds ? graph.nodes.length : null
 
-    // adding useEffect here 
+    // fetch the graph. asking for something different (first load, another
+    // scope, "show more") goes straight away; a plain refresh — every live
+    // alert bumps refreshKey — waits a beat, so a burst of alerts costs one
+    // request and one layout instead of one each
+    const lastRequest = useRef(null)
     useEffect(() => {
-        // fetching the backend for the graph data
-        const url = host 
-            ? `${API_URL}/graph/host/${encodeURIComponent(host)}`
-            : `${API_URL}/graph`
-        fetch(url)
-        .then(res => res.json())
-        .then(data => { setGraph(data); onGraph?.(data) })
-        .catch(err => setError(err.message))
-        .finally(() => setLoading(false))
-    }, [refreshKey, host])
+        let cancelled = false
+        const run = () => {
+            const req = host
+                ? fetch(`${API_URL}/graph/host/${encodeURIComponent(host)}`)
+                : fetch(`${API_URL}/graph/view`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(scopedIds
+                        ? { only: scopedIds }
+                        : { limit, include: includeKey ? includeKey.split("\n") : [] }),
+                })
+            req
+            .then(res => res.json())
+            .then(data => { if (!cancelled) { setGraph(data); onGraph?.(data) } })
+            .catch(err => { if (!cancelled) setError(err.message) })
+            .finally(() => { if (!cancelled) setLoading(false) })
+        }
+        const requestKey = [host, scopeKey, limit, includeKey].join("|")
+        const id = setTimeout(run, lastRequest.current === requestKey ? 1200 : 0)
+        lastRequest.current = requestKey
+        return () => { cancelled = true; clearTimeout(id) }
+    }, [refreshKey, host, scopedIds, scopeKey, limit, includeKey])
 
     // create the cytoscape instance ONCE. If we rebuilt it on every graph
     // change, the whole layout would reshuffle each time an alert arrives —
@@ -150,49 +192,36 @@ function GraphCanvas({ compact = false, refreshKey, host, onReady, onGraph, tool
         if (fresh.length === 0) return
 
         const firstDraw = cy.nodes().length === fresh.length
-
-        // lock everything already placed so cose only positions the new nodes
-        const settled = cy.nodes().difference(cy.collection(fresh))
-        settled.lock()
-
-        const layout = cy.layout({
-            name: "cose",
-            animate: false,
-            padding: 40,
-            nodeRepulsion: 14000,
-            idealEdgeLength: 95,
-            nodeOverlap: 24,
-            fit: firstDraw,       // only auto-fit on the very first render
-            randomize: firstDraw, // new nodes start near their neighbours otherwise
-        })
+        let layout
+        if (firstDraw) {
+            layout = cy.layout(forceLayout(fresh.length, { randomize: true, fit: true }))
+        } else {
+            // live update: start each new node beside something it links to,
+            // and pin everything already placed so only the newcomers move
+            const settled = cy.nodes().difference(cy.collection(fresh))
+            fresh.forEach(n => {
+                const anchor = n.neighborhood("node").difference(cy.collection(fresh))[0]
+                const p = anchor ? anchor.position() : { x: 0, y: 0 }
+                n.position({ x: p.x + (Math.random() - 0.5) * 80, y: p.y + (Math.random() - 0.5) * 80 })
+            })
+            layout = cy.layout(forceLayout(cy.nodes().length, {
+                randomize: false,
+                fit: false,
+                fixedNodeConstraint: settled.map(n => ({ nodeId: n.id(), position: { ...n.position() } })),
+            }))
+        }
         layout.run()
-        settled.unlock()
-
         return () => layout.stop()
     }, [graph])
 
-    // hide whatever the scope leaves out. runs after the sync above, so new
-    // nodes from a live alert are scoped too; refits only when the scope changes
+    // the backend already sent only the scoped entities; when the scope
+    // itself changes (a different filter), frame the new set
     useEffect(() => {
         const cy = cyRef.current
-        if (!cy) return
-        if (!scoped) {
-            // scope just cleared: bring everything back. Only undo our own hiding —
-            // the explorer manages "gone" itself and never passes a scope
-            if (fittedKey.current) {
-                fittedKey.current = null
-                cy.nodes().removeClass("gone")
-                cy.fit(cy.elements(":visible"), 30)
-            }
-            return
-        }
-        cy.batch(() => cy.nodes().forEach(n => n.toggleClass("gone", !scoped.has(n.id()))))
-        const visible = cy.elements(":visible")
-        if (graph.nodes.length && fittedKey.current !== scopeKey && visible.length) {
-            fittedKey.current = scopeKey
-            cy.fit(visible, 30)
-        }
-    }, [graph, scoped, scopeKey])
+        if (!cy || !graph.nodes.length || fittedKey.current === scopeKey) return
+        fittedKey.current = scopeKey
+        if (scopeKey) cy.fit(cy.elements(":visible"), 30)
+    }, [graph, scopeKey])
 
     // the container changes size when fullscreen flips, and cytoscape caches
     // its dimensions — it has to be told
@@ -229,10 +258,10 @@ function GraphCanvas({ compact = false, refreshKey, host, onReady, onGraph, tool
     const tidy = () => {
         const cy = cyRef.current
         if (!cy) return
-        cy.elements(":visible").layout({
-            name: "cose", animate: true, animationDuration: 450, fit: true, padding: 40,
-            nodeRepulsion: 14000, idealEdgeLength: 95, nodeOverlap: 24,
-        }).run()
+        const visible = cy.elements(":visible")
+        visible.layout(forceLayout(visible.nodes().length, {
+            randomize: true, fit: true, animate: true, animationDuration: 450,
+        })).run()
     }
 
     return (

@@ -16,6 +16,7 @@ const SEVERITIES = ["critical", "high", "medium", "low"]
 const ENGINES = ["verifyeye", "spectrac2", "manual"]
 const RANGES = { "24h": 864e5, "7d": 7 * 864e5, "30d": 30 * 864e5 }
 const GROUP_PREVIEW = 6   // connections listed per relationship before "+N more"
+const DEFAULT_LIMIT = 400 // entities loaded up front; the layout stays well under a second
 
 // HAS_IP -> "has IP", CONNECTED_TO_DOMAIN -> "connected to domain"
 const relLabel = (t) => t.toLowerCase().split("_").map(w => w === "ip" ? "IP" : w === "url" ? "URL" : w).join(" ")
@@ -63,6 +64,8 @@ export default function GraphExplorer({ alerts, refreshKey, onOpenAlert, onFilte
     const [find, setFind] = useState("")
     const [findOpen, setFindOpen] = useState(false)
     const [expanded, setExpanded] = useState(() => new Set())   // connection groups showing all items
+    // graph at scale (#13): load the most-connected entities first, more on request
+    const [limit, setLimit] = useState(DEFAULT_LIMIT)
 
     // node id -> alerts touching it, newest first
     const alertsByEntity = useMemo(() => {
@@ -303,7 +306,14 @@ export default function GraphExplorer({ alerts, refreshKey, onOpenAlert, onFilte
                 {findOpen && find.trim() && (
                     <div className="gx-find-menu">
                         {findHits.length === 0
-                            ? <div className="gx-find-empty">No entity matches “{find.trim()}”</div>
+                            ? <div className="gx-find-empty">
+                                No loaded entity matches “{find.trim()}”
+                                {graph.truncated && (
+                                    <button className="gx-reset" onMouseDown={e => e.preventDefault()} onClick={() => setLimit(null)}>
+                                        Load all {graph.total.toLocaleString()} and search again
+                                    </button>
+                                )}
+                              </div>
                             : findHits.map(n => (
                                 <button key={n.id} className="gx-find-row" onMouseDown={e => e.preventDefault()} onClick={() => pickHit(n.id)}>
                                     <TypeDot type={n.type} />
@@ -323,6 +333,18 @@ export default function GraphExplorer({ alerts, refreshKey, onOpenAlert, onFilte
                 </button>
             )}
         </div>
+        {graph.truncated && (
+            <div className="gx-scale" role="status">
+                <span>
+                    Showing the <b>{total.toLocaleString()}</b> most-connected of{" "}
+                    <b>{graph.total.toLocaleString()}</b> entities
+                </span>
+                {limit * 2 < graph.total && (
+                    <button className="gx-reset" onClick={() => setLimit(limit * 2)}>Show {(limit * 2).toLocaleString()}</button>
+                )}
+                <button className="gx-reset" onClick={() => setLimit(null)}>Show all</button>
+            </div>
+        )}
         </>
     )
 
@@ -331,6 +353,8 @@ export default function GraphExplorer({ alerts, refreshKey, onOpenAlert, onFilte
             refreshKey={refreshKey}
             onReady={handleReady}
             onGraph={setGraph}
+            limit={limit}
+            include={focus?.ids}
             toolbar={toolbar}
             hiddenTypes={hiddenTypes}
             onToggleType={toggleType}
