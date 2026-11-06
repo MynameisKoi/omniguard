@@ -4,7 +4,9 @@ from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 from models import Alert
 
 auth = (NEO4J_USER, NEO4J_PASSWORD)
-driver = GraphDatabase.driver(NEO4J_URI, auth=auth)
+# fail fast when Neo4j is down: the defaults retry for 30s+, which stalls every
+# alert write and leaves the dashboard graph spinning
+driver = GraphDatabase.driver(NEO4J_URI, auth=auth, connection_timeout=3, max_transaction_retry_time=5)
 
 
 # this key value dictionary is to make sure that we can label the nodes

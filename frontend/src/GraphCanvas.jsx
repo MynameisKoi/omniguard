@@ -84,7 +84,11 @@ function GraphCanvas({ compact = false, refreshKey, host, onReady, onGraph, tool
                         : { limit, include: includeKey ? includeKey.split("\n") : [] }),
                 })
             req
-            .then(res => res.json())
+            .then(res => {
+                if (res.status === 503) throw new Error("the graph database (Neo4j) is offline")
+                if (!res.ok) throw new Error(`the server answered ${res.status}`)
+                return res.json()
+            })
             .then(data => { if (!cancelled) { setGraph(data); onGraph?.(data) } })
             .catch(err => { if (!cancelled) setError(err.message) })
             .finally(() => { if (!cancelled) setLoading(false) })

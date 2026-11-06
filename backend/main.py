@@ -1,4 +1,6 @@
 from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response
+from fastapi.responses import JSONResponse
+from neo4j.exceptions import ServiceUnavailable
 from starlette.concurrency import run_in_threadpool
 from events import manager
 from models import Alert, AlertCreate
@@ -30,6 +32,11 @@ alerts_collection = database["alerts"]
 
 
 app = FastAPI(title="OmniGuard SOC API")
+
+# graph endpoints while Neo4j is down: a clear 503, not a hang or a bare 500
+@app.exception_handler(ServiceUnavailable)
+async def neo4j_unavailable(request, exc):
+    return JSONResponse(status_code=503, content={"detail": "Graph database (Neo4j) is unavailable"})
 
 app.add_middleware(
     CORSMiddleware,

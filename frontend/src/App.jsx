@@ -6,13 +6,14 @@ import GraphExplorer from './GraphExplorer';
 import { timeAgo, exactTime } from './time';
 import { scopeIds } from './graphScope';
 import { label, humanize, MITRE_NAMES } from './labels';
+import { EvidencePanel, EvidenceGallery, EvidencePage } from './Evidence';
 import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
     ShieldAlert, Globe, Check, TriangleAlert, Inbox, X,
     Siren, Users, Activity, Target, TrendingUp, TrendingDown, Search, Bell,
     UserRound, LogOut, Sparkles, RefreshCw, Send, Bot, Calendar,
-    GitMerge, Gauge, ShieldCheck, ShieldOff, UserCheck, Link2, Copy,
+    GitMerge, Gauge, ShieldCheck, ShieldOff, UserCheck, Link2, Copy, Camera,
 } from 'lucide-react';
 import { Sparkline, StackedArea, BarRow, PieChart, BarChart, SampleBadge } from './charts';
 
@@ -102,6 +103,7 @@ const NAV = [
     { group: "Investigate", items: [
         { id: "assets", icon: Server, label: "Hosts & assets" },
         { id: "users",  icon: Users,  label: "Users" },
+        { id: "evidence", icon: Camera, label: "Evidence" },
         { id: "ledger", icon: Activity, label: "Audit ledger" },
     ]},
     { group: "System", items: [
@@ -951,6 +953,9 @@ function App({ user, onLogout, onUserChange }) {
                                 <div>
                                     {selected.description && <p className="note">{selected.description}</p>}
 
+                                    {/* what VerifyEye's agent saw at this page (#3) */}
+                                    {selected.target_url && <EvidencePanel alert={selected} />}
+
                                     <Panel
                                         title="Attack graph"
                                         note={`neighbourhood of ${selected.host}`}
@@ -1504,6 +1509,9 @@ function App({ user, onLogout, onUserChange }) {
 
                     {/* ── audit ledger ── */}
                     {page === "ledger" && <LedgerPage />}
+
+                    {/* ── agent evidence (#3) ── */}
+                    {page === "evidence" && <EvidencePage onFilter={filterBy} />}
 
                     {/* ── search results: a full dashboard scoped to the term ── */}
                     {page === "search" && (
@@ -2638,6 +2646,14 @@ function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph, asEntity 
                     )}
                 </Panel>
             </div>
+
+            {view.some(a => a.target_url) && (
+                <div className="grid-1">
+                    <Panel title="What the agent saw" note="screenshots of these pages, taken by VerifyEye's sandboxed agent">
+                        <EvidenceGallery alerts={view} />
+                    </Panel>
+                </div>
+            )}
 
             <div className="grid-1">
                 <Panel title="All matching alerts" note={`${sorted.length} alert${sorted.length === 1 ? "" : "s"}`} flush>
