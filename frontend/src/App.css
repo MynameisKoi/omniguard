@@ -2937,3 +2937,34 @@ button { font: inherit; color: inherit; }
 .att-n { margin-left: auto; font-family: ui-monospace, Menlo, monospace; color: var(--text); }
 .att-total { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--line-soft); color: var(--faint); }
 .att-total b { color: var(--text); }
+
+/* pie chart */
+.pie-wrap { display: flex; align-items: center; gap: 16px; }
+.pie { flex: none; }
+.pie-slice { stroke: var(--surface); stroke-width: 1.5; transition: opacity 0.12s; }
+.pie-slice.clickable { cursor: pointer; }
+.pie-slice.clickable:hover { opacity: 0.85; }
+.pie-slice.dim { opacity: 0.32; }
+.pie-legend { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.pie-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 2px 5px; margin: 0 -5px; border-radius: var(--r-sm); }
+.pie-row.clickable { cursor: pointer; }
+.pie-row.clickable:hover { background: var(--hover); }
+.pie-row.active { background: var(--accent-wash); }
+.pie-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.pie-key { text-transform: capitalize; color: var(--text); }
+.pie-n { margin-left: auto; font-family: ui-monospace, Menlo, monospace; color: var(--text); }
+.pie-pct { color: var(--faint); width: 36px; text-align: right; }
+
+/* vertical bar / column chart */
+.vbar-chart { display: flex; align-items: flex-end; gap: 10px; padding-top: 6px; }
+.vbar-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; height: 100%; }
+.vbar-col.clickable { cursor: pointer; }
+.vbar-val { font-size: 12px; font-weight: 600; color: var(--text); flex: none; }
+.vbar-track { flex: 1; width: 100%; max-width: 48px; display: flex; align-items: flex-end; justify-content: center; }
+.vbar { width: 100%; min-height: 2px; border-radius: 5px 5px 0 0; background: var(--accent); transition: opacity 0.12s; }
+.vbar.sev-critical { background: var(--fill-critical); }
+.vbar.sev-high { background: var(--fill-high); }
+.vbar.sev-medium { background: var(--fill-medium); }
+.vbar.sev-low { background: var(--fill-low); }
+.vbar-col.clickable:hover .vbar { opacity: 0.82; }
+.vbar-label { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; text-align: center; }

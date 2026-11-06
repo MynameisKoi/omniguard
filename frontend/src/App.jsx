@@ -9,7 +9,7 @@ import {
     Siren, Users, Activity, Target, TrendingUp, TrendingDown, Search, Bell,
     UserRound, LogOut, Sparkles, RefreshCw, Send, Bot,
 } from 'lucide-react';
-import { Sparkline, StackedArea, BarRow, SampleBadge } from './charts';
+import { Sparkline, StackedArea, BarRow, PieChart, BarChart, SampleBadge } from './charts';
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const SOURCES = ["verifyeye", "spectrac2", "manual"];
@@ -908,23 +908,11 @@ function App({ user, onLogout, onUserChange }) {
 
                             <div className="grid-3">
                                 <Panel title="Detections by engine" note={`${countDistinct("source")} engine${countDistinct("source") === 1 ? "" : "s"}`}>
-                                    {engines.length === 0 ? (
-                                        <div className="empty">No detections yet.</div>
-                                    ) : (
-                                        <div className="barrows">
-                                            {engines.map(([src, n]) => (
-                                                <BarRow
-                                                    key={src}
-                                                    label={src}
-                                                    sub={ENGINE_ROLE[src] || ""}
-                                                    value={n}
-                                                    max={engineMax}
-                                                    tone={src === "spectrac2" ? "critical" : src === "verifyeye" ? "low" : "medium"}
-                                                    onClick={() => setSrcFilter(f => f === src ? null : src)}
-                                                />
-                                            ))}
-                                        </div>
-                                    )}
+                                    <PieChart
+                                        slices={engines.map(([src, n]) => ({ key: src, n, fill: src === "verifyeye" ? "var(--eng-1)" : src === "spectrac2" ? "var(--eng-2)" : "var(--eng-3)" }))}
+                                        onSlice={(key) => setSrcFilter(f => f === key ? null : key)}
+                                        activeKey={srcFilter}
+                                    />
                                 </Panel>
 
                                 <Panel title="Top impersonated brands" note="phishing targets">
@@ -940,17 +928,9 @@ function App({ user, onLogout, onUserChange }) {
                                 </Panel>
 
                                 <Panel title="Triage status" note={`${scoped.length} alerts`}>
-                                    <div className="barrows">
-                                        {statusCounts.map(([s, n]) => (
-                                            <BarRow
-                                                key={s}
-                                                label={s}
-                                                value={n}
-                                                max={statusMax}
-                                                tone={s === "resolved" ? "low" : s === "triaged" ? "medium" : "critical"}
-                                            />
-                                        ))}
-                                    </div>
+                                    <PieChart
+                                        slices={statusCounts.map(([s, n]) => ({ key: s, n, fill: s === "new" ? "var(--fill-critical)" : s === "triaged" ? "var(--fill-medium)" : "var(--good)" }))}
+                                    />
                                 </Panel>
                             </div>
 
@@ -971,20 +951,15 @@ function App({ user, onLogout, onUserChange }) {
                                     {users.length === 0 ? (
                                         <div className="empty">No users attributed.</div>
                                     ) : (
-                                        <div className="barrows">
-                                            {users.map(([u, n]) => (
-                                                <BarRow key={u} label={u} value={n} max={userMax} onClick={() => filterBy(u)} />
-                                            ))}
-                                        </div>
+                                        <BarChart
+                                            data={users.map(([u, n]) => ({ label: u, value: n, fill: "var(--accent)" }))}
+                                            onBar={(d) => filterBy(d.label)}
+                                        />
                                     )}
                                 </Panel>
 
                                 <Panel title="Confidence distribution" note="detector confidence">
-                                    <div className="barrows">
-                                        {confBuckets.map(([band, n]) => (
-                                            <BarRow key={band} label={band} value={n} max={confMax} tone="low" />
-                                        ))}
-                                    </div>
+                                    <BarChart data={confBuckets.map(([band, n]) => ({ label: band, value: n, tone: "low" }))} />
                                 </Panel>
                             </div>
 
@@ -2210,14 +2185,7 @@ function ScopedDashboard({ alerts, term, onOpen }) {
                     />
                 </Panel>
                 <Panel title="Detections by engine" note="sources">
-                    {engines.length === 0 ? <div className="empty">No detections.</div> : (
-                        <div className="barrows">
-                            {engines.map(([src, n]) => (
-                                <BarRow key={src} label={src} sub={ENGINE_ROLE[src] || ""} value={n} max={engineMax}
-                                    tone={src === "spectrac2" ? "critical" : src === "verifyeye" ? "low" : "medium"} />
-                            ))}
-                        </div>
-                    )}
+                    <PieChart slices={engines.map(([src, n]) => ({ key: src, n, fill: src === "verifyeye" ? "var(--eng-1)" : src === "spectrac2" ? "var(--eng-2)" : "var(--eng-3)" }))} />
                 </Panel>
             </div>
 
@@ -2231,9 +2199,7 @@ function ScopedDashboard({ alerts, term, onOpen }) {
                 </Panel>
                 <Panel title="Alerts by user" note="most affected">
                     {users.length === 0 ? <div className="empty">No users attributed.</div> : (
-                        <div className="barrows">
-                            {users.map(([u, n]) => (<BarRow key={u} label={u} value={n} max={userMax} />))}
-                        </div>
+                        <BarChart data={users.map(([u, n]) => ({ label: u, value: n, fill: "var(--accent)" }))} />
                     )}
                 </Panel>
                 <Panel title="Impersonated brands" note="phishing targets">

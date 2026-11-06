@@ -172,6 +172,88 @@ export function BarRow({ label, sub, value, max, tone, onClick }) {
     );
 }
 
+/* ---- pie chart: filled wedges + legend, for a few categories ---- */
+
+export function PieChart({ slices, size = 128, onSlice, activeKey }) {
+    const sum = slices.reduce((a, s) => a + s.n, 0);
+    const clickable = typeof onSlice === "function";
+    if (sum === 0) return <div className="empty">No data yet.</div>;
+
+    const cx = size / 2, cy = size / 2, r = size / 2 - 2;
+    let angle = -Math.PI / 2;
+    const wedges = slices.filter(s => s.n > 0).map(s => {
+        const frac = s.n / sum;
+        const a0 = angle, a1 = angle + frac * 2 * Math.PI;
+        angle = a1;
+        const large = frac > 0.5 ? 1 : 0;
+        const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+        const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+        // a single full-circle slice can't be drawn as an arc; draw a circle instead
+        const d = frac >= 0.999
+            ? `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - 0.01} ${cy - r} Z`
+            : `M ${cx} ${cy} L ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z`;
+        return { ...s, d };
+    });
+
+    return (
+        <div className="pie-wrap">
+            <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} className="pie" role="img">
+                {wedges.map(w => (
+                    <path
+                        key={w.key}
+                        d={w.d}
+                        className={`pie-slice ${clickable ? "clickable" : ""} ${activeKey && activeKey !== w.key ? "dim" : ""}`}
+                        style={{ fill: w.fill }}
+                        onClick={clickable ? () => onSlice(w.key) : undefined}
+                    >
+                        <title>{`${w.key}: ${w.n}`}</title>
+                    </path>
+                ))}
+            </svg>
+            <div className="pie-legend">
+                {slices.map(s => (
+                    <div
+                        className={`pie-row ${clickable ? "clickable" : ""} ${activeKey === s.key ? "active" : ""}`}
+                        key={s.key}
+                        onClick={clickable ? () => onSlice(s.key) : undefined}
+                        role={clickable ? "button" : undefined}
+                    >
+                        <span className="pie-swatch" style={{ background: s.fill }} />
+                        <span className="pie-key">{s.key}</span>
+                        <span className="pie-n">{s.n}</span>
+                        <span className="pie-pct">{Math.round((s.n / sum) * 100)}%</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+/* ---- vertical bar / column chart ---- */
+
+export function BarChart({ data, height = 160, onBar }) {
+    const max = Math.max(1, ...data.map(d => d.value));
+    const clickable = typeof onBar === "function";
+    return (
+        <div className="vbar-chart" style={{ height }}>
+            {data.map((d, i) => (
+                <div
+                    className={`vbar-col ${clickable ? "clickable" : ""}`}
+                    key={i}
+                    onClick={clickable ? () => onBar(d) : undefined}
+                    title={`${d.label}: ${d.value}`}
+                >
+                    <span className="vbar-val">{d.value}</span>
+                    <div className="vbar-track">
+                        <div className={`vbar ${d.tone ? `sev-${d.tone}` : ""}`} style={{ height: `${(d.value / max) * 100}%`, background: d.fill }} />
+                    </div>
+                    <span className="vbar-label">{d.label}</span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 /* ---- "this isn't real data yet" marker ---- */
 
 export function SampleBadge({ note = "sample data" }) {
