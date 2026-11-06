@@ -167,7 +167,9 @@ function App({ user, onLogout, onUserChange }) {
     }, [page, selectedId, alerts])
     const [filter, setFilter] = useState(null)
     const [srcFilter, setSrcFilter] = useState(null)
-    const [dateFilter, setDateFilter] = useState(null)   // null | "today" | "7d" | "30d" (alerts page)
+    const [dateFilter, setDateFilter] = useState(null)   // null|"today"|"yesterday"|"7d"|"30d"|"custom"
+    const [dateFrom, setDateFrom] = useState("")
+    const [dateTo, setDateTo] = useState("")
     const [assetTab, setAssetTab] = useState("hosts")
     const [query, setQuery] = useState("")          // live text in the search box
     const [searchTerm, setSearchTerm] = useState(() => { try { return localStorage.getItem("og_searchTerm") || "" } catch { return "" } }) // committed term (Enter)
@@ -352,9 +354,16 @@ function App({ user, onLogout, onUserChange }) {
         if (!dateFilter) return true;
         const t = new Date(a.timestamp).getTime();
         if (isNaN(t)) return false;
-        if (dateFilter === "today") { const d = new Date(); d.setHours(0, 0, 0, 0); return t >= d.getTime(); }
+        const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
+        if (dateFilter === "today") return t >= startToday.getTime();
+        if (dateFilter === "yesterday") return t >= startToday.getTime() - 864e5 && t < startToday.getTime();
         if (dateFilter === "7d") return t >= Date.now() - 7 * 864e5;
         if (dateFilter === "30d") return t >= Date.now() - 30 * 864e5;
+        if (dateFilter === "custom") {
+            const from = dateFrom ? new Date(dateFrom).getTime() : -Infinity;
+            const to = dateTo ? new Date(dateTo).getTime() + 864e5 : Infinity; // end day inclusive
+            return t >= from && t < to;
+        }
         return true;
     };
     const visible = [...scoped].filter(inDateRange).sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
@@ -627,11 +636,12 @@ function App({ user, onLogout, onUserChange }) {
                             {untriaged > 0 && <span className="bell-badge">{untriaged > 99 ? "99+" : untriaged}</span>}
                         </button>
                         {menu === "bell" && (
-                            <div className="dropdown wide">
+                            <div className="dropdown notif-dd">
                                 <div className="dropdown-head">
                                     Notifications
                                     {untriaged > 0 && <span className="dropdown-head-count">{untriaged} new</span>}
                                 </div>
+                                <div className="dropdown-hint">Untriaged alerts needing a look — click one to investigate.</div>
                                 {(() => {
                                     const notifs = [...alerts]
                                         .filter(a => a.status === "new")
@@ -761,11 +771,18 @@ function App({ user, onLogout, onUserChange }) {
                                     <span className="filterbar-sep" />
                                     <span className="label">When</span>
                                     <button className={`chip ${dateFilter === null ? "on" : ""}`} onClick={() => setDateFilter(null)}>all time</button>
-                                    {[["today", "today"], ["7d", "7 days"], ["30d", "30 days"]].map(([k, label]) => (
+                                    {[["today", "today"], ["yesterday", "yesterday"], ["7d", "last 7 days"], ["30d", "last 30 days"], ["custom", "custom…"]].map(([k, label]) => (
                                         <button key={k} className={`chip ${dateFilter === k ? "on" : ""}`} onClick={() => setDateFilter(k)}>
                                             {label}
                                         </button>
                                     ))}
+                                    {dateFilter === "custom" && (
+                                        <span className="date-range">
+                                            <input type="date" className="date-input" value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)} />
+                                            <span className="date-dash">→</span>
+                                            <input type="date" className="date-input" value={dateTo} min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)} />
+                                        </span>
+                                    )}
                                 </div>
 
                                 {visible.length === 0 ? (

@@ -3003,3 +3003,18 @@ button { font: inherit; color: inherit; }
 
 /* #12 date filter: divider between the severity and date chip groups */
 .filterbar-sep { width: 1px; align-self: stretch; min-height: 20px; background: var(--line); margin: 0 6px; }
+
+/* notifications dropdown: right-aligned (so it doesn't overflow the edge) + explanation line */
+.dropdown.notif-dd { left: auto; right: 0; width: 340px; max-width: calc(100vw - 24px); }
+.dropdown-hint { padding: 0 14px 8px; font-size: 11.5px; color: var(--faint); border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; }
+
+/* custom date range inputs on the alerts filter bar */
+.date-range { display: inline-flex; align-items: center; gap: 7px; margin-left: 2px; }
+.date-dash { color: var(--faint); }
+.date-input {
+    padding: 4px 9px; border: 1px solid var(--line); border-radius: var(--r-sm);
+    background: var(--raised); color: var(--text); font-size: var(--t-xs);
+    font-family: inherit; color-scheme: dark light;
+}
+.date-input:focus { outline: none; border-color: var(--accent); }
+.dropdown.notif-dd { background: var(--surface); z-index: 160; }
