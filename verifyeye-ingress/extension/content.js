@@ -184,10 +184,66 @@ function looksLikeTyposquat(brands) {
   );
 }
 
-function hasHomoglyphOrPunycode() {
-  const host = location.hostname.toLowerCase();
-  if (host.includes("xn--")) return true;
-  return /[^\u0000-\u007f]/.test(host);
+// punycode (RFC 3492) decoder: browsers give us international domains as
+// "xn--..." labels, and we need the real characters to judge them
+function punyDecode(label) {
+  if (!label.startsWith("xn--")) return label;
+  const input = label.slice(4);
+  const base = 36, tMin = 1, tMax = 26, skew = 38, damp = 700;
+  const adapt = (delta, numPoints, first) => {
+    delta = first ? Math.floor(delta / damp) : delta >> 1;
+    delta += Math.floor(delta / numPoints);
+    let k = 0;
+    while (delta > ((base - tMin) * tMax) >> 1) { delta = Math.floor(delta / (base - tMin)); k += base; }
+    return k + Math.floor(((base - tMin + 1) * delta) / (delta + skew));
+  };
+  const digit = (c) => c - 48 < 10 ? c - 22 : c - 65 < 26 ? c - 65 : c - 97 < 26 ? c - 97 : base;
+  const sep = input.lastIndexOf("-");
+  const out = sep > 0 ? [...input.slice(0, sep)].map(c => c.codePointAt(0)) : [];
+  let n = 128, i = 0, bias = 72;
+  for (let idx = sep > 0 ? sep + 1 : 0; idx < input.length;) {
+    const oldi = i;
+    for (let w = 1, k = base; ; k += base) {
+      const d = digit(input.charCodeAt(idx++));
+      if (d >= base) return label;   // not valid punycode: leave it as is
+      i += d * w;
+      const t = k <= bias ? tMin : k >= bias + tMax ? tMax : k - bias;
+      if (d < t) break;
+      w *= base - t;
+    }
+    bias = adapt(i - oldi, out.length + 1, oldi === 0);
+    n += Math.floor(i / (out.length + 1));
+    i %= out.length + 1;
+    out.splice(i++, 0, n);
+  }
+  return String.fromCodePoint(...out);
+}
+
+// Cyrillic / Greek letters that look like Latin ones
+const CONFUSABLE = {
+  "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i",
+  "ј": "j", "ԁ": "d", "ɡ": "g", "һ": "h", "ӏ": "l", "ѕ": "s", "ԛ": "q", "ԝ": "w",
+  "α": "a", "ο": "o", "ρ": "p", "ν": "v", "τ": "t", "ι": "i", "κ": "k", "χ": "x",
+};
+const scriptOf = (ch) => /[a-z0-9-]/.test(ch) ? "latin"
+  : /[\u0400-\u04ff\u0500-\u052f]/.test(ch) ? "cyrillic"
+  : /[\u0370-\u03ff]/.test(ch) ? "greek"
+  : /\p{Script=Latin}/u.test(ch) ? "latin" : "other";
+
+// lookalike domains (#7). Used to flag ANY international domain, which hit every
+// legit non-English site. Now only what's built to deceive: a label mixing
+// Latin with Cyrillic/Greek ("аpple" with a Cyrillic а), or one that reads as
+// a known brand's domain once lookalike letters are swapped back
+function hasHomoglyphOrPunycode(brands = []) {
+  const labels = location.hostname.toLowerCase().split(".").map(punyDecode);
+  const brandNames = new Set(brands.flatMap(b => b.domains.map(d => d.split(".")[0])));
+  return labels.some(label => {
+    if (/^[\x00-\x7f]*$/.test(label)) return false;   // plain ASCII: nothing to fake
+    const scripts = new Set([...label].map(scriptOf).filter(s => s !== "other"));
+    if (scripts.has("latin") && (scripts.has("cyrillic") || scripts.has("greek"))) return true;
+    const skeleton = [...label].map(ch => CONFUSABLE[ch] || ch).join("");
+    return brandNames.has(skeleton);
+  });
 }
 
 function brandAsSubdomain(brands) {
@@ -210,7 +266,7 @@ function scorePage(brands) {
   if (brand && !isLegitDomain(brand)) score += 10;
   if (submitsOffDomain()) score += 40;
   if (looksLikeTyposquat(brands)) score += 30;
-  if (hasHomoglyphOrPunycode()) score += 30;
+  if (hasHomoglyphOrPunycode(brands)) score += 30;
   if (brandAsSubdomain(brands)) score += 25;
 
   return score;

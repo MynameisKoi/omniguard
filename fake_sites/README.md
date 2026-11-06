@@ -22,7 +22,7 @@ resolve to nothing. They exist only to prove detection works.
 | google     | 5700 | Google | the fake OAuth popup window the other sites open |
 | netflix    | 5800 | Netflix | |
 | tiktok     | 5900 | TikTok | |
-| amazon     | 6000 | Amazon | |
+| amazon     | 6200 | Amazon | (not 6000: Chrome blocks that port as unsafe) |
 
 ## The Google OAuth popup
 

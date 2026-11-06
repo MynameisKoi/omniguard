@@ -6,6 +6,7 @@ import GraphExplorer from './GraphExplorer';
 import { timeAgo, exactTime } from './time';
 import { scopeIds } from './graphScope';
 import { label, humanize, MITRE_NAMES } from './labels';
+import { EvidencePanel, EvidenceGallery } from './Evidence';
 import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
@@ -136,7 +137,11 @@ function App({ user, onLogout, onUserChange }) {
     // open by default on desktop, collapsed into a drawer on phones
     const [navOpen, setNavOpen] = useState(() => window.innerWidth > 820)
     // restore the last tab + open alert on reload instead of snapping back to the dashboard
-    const [page, setPage] = useState(() => { try { return localStorage.getItem("og_page") || "overview" } catch { return "overview" } })
+    // the remembered page, unless it no longer exists (then the dashboard)
+    const [page, setPage] = useState(() => {
+        const known = new Set([...NAV.flatMap(s => s.items.map(i => i.id)), "alert-detail", "search", "profile"])
+        try { const p = localStorage.getItem("og_page"); return known.has(p) ? p : "overview" } catch { return "overview" }
+    })
     const [selectedId, setSelectedId] = useState(() => { try { return localStorage.getItem("og_selectedId") || null } catch { return null } })
     // which page the open alert was reached from, so "back" returns there
     const [cameFrom, setCameFrom] = useState(() => { try { return localStorage.getItem("og_cameFrom") || "alerts" } catch { return "alerts" } })
@@ -950,6 +955,9 @@ function App({ user, onLogout, onUserChange }) {
                             <div className="split">
                                 <div>
                                     {selected.description && <p className="note">{selected.description}</p>}
+
+                                    {/* what VerifyEye's agent saw at this page (#3) */}
+                                    {selected.target_url && <EvidencePanel alert={selected} />}
 
                                     <Panel
                                         title="Attack graph"
@@ -2638,6 +2646,14 @@ function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph, asEntity 
                     )}
                 </Panel>
             </div>
+
+            {view.some(a => a.target_url) && (
+                <div className="grid-1">
+                    <Panel title="What the agent saw" note="screenshots of these pages, taken by VerifyEye's sandboxed agent">
+                        <EvidenceGallery alerts={view} />
+                    </Panel>
+                </div>
+            )}
 
             <div className="grid-1">
                 <Panel title="All matching alerts" note={`${sorted.length} alert${sorted.length === 1 ? "" : "s"}`} flush>
