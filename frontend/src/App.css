@@ -3463,3 +3463,35 @@ button { font: inherit; color: inherit; }
 .gx-focus > svg { width: 15px; height: 15px; color: var(--accent-text); flex: none; }
 .gx-focus > span { flex: 1; min-width: 180px; }
 .gx-focus b { font-family: var(--mono); }
+
+/* chart-click drill-down: what the entity is, when it was active, how far it spread (#30) */
+.entity-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px 32px;
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--edge);
+}
+.entity-id { min-width: 0; }
+.entity-name {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px;
+  font-family: var(--mono); font-size: var(--t-xl); font-weight: 600;
+  color: var(--text); overflow-wrap: anywhere;
+}
+.entity-sub { font-family: var(--sans); font-size: var(--t-sm); font-weight: 500; color: var(--dim); }
+.entity-facts {
+  display: flex; flex-wrap: wrap; gap: 12px 28px;
+  margin: 0 0 0 auto;
+}
+.entity-facts div { display: flex; flex-direction: column; gap: 3px; }
+.entity-facts dt {
+  font-size: var(--t-2xs); font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--faint);
+}
+.entity-facts dd { margin: 0; font-size: var(--t-sm); color: var(--text); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .entity-facts { margin-left: 0; } }

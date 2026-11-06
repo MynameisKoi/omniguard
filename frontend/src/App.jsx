@@ -159,11 +159,12 @@ function App({ user, onLogout, onUserChange }) {
     const [assetTab, setAssetTab] = useState("hosts")
     const [query, setQuery] = useState("")          // live text in the search box
     const [searchTerm, setSearchTerm] = useState(() => { try { return localStorage.getItem("og_searchTerm") || "" } catch { return "" } }) // committed term (Enter)
-    const [searchKind, setSearchKind] = useState("search") // "search" (typed) | "filter" (chart click)
+    const [searchKind, setSearchKind] = useState(() => { try { return localStorage.getItem("og_searchKind") || "search" } catch { return "search" } }) // "search" (typed) | "filter" (chart click)
     const [recentSearches, setRecentSearches] = useState(() => {
         try { return JSON.parse(localStorage.getItem("og_recent_searches") || "[]") } catch { return [] }
     })
     useEffect(() => { try { localStorage.setItem("og_searchTerm", searchTerm) } catch {} }, [searchTerm])
+    useEffect(() => { try { localStorage.setItem("og_searchKind", searchKind) } catch { /* private mode */ } }, [searchKind])
 
     // brief "something changed" flash + scroll-to-top when a filter is applied,
     // so an in-place dashboard change is perceptible instead of silently instant
@@ -285,9 +286,17 @@ function App({ user, onLogout, onUserChange }) {
     };
     // live typeahead (as you type) and the committed results (after Enter)
     const liveHits = query.trim() ? alerts.filter(a => matchesTerm(a, query)) : [];
-    const searchHits = alerts
+    const looseHits = alerts
         .filter(a => matchesTerm(a, searchTerm))
         .sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
+    // a chart click ("GitHub" in the brands chart) means exactly that value of
+    // that field, so the drill-down matches the count on the bar. Typed
+    // searches stay loose (substring across fields).
+    const clickedKind = searchKind === "filter" ? entityKind(looseHits, searchTerm) : null;
+    const searchHits = clickedKind
+        ? looseHits.filter(a => ENTITY_FIELDS.some(([f, label]) =>
+            label === clickedKind.label && String(a[f] ?? "").toLowerCase() === searchTerm.trim().toLowerCase()))
+        : looseHits;
 
     // run a search: open the dedicated results page and remember the term
     const runSearch = (term) => {
@@ -1422,7 +1431,7 @@ function App({ user, onLogout, onUserChange }) {
                             {searchHits.length === 0 ? (
                                 <CardEmpty glyph={Search} text={`No alerts match “${searchTerm}”`} />
                             ) : (
-                                <ScopedDashboard alerts={searchHits} term={searchTerm} onOpen={openAlert} onFilter={filterBy} onSeeGraph={seeInGraph} />
+                                <ScopedDashboard alerts={searchHits} term={searchTerm} onOpen={openAlert} onFilter={filterBy} onSeeGraph={seeInGraph} asEntity={searchKind === "filter"} />
                             )}
                         </>
                     )}
@@ -2181,7 +2190,55 @@ function Stat({ icon: Icon, label, value, tone, foot, spark, onClick, active }) 
 
 /* a dashboard scoped to a subset of alerts (used by the search results page):
    stats + charts + the full matching list, all computed from `alerts`. */
-function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph }) {
+// which alert field a chart-click term is the value of — "Microsoft 365" is a
+// brand, "LAPTOP-10" a host — so the filtered view can say what it's about (#30)
+const ENTITY_FIELDS = [
+    ["host", "Host"], ["user", "User"], ["domain", "Domain"], ["brand_target", "Impersonated brand"],
+    ["mitre_technique", "MITRE technique"], ["source", "Detection engine"], ["event_type", "Event type"],
+    ["src_ip", "IP address"], ["dst_ip", "IP address"],
+];
+function entityKind(alerts, term) {
+    const t = (term || "").trim().toLowerCase();
+    let best = null;
+    ENTITY_FIELDS.forEach(([field, label]) => {
+        const n = alerts.filter(a => String(a[field] ?? "").toLowerCase() === t).length;
+        if (n > (best?.n || 0)) best = { field, label, n };
+    });
+    return best;
+}
+
+/* the top of a chart-click drill-down: what was clicked, when it was active,
+   and how far it spread (hosts / users / domains) */
+function EntitySummary({ alerts, term }) {
+    const kind = entityKind(alerts, term);
+    const times = alerts.map(a => new Date(a.timestamp).getTime()).filter(t => !isNaN(t));
+    const distinct = (f) => new Set(alerts.map(a => a[f]).filter(Boolean)).size;
+    const facts = [
+        ["First seen", times.length ? exactTime(Math.min(...times)) : "—"],
+        ["Last seen", times.length ? `${exactTime(Math.max(...times))} · ${timeAgo(Math.max(...times))}` : "—"],
+        ["Hosts affected", distinct("host")],
+        ["Users affected", distinct("user")],
+        [kind?.field === "brand_target" ? "Impersonating domains" : "Domains", distinct("domain")],
+    ];
+    return (
+        <section className="entity-summary">
+            <div className="entity-id">
+                <span className="search-eyebrow">{kind ? kind.label : "Filter"}</span>
+                <div className="entity-name">
+                    {term}
+                    {kind?.field === "mitre_technique" && MITRE[term] && <span className="entity-sub">{MITRE[term]}</span>}
+                </div>
+            </div>
+            <dl className="entity-facts">
+                {facts.map(([k, v]) => (
+                    <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
+                ))}
+            </dl>
+        </section>
+    );
+}
+
+function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph, asEntity = false }) {
     const SEV = ["critical", "high", "medium", "low"];
     const [sevFilter, setSevFilter] = useState(null);
     const toggleSev = (s) => setSevFilter(prev => prev === s ? null : s);
@@ -2209,8 +2266,22 @@ function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph }) {
     const userMax = Math.max(1, ...users.map(u => u[1]));
     const sorted = [...view].sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
 
+    // who was hit: each host with its alert count, worst severity and last activity
+    const affectedHosts = Object.entries(countBy("host"))
+        .map(([host, n]) => {
+            const mine = view.filter(a => a.host === host);
+            return {
+                host, n,
+                worst: SEV.find(s => mine.some(a => a.severity === s)),
+                last: Math.max(...mine.map(a => new Date(a.timestamp).getTime())),
+            };
+        })
+        .sort((a, b) => SEV.indexOf(a.worst) - SEV.indexOf(b.worst) || b.n - a.n);
+
     return (
         <>
+            {asEntity && <EntitySummary alerts={alerts} term={term} />}
+
             <div className="stats">
                 <Stat icon={Flag}          label="Matches"   value={alerts.length}       spark={totalSeries} onClick={() => setSevFilter(null)} active={!sevFilter} />
                 <Stat icon={ShieldAlert}   label="Critical"  value={countOf("critical")} spark={sevSeries("critical")} tone="critical" onClick={() => toggleSev("critical")} active={sevFilter === "critical"} />
@@ -2272,7 +2343,7 @@ function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph }) {
                 </Panel>
             </div>
 
-            <div className="grid-1">
+            <div className="grid-2">
                 <Panel
                     title="Network graph"
                     note={`entities in ${view.length === 1 ? "this alert" : `these ${view.length} alerts`}`}
@@ -2280,6 +2351,30 @@ function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph }) {
                     onAction={() => onSeeGraph(view, `“${term}”${sevFilter ? ` · ${sevFilter}` : ""}`)}
                 >
                     <GraphCanvas compact refreshKey={alerts.length} scope={view} />
+                </Panel>
+                <Panel title="Affected hosts" note={`${affectedHosts.length} host${affectedHosts.length === 1 ? "" : "s"}`} flush>
+                    {affectedHosts.length === 0 ? <div className="empty">No hosts in these alerts.</div> : (
+                        <table className="table">
+                            <thead>
+                                <tr><th>Host</th><th>Worst</th><th>Alerts</th><th>Last seen</th></tr>
+                            </thead>
+                            <tbody>
+                                {affectedHosts.map(h => (
+                                    <tr
+                                        key={h.host}
+                                        className={onFilter && h.host !== term ? "row-link" : ""}
+                                        onClick={onFilter && h.host !== term ? () => onFilter(h.host) : undefined}
+                                        title={onFilter && h.host !== term ? `Drill into ${h.host}` : undefined}
+                                    >
+                                        <td className="td-mono">{h.host}</td>
+                                        <td><span className={`sev ${h.worst}`}>{h.worst}</span></td>
+                                        <td className="td-mono td-dim">{h.n}</td>
+                                        <td className="td-mono td-faint" title={exactTime(h.last)}>{timeAgo(h.last)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
                 </Panel>
             </div>
 
