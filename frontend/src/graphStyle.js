@@ -48,7 +48,7 @@ export function buildGraphStyle() {
     const faint = v("--faint", "#6a727c");
     const surface = v("--surface", "#0e1013");
     const edge = v("--g-edge", "#39414b");
-    const edgeHl = v("--g-edge-hl", "#8b7cf6");
+    const edgeHl = v("--g-edge-hl", "#3cc6db");
     const mono = v("--mono", "monospace");
 
     const perType = NODE_TYPES.map(type => ({

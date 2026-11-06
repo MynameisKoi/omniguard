@@ -1,4 +1,5 @@
-import { ShieldAlert, Flag, Activity, Share2, Bot, ArrowRight, Check } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+import { ShieldAlert, Flag, Activity, Share2, Bot, ArrowRight, Check, MousePointerClick, Radar, Sparkles } from 'lucide-react';
 
 // marketing landing shown before login: what OmniGuard is, for visitors
 // who land on the dashboard URL without an account yet.
@@ -11,9 +12,27 @@ const FEATURES = [
     { icon: Flag, title: "OCSF-native export", body: "Alerts export as standard OCSF Security Findings, ready to stream into Splunk, AWS Security Lake or any modern SIEM." },
 ];
 
+// fade sections up as they scroll into view. Elements start hidden only once
+// this has run (.lp-js on the root), so with no JS everything is just visible
+function useReveal() {
+    const ref = useRef(null);
+    useEffect(() => {
+        const root = ref.current;
+        if (!root || !("IntersectionObserver" in window)) return;
+        root.classList.add("lp-js");
+        const io = new IntersectionObserver(entries => entries.forEach(e => {
+            if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+        }), { threshold: 0.15 });
+        root.querySelectorAll(".lp-reveal").forEach(el => io.observe(el));
+        return () => io.disconnect();
+    }, []);
+    return ref;
+}
+
 export default function Landing({ onSignIn }) {
+    const ref = useReveal();
     return (
-        <div className="landing">
+        <div className="landing" ref={ref}>
             <header className="lp-nav">
                 <div className="lp-brand">
                     <span className="lp-logo"><ShieldAlert /></span>
@@ -40,14 +59,54 @@ export default function Landing({ onSignIn }) {
                     </button>
                     <a className="lp-btn-ghost" href="#features">See what it does</a>
                 </div>
-                <div className="lp-stats">
-                    <div><b>2</b><span>detection engines</span></div>
-                    <div><b>6</b><span>integrated subsystems</span></div>
-                    <div><b>100%</b><span>local / zero-cloud</span></div>
-                </div>
             </section>
 
-            <section className="lp-section" id="features">
+            {/* the real dashboard, on a monitor and a phone (screenshots: public/showcase) */}
+            <div className="lp-showcase">
+                <figure className="lp-monitor">
+                    <div className="lp-monitor-screen">
+                        <img src="/showcase/dashboard-desktop.jpg" width="2880" height="1800"
+                            alt="The OmniGuard dashboard on a desktop monitor: alert counts by severity, AI analyst, threat activity and severity charts" />
+                    </div>
+                    <div className="lp-monitor-neck" />
+                    <div className="lp-monitor-base" />
+                </figure>
+                <figure className="lp-phone">
+                    <div className="lp-phone-screen">
+                        <img src="/showcase/dashboard-phone.jpg" width="1170" height="2532"
+                            alt="The same dashboard on a phone, with the severity cards stacked in two columns" />
+                    </div>
+                </figure>
+            </div>
+
+            <div className="lp-stats lp-reveal">
+                <div><b>2</b><span>detection engines</span></div>
+                <div><b>6</b><span>integrated subsystems</span></div>
+                <div><b>100%</b><span>local / zero-cloud</span></div>
+            </div>
+
+            <section className="lp-section lp-split lp-reveal">
+                <div className="lp-split-text">
+                    <span className="lp-eyebrow">Attack graph</span>
+                    <h2>See the whole attack, not just a row</h2>
+                    <p>
+                        Every alert lands in a live graph of hosts, users, processes, domains and
+                        C2 infrastructure — so one phishing page or beacon shows you everything it touched.
+                    </p>
+                    <ul className="lp-points">
+                        <li><MousePointerClick /><span><b>Click any node</b> to see what it is, what it connects to and every alert involving it.</span></li>
+                        <li><Radar /><span><b>Filter by severity, engine or time</b> and find any host in a keystroke.</span></li>
+                        <li><Sparkles /><span><b>See it in the graph</b> — jump from any chart or alert straight to its entities, lit up.</span></li>
+                    </ul>
+                </div>
+                <figure className="lp-browser">
+                    <div className="lp-browser-bar"><span /><span /><span /><em>omniguard / network graph</em></div>
+                    <img src="/showcase/graph-desktop.jpg" width="2880" height="1800" loading="lazy"
+                        alt="The network graph explorer with host LAPTOP-10 selected, its neighbourhood highlighted and a detail panel listing its alerts and connections" />
+                </figure>
+            </section>
+
+            <section className="lp-section lp-reveal" id="features">
                 <h2>One platform, the whole kill chain</h2>
                 <p className="lp-section-sub">Producers feed a shared ingestion hub; the dashboard is where it all comes together.</p>
                 <div className="lp-features">
@@ -61,7 +120,7 @@ export default function Landing({ onSignIn }) {
                 </div>
             </section>
 
-            <section className="lp-section lp-about" id="about">
+            <section className="lp-section lp-about lp-reveal" id="about">
                 <h2>About the project</h2>
                 <p className="lp-about-body">
                     OmniGuard is a senior capstone project at San Francisco Bay University — a

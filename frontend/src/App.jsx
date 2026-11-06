@@ -1,6 +1,6 @@
 import "./App.css"
 import { API_URL, WS_URL } from "./config"
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import GraphCanvas from './GraphCanvas';
 import GraphExplorer from './GraphExplorer';
 import { timeAgo, exactTime } from './time';
@@ -256,10 +256,15 @@ function App({ user, onLogout, onUserChange }) {
 
     }, [])
 
-    // set it on <html> so body and everything else inherit the palette
+    // set it on <html> so body and everything else inherit the palette.
+    // theme-anim cross-fades the colours for a moment instead of snapping
     useEffect(() => {
-        document.documentElement.setAttribute("data-theme", theme);
+        const root = document.documentElement;
+        root.classList.add("theme-anim");
+        root.setAttribute("data-theme", theme);
         try { localStorage.setItem("og-theme", theme) } catch { /* private mode */ }
+        const id = setTimeout(() => root.classList.remove("theme-anim"), 450);
+        return () => clearTimeout(id);
     }, [theme]);
 
     // a click anywhere outside an open dropdown closes it, and so does escape
@@ -722,7 +727,9 @@ function App({ user, onLogout, onUserChange }) {
                     {filtering ? (
                         <div className="content-spinner"><div className="spinner" /></div>
                     ) : (
-                    <>
+                    // keyed by page so a page change remounts the content and the
+                    // enter animation (.content > *) plays; live alerts don't change it
+                    <Fragment key={page}>
 
                     {(filter || srcFilter) && (page === "overview" || page === "alerts") && (
                         <div className="active-filters">
@@ -1436,7 +1443,7 @@ function App({ user, onLogout, onUserChange }) {
                         </>
                     )}
 
-                    </>
+                    </Fragment>
                     )}
 
                 </div>
