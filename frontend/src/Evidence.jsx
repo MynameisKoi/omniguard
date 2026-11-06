@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
-import { Camera, ShieldCheck, ShieldAlert, ShieldQuestion, X, ExternalLink, Fingerprint, ArrowRight } from 'lucide-react'
+import { Camera, ShieldCheck, ShieldAlert, ShieldQuestion, X, ExternalLink, Fingerprint } from 'lucide-react'
 import { API_URL } from "./config"
 import { timeAgo, exactTime } from './time'
 
 /* Agent evidence (#3): the screenshots VerifyEye's sandboxed agent took of the
  * pages it checked, with its verdict. Used on the alert detail (EvidencePanel),
- * entity drill-downs (EvidenceGallery) and its own page (EvidencePage). */
+ * and entity drill-downs (EvidenceGallery). */
 
 const imageSrc = (e) => `${API_URL}${e.image_url}`
 const host = (url) => { try { return new URL(url).hostname } catch { return url } }
@@ -99,19 +99,27 @@ export function EvidencePanel({ alert }) {
     const [list, setList] = useState(null)
     const [open, setOpen] = useState(null)
     useEffect(() => {
-        let alive = true
-        fetch(`${API_URL}/alerts/${alert.alert_id}/evidence`)
+        let alive = true, timer, tries = 0
+        // the extension reports the alert at once; the agent's screenshot lands
+        // a few seconds later. for a fresh alert keep asking until it arrives
+        const fresh = Date.now() - new Date(alert.timestamp).getTime() < 2 * 60 * 1000
+        const load = () => fetch(`${API_URL}/alerts/${alert.alert_id}/evidence`)
             .then(r => r.ok ? r.json() : [])
-            .then(d => { if (alive) setList(d) })
-            .catch(() => { if (alive) setList([]) })
-        return () => { alive = false }
-    }, [alert.alert_id])
+            .catch(() => [])
+            .then(d => {
+                if (!alive) return
+                setList(d)
+                if (!d.length && fresh && ++tries < 15) timer = setTimeout(load, 2000)
+            })
+        load()
+        return () => { alive = false; clearTimeout(timer) }
+    }, [alert.alert_id, alert.timestamp])
 
     if (list === null) return <section className="ev-panel loading"><div className="ev-shot big skeleton" /></section>
     if (list.length === 0) return (
         <section className="ev-panel empty">
             <Camera />
-            <span>No agent screenshot for this page yet — the agent captures one the next time it checks it.</span>
+            <span>No agent screenshot for this page yet — it appears here as soon as the agent has checked the page.</span>
         </section>
     )
     const latest = list[0]
@@ -174,69 +182,5 @@ export function EvidenceGallery({ alerts }) {
                 )}
             {open && <EvidenceViewer evidence={open} onClose={() => setOpen(null)} />}
         </>
-    )
-}
-
-// every capture the agent has made: phishing, cleared and blocked
-const FILTERS = [[null, "All"], ["phishing", "Phishing"], ["cleared", "Cleared"], ["blocked", "Blocked"]]
-
-export function EvidencePage({ onFilter }) {
-    const [filter, setFilter] = useState(null)
-    const [items, setItems] = useState(null)
-    const [open, setOpen] = useState(null)
-    useEffect(() => {
-        let alive = true
-        fetch(`${API_URL}/evidence?limit=120${filter ? `&verdict=${filter}` : ""}`)
-            .then(r => r.json()).then(d => { if (alive) setItems(d) }).catch(() => { if (alive) setItems([]) })
-        return () => { alive = false }
-    }, [filter])
-
-    return (
-        <section className="panel ev-page">
-            <div className="panel-head">
-                <div className="panel-heading">
-                    <span className="panel-title">Agent evidence</span>
-                    <span className="panel-note">every page VerifyEye's sandboxed agent has checked</span>
-                </div>
-            </div>
-            <div className="panel-body">
-                <div className="ev-toolbar">
-                    <div className="seg" role="group" aria-label="Verdict">
-                        {FILTERS.map(([k, label]) => (
-                            <button key={label} className={`seg-btn ${filter === k ? "on" : ""}`} onClick={() => { setItems(null); setFilter(k) }} aria-pressed={filter === k}>{label}</button>
-                        ))}
-                    </div>
-                    {items && <span className="ev-count">{items.length} capture{items.length === 1 ? "" : "s"}</span>}
-                </div>
-
-                {items === null ? (
-                    <div className="ev-grid">{[0, 1, 2, 3, 4, 5].map(i => <div key={i} className="ev-shot skeleton" />)}</div>
-                ) : items.length === 0 ? (
-                    <div className="empty">
-                        No captures{filter ? ` marked ${filter}` : ""} yet. They appear as the agent checks login pages.
-                    </div>
-                ) : (
-                    <div className="ev-grid">
-                        {items.map(e => (
-                            <figure key={e.evidence_id} className="ev-card">
-                                <Shot evidence={e} onOpen={setOpen} />
-                                <figcaption>
-                                    <span className="mono" title={e.url}>{host(e.url)}</span>
-                                    <VerdictBadge evidence={e} />
-                                </figcaption>
-                                <div className="ev-card-foot">
-                                    <span title={exactTime(utc(e.captured_at))}>{timeAgo(utc(e.captured_at))}</span>
-                                    {e.brand && <span>looks like {e.brand}</span>}
-                                    {e.phishing && onFilter && (
-                                        <button className="ev-link" onClick={() => onFilter(host(e.url))}>Alerts <ArrowRight /></button>
-                                    )}
-                                </div>
-                            </figure>
-                        ))}
-                    </div>
-                )}
-            </div>
-            {open && <EvidenceViewer evidence={open} onClose={() => setOpen(null)} />}
-        </section>
     )
 }

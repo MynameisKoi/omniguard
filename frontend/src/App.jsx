@@ -6,14 +6,14 @@ import GraphExplorer from './GraphExplorer';
 import { timeAgo, exactTime } from './time';
 import { scopeIds } from './graphScope';
 import { label, humanize, MITRE_NAMES } from './labels';
-import { EvidencePanel, EvidenceGallery, EvidencePage } from './Evidence';
+import { EvidencePanel, EvidenceGallery } from './Evidence';
 import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
     ShieldAlert, Globe, Check, TriangleAlert, Inbox, X,
     Siren, Users, Activity, Target, TrendingUp, TrendingDown, Search, Bell,
     UserRound, LogOut, Sparkles, RefreshCw, Send, Bot, Calendar,
-    GitMerge, Gauge, ShieldCheck, ShieldOff, UserCheck, Link2, Copy, Camera,
+    GitMerge, Gauge, ShieldCheck, ShieldOff, UserCheck, Link2, Copy,
 } from 'lucide-react';
 import { Sparkline, StackedArea, BarRow, PieChart, BarChart, SampleBadge } from './charts';
 
@@ -103,7 +103,6 @@ const NAV = [
     { group: "Investigate", items: [
         { id: "assets", icon: Server, label: "Hosts & assets" },
         { id: "users",  icon: Users,  label: "Users" },
-        { id: "evidence", icon: Camera, label: "Evidence" },
         { id: "ledger", icon: Activity, label: "Audit ledger" },
     ]},
     { group: "System", items: [
@@ -138,7 +137,11 @@ function App({ user, onLogout, onUserChange }) {
     // open by default on desktop, collapsed into a drawer on phones
     const [navOpen, setNavOpen] = useState(() => window.innerWidth > 820)
     // restore the last tab + open alert on reload instead of snapping back to the dashboard
-    const [page, setPage] = useState(() => { try { return localStorage.getItem("og_page") || "overview" } catch { return "overview" } })
+    // the remembered page, unless it no longer exists (then the dashboard)
+    const [page, setPage] = useState(() => {
+        const known = new Set([...NAV.flatMap(s => s.items.map(i => i.id)), "alert-detail", "search", "profile"])
+        try { const p = localStorage.getItem("og_page"); return known.has(p) ? p : "overview" } catch { return "overview" }
+    })
     const [selectedId, setSelectedId] = useState(() => { try { return localStorage.getItem("og_selectedId") || null } catch { return null } })
     // which page the open alert was reached from, so "back" returns there
     const [cameFrom, setCameFrom] = useState(() => { try { return localStorage.getItem("og_cameFrom") || "alerts" } catch { return "alerts" } })
@@ -1509,9 +1512,6 @@ function App({ user, onLogout, onUserChange }) {
 
                     {/* ── audit ledger ── */}
                     {page === "ledger" && <LedgerPage />}
-
-                    {/* ── agent evidence (#3) ── */}
-                    {page === "evidence" && <EvidencePage onFilter={filterBy} />}
 
                     {/* ── search results: a full dashboard scoped to the term ── */}
                     {page === "search" && (
