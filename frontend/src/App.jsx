@@ -7,7 +7,7 @@ import {
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
     ShieldAlert, Globe, Check, TriangleAlert, Inbox, X,
     Siren, Users, Activity, Target, TrendingUp, TrendingDown, Search, Bell,
-    UserRound, LogOut, Sparkles, RefreshCw, Send, Bot,
+    UserRound, LogOut, Sparkles, RefreshCw, Send, Bot, Calendar,
 } from 'lucide-react';
 import { Sparkline, StackedArea, BarRow, PieChart, BarChart, SampleBadge } from './charts';
 
@@ -770,25 +770,13 @@ function App({ user, onLogout, onUserChange }) {
                                     ))}
                                     <span className="filterbar-sep" />
                                     <span className="label">When</span>
-                                    <select
-                                        className="date-select"
-                                        value={dateFilter || "all"}
-                                        onChange={e => setDateFilter(e.target.value === "all" ? null : e.target.value)}
-                                    >
-                                        <option value="all">All time</option>
-                                        <option value="today">Today</option>
-                                        <option value="yesterday">Yesterday</option>
-                                        <option value="7d">Last 7 days</option>
-                                        <option value="30d">Last 30 days</option>
-                                        <option value="custom">Custom range…</option>
-                                    </select>
-                                    {dateFilter === "custom" && (
-                                        <span className="date-range">
-                                            <input type="date" className="date-input" value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)} />
-                                            <span className="date-dash">→</span>
-                                            <input type="date" className="date-input" value={dateTo} min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)} />
-                                        </span>
-                                    )}
+                                    <DateRangePicker
+                                        value={dateFilter}
+                                        from={dateFrom}
+                                        to={dateTo}
+                                        onPreset={(k) => { setDateFilter(k); setDateFrom(""); setDateTo(""); }}
+                                        onCustom={(f, t) => { setDateFrom(f); setDateTo(t); setDateFilter("custom"); }}
+                                    />
                                 </div>
 
                                 {visible.length === 0 ? (
@@ -2301,6 +2289,71 @@ function ScopedDashboard({ alerts, term, onOpen }) {
 }
 
 /* one segmented control: "All" plus every option, joined into a single pill */
+// GA-style date range picker: one trigger button → popover with presets + custom range
+function DateRangePicker({ value, from, to, onPreset, onCustom }) {
+    const [open, setOpen] = useState(false);
+    const [pos, setPos] = useState({ top: 0, left: 0 });
+    const [cFrom, setCFrom] = useState(from || "");
+    const [cTo, setCTo] = useState(to || "");
+    const ref = useRef(null);
+    const trigger = useRef(null);
+    const toggle = () => {
+        if (!open && trigger.current) {
+            const r = trigger.current.getBoundingClientRect();
+            setPos({ top: r.bottom + 6, left: Math.min(r.left, window.innerWidth - 370) });
+        }
+        setOpen(o => !o);
+    };
+    useEffect(() => {
+        if (!open) return;
+        const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+        document.addEventListener("mousedown", onDown);
+        window.addEventListener("keydown", onKey);
+        return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+    }, [open]);
+    useEffect(() => { setCFrom(from || ""); setCTo(to || ""); }, [from, to]);
+
+    const fmt = (d) => { try { return new Date(d + "T00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch { return d; } };
+    const PRESETS = [["all", "All time"], ["today", "Today"], ["yesterday", "Yesterday"], ["7d", "Last 7 days"], ["30d", "Last 30 days"]];
+    const label = value === "today" ? "Today"
+        : value === "yesterday" ? "Yesterday"
+        : value === "7d" ? "Last 7 days"
+        : value === "30d" ? "Last 30 days"
+        : value === "custom" ? (from && to ? `${fmt(from)} – ${fmt(to)}` : "Custom range")
+        : "All time";
+
+    return (
+        <div className="drp" ref={ref}>
+            <button className="drp-trigger" ref={trigger} onClick={toggle}>
+                <Calendar /> <span>{label}</span> <ChevronDown />
+            </button>
+            {open && (
+                <div className="drp-pop" style={{ position: "fixed", top: pos.top, left: pos.left }}>
+                    <div className="drp-presets">
+                        {PRESETS.map(([k, lbl]) => (
+                            <button key={k} className={`drp-opt ${(value || "all") === k ? "on" : ""}`}
+                                onClick={() => { onPreset(k === "all" ? null : k); setOpen(false); }}>
+                                {lbl}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="drp-custom">
+                        <div className="drp-custom-title">Custom range</div>
+                        <label className="drp-field"><span>Start</span>
+                            <input type="date" value={cFrom} max={cTo || undefined} onChange={e => setCFrom(e.target.value)} />
+                        </label>
+                        <label className="drp-field"><span>End</span>
+                            <input type="date" value={cTo} min={cFrom || undefined} onChange={e => setCTo(e.target.value)} />
+                        </label>
+                        <button className="drp-apply" disabled={!cFrom || !cTo} onClick={() => { onCustom(cFrom, cTo); setOpen(false); }}>Apply</button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 function Seg({ label, value, onChange, options }) {
     return (
         <div className="seg-group">

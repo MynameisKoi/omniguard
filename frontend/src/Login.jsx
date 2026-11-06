@@ -4,7 +4,7 @@ import { API_URL } from "./config"
 
 // v1 analyst login: checks email + password against the backend, then
 // hands the user up to main.jsx which swaps in the dashboard
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, onBack }) {
     const [email, setEmail] = useState("")
     const [password, setPassword] = useState("")
     const [error, setError] = useState(null)
@@ -74,6 +74,10 @@ export default function Login({ onLogin }) {
                 <button className="login-btn" type="submit" disabled={loading}>
                     {loading ? "Signing in…" : "Sign in"}
                 </button>
+
+                {onBack && (
+                    <button type="button" className="login-back" onClick={onBack}>← Back to home</button>
+                )}
             </form>
         </div>
     )

@@ -3029,3 +3029,128 @@ button { font: inherit; color: inherit; }
 }
 .date-select:hover { border-color: var(--accent-line); }
 .date-select:focus { outline: none; border-color: var(--accent); }
+
+/* ───────────── #14 marketing landing page ───────────── */
+.landing { min-height: 100vh; background: var(--bg); color: var(--text); overflow-x: hidden; }
+.landing a { color: inherit; text-decoration: none; }
+
+.lp-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 1100px; margin: 0 auto; padding: 20px 24px;
+}
+.lp-brand { display: flex; align-items: center; gap: 10px; }
+.lp-logo { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--accent-wash); color: var(--accent-text); }
+.lp-logo svg { width: 19px; height: 19px; }
+.lp-nav-links { display: flex; align-items: center; gap: 22px; font-size: 14px; }
+.lp-nav-links a { color: var(--dim); }
+.lp-nav-links a:hover { color: var(--text); }
+.lp-signin {
+    padding: 8px 16px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--surface); color: var(--text); font-size: 14px; font-weight: 500; cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+.lp-signin:hover { background: var(--accent-wash); border-color: var(--accent-line); color: var(--accent-text); }
+
+.lp-hero { max-width: 820px; margin: 0 auto; padding: 72px 24px 56px; text-align: center; }
+.lp-eyebrow { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-text); background: var(--accent-wash); padding: 5px 13px; border-radius: 999px; margin-bottom: 22px; }
+.lp-hero h1 { font-size: 48px; line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 18px; font-weight: 700; }
+.lp-lede { font-size: 17px; line-height: 1.6; color: var(--dim); max-width: 640px; margin: 0 auto 30px; }
+.lp-cta { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.lp-btn-primary {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 22px; border: 0; border-radius: 10px;
+    background: var(--accent); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+    transition: transform 0.1s, filter 0.12s;
+}
+.lp-btn-primary:hover { filter: brightness(1.08); }
+.lp-btn-primary:active { transform: translateY(1px); }
+.lp-btn-primary svg { width: 17px; height: 17px; }
+.lp-btn-ghost { display: inline-flex; align-items: center; padding: 12px 18px; color: var(--dim); font-size: 15px; font-weight: 500; }
+.lp-btn-ghost:hover { color: var(--text); }
+
+.lp-stats { display: flex; justify-content: center; gap: 48px; margin-top: 48px; flex-wrap: wrap; }
+.lp-stats div { display: flex; flex-direction: column; gap: 3px; }
+.lp-stats b { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; color: var(--accent-text); }
+.lp-stats span { font-size: 13px; color: var(--faint); }
+
+.lp-section { max-width: 1100px; margin: 0 auto; padding: 64px 24px; }
+.lp-section h2 { font-size: 30px; letter-spacing: -0.01em; text-align: center; margin: 0 0 8px; }
+.lp-section-sub { text-align: center; color: var(--dim); margin: 0 auto 40px; max-width: 560px; }
+.lp-features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.lp-feature { padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); transition: border-color 0.14s, transform 0.14s; }
+.lp-feature:hover { border-color: var(--accent-line); transform: translateY(-2px); }
+.lp-feature-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; background: var(--accent-wash); color: var(--accent-text); margin-bottom: 14px; }
+.lp-feature-icon svg { width: 21px; height: 21px; }
+.lp-feature h3 { font-size: 16px; margin: 0 0 8px; }
+.lp-feature p { font-size: 14px; line-height: 1.6; color: var(--dim); margin: 0; }
+
+.lp-about { max-width: 820px; text-align: center; }
+.lp-about-body { font-size: 16px; line-height: 1.7; color: var(--dim); margin: 0 auto 32px; max-width: 680px; }
+.lp-about-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; text-align: left; margin-bottom: 36px; }
+.lp-about-grid div { padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); display: flex; flex-direction: column; gap: 4px; }
+.lp-about-grid b { font-size: 14px; }
+.lp-about-grid span { font-size: 13px; color: var(--faint); }
+.lp-about-cta { justify-content: center; }
+
+.lp-footer { border-top: 1px solid var(--line); max-width: 1100px; margin: 0 auto; padding: 26px 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--faint); }
+
+.login-back { display: block; width: 100%; margin-top: 4px; border: 0; background: 0; color: var(--dim); font-size: 13px; cursor: pointer; }
+.login-back:hover { color: var(--text); }
+
+@media (max-width: 820px) {
+    .lp-hero h1 { font-size: 34px; }
+    .lp-features { grid-template-columns: 1fr; }
+    .lp-about-grid { grid-template-columns: 1fr; }
+    .lp-nav-links { gap: 14px; }
+}
+
+/* make native date widgets follow the theme (dark/light) instead of default white */
+:root[data-theme="dark"], :root:not([data-theme="light"]) { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+
+/* unify the When controls so the dropdown + date inputs read as one clean set */
+.date-range { display: inline-flex; align-items: center; gap: 8px; margin-left: 4px; }
+.date-dash { color: var(--faint); font-size: 12px; }
+.date-select, .date-input {
+    height: 30px; box-sizing: border-box; padding: 0 10px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--raised); color: var(--text);
+    font-size: var(--t-xs); font-family: inherit; line-height: 1;
+}
+.date-select { font-weight: 500; cursor: pointer; padding-right: 8px; }
+.date-select:hover, .date-input:hover { border-color: var(--accent-line); }
+.date-select:focus, .date-input:focus { outline: none; border-color: var(--accent); }
+.date-input::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; filter: var(--cal-filter, none); }
+
+/* GA-style date range picker */
+.drp { position: relative; display: inline-block; }
+.drp-trigger {
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 30px; padding: 0 11px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--raised); color: var(--text);
+    font-size: var(--t-xs); font-weight: 500; cursor: pointer;
+    transition: border-color 0.12s;
+}
+.drp-trigger:hover { border-color: var(--accent-line); }
+.drp-trigger svg { width: 14px; height: 14px; flex: none; }
+.drp-trigger svg:first-child { color: var(--dim); }
+.drp-trigger svg:last-child { color: var(--faint); }
+.drp-pop {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 60;
+    display: flex; min-width: 350px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; box-shadow: var(--shadow-lg); overflow: hidden;
+    animation: modal-pop 0.12s ease-out;
+}
+.drp-presets { display: flex; flex-direction: column; padding: 6px; border-right: 1px solid var(--line); min-width: 152px; }
+.drp-opt { text-align: left; padding: 8px 12px; border: 0; background: 0; color: var(--dim); font-size: 13px; border-radius: 7px; cursor: pointer; }
+.drp-opt:hover { background: var(--hover); color: var(--text); }
+.drp-opt.on { background: var(--accent-wash); color: var(--accent-text); font-weight: 600; }
+.drp-custom { display: flex; flex-direction: column; gap: 10px; padding: 14px; flex: 1; }
+.drp-custom-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); }
+.drp-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--dim); }
+.drp-field input { height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--raised); color: var(--text); font-size: 13px; font-family: inherit; }
+.drp-field input:focus { outline: none; border-color: var(--accent); }
+.drp-apply { margin-top: 2px; padding: 8px; border: 0; border-radius: 7px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+.drp-apply:disabled { opacity: 0.5; cursor: default; }
