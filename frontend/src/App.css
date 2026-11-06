@@ -4027,3 +4027,10 @@ mark.hl-match { background: var(--accent-wash); color: var(--accent-text); borde
   .ev-shot:hover { transform: none; }
 }
 .ev-facts > div > .ev-verdict { align-self: flex-start; }
+
+/* "your session ended" on the login screen */
+.login-notice {
+  padding: 9px 12px; border-radius: var(--r-md);
+  background: var(--accent-wash); border: 1px solid var(--accent-line);
+  color: var(--accent-text); font-size: var(--t-sm);
+}

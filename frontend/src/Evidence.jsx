@@ -1,13 +1,26 @@
 import { useState, useEffect } from 'react'
 import { Camera, ShieldCheck, ShieldAlert, ShieldQuestion, X, ExternalLink, Fingerprint } from 'lucide-react'
-import { API_URL } from "./config"
+import { api } from "./api"
 import { timeAgo, exactTime } from './time'
 
 /* Agent evidence (#3): the screenshots VerifyEye's sandboxed agent took of the
  * pages it checked, with its verdict. Used on the alert detail (EvidencePanel),
  * and entity drill-downs (EvidenceGallery). */
 
-const imageSrc = (e) => `${API_URL}${e.image_url}`
+// an <img> can't send the session header, so screenshots are fetched with it
+// and shown from a local blob URL (released again when the image goes away)
+function useAuthedImage(path) {
+    const [src, setSrc] = useState(null)
+    useEffect(() => {
+        let alive = true, url
+        api(path)
+            .then(r => r.ok ? r.blob() : null)
+            .then(b => { if (alive && b) { url = URL.createObjectURL(b); setSrc(url) } })
+            .catch(() => {})
+        return () => { alive = false; if (url) URL.revokeObjectURL(url) }
+    }, [path])
+    return src
+}
 const host = (url) => { try { return new URL(url).hostname } catch { return url } }
 // the API sends UTC without a zone marker; say so, or browsers read it as local time
 const utc = (ts) => /(Z|[+-]\d\d:\d\d)$/.test(ts || "") ? ts : `${ts}Z`
@@ -26,9 +39,10 @@ export function VerdictBadge({ evidence }) {
 // a screenshot that fades in once loaded, instead of popping in half-drawn
 function Shot({ evidence, onOpen, size = "" }) {
     const [loaded, setLoaded] = useState(false)
+    const src = useAuthedImage(evidence.image_url)
     return (
         <button className={`ev-shot ${size} ${loaded ? "loaded" : ""}`} onClick={() => onOpen(evidence)} title="View full size">
-            <img src={imageSrc(evidence)} alt={`What the agent saw at ${host(evidence.url)}`} loading="lazy" onLoad={() => setLoaded(true)} />
+            {src && <img src={src} alt={`What the agent saw at ${host(evidence.url)}`} onLoad={() => setLoaded(true)} />}
         </button>
     )
 }
@@ -36,10 +50,11 @@ function Shot({ evidence, onOpen, size = "" }) {
 // full-size view, with the details and a fresh check of the image's fingerprint
 export function EvidenceViewer({ evidence, onClose }) {
     const [check, setCheck] = useState(null)   // null = checking, else { integrity_ok }
+    const src = useAuthedImage(evidence.image_url)
     useEffect(() => {
         const onKey = (ev) => { if (ev.key === "Escape") onClose() }
         window.addEventListener("keydown", onKey)
-        fetch(`${API_URL}/evidence/${evidence.evidence_id}`)
+        api(`/evidence/${evidence.evidence_id}`)
             .then(r => r.json()).then(setCheck).catch(() => setCheck({ integrity_ok: null }))
         return () => window.removeEventListener("keydown", onKey)
     }, [evidence.evidence_id, onClose])
@@ -56,7 +71,8 @@ export function EvidenceViewer({ evidence, onClose }) {
                     <button className="icon-btn" onClick={onClose} aria-label="Close"><X /></button>
                 </header>
 
-                <img className="ev-viewer-img" src={imageSrc(evidence)} alt={`Screenshot of ${evidence.url}`} />
+                {src ? <img className="ev-viewer-img" src={src} alt={`Screenshot of ${evidence.url}`} />
+                     : <div className="ev-shot skeleton" />}
 
                 <div className="ev-facts">
                     <div><span>Verdict</span><VerdictBadge evidence={evidence} /></div>
@@ -103,7 +119,7 @@ export function EvidencePanel({ alert }) {
         // the extension reports the alert at once; the agent's screenshot lands
         // a few seconds later. for a fresh alert keep asking until it arrives
         const fresh = Date.now() - new Date(alert.timestamp).getTime() < 2 * 60 * 1000
-        const load = () => fetch(`${API_URL}/alerts/${alert.alert_id}/evidence`)
+        const load = () => api(`/alerts/${alert.alert_id}/evidence`)
             .then(r => r.ok ? r.json() : [])
             .catch(() => [])
             .then(d => {
@@ -157,7 +173,7 @@ export function EvidenceGallery({ alerts }) {
         let alive = true
         const list = key ? key.split("\n") : []
         Promise.all(list.map(u =>
-            fetch(`${API_URL}/evidence?limit=1&url=${encodeURIComponent(u)}`).then(r => r.ok ? r.json() : []).catch(() => [])
+            api(`/evidence?limit=1&url=${encodeURIComponent(u)}`).then(r => r.ok ? r.json() : []).catch(() => [])
         )).then(rs => { if (alive) setItems(rs.flat()) })
         return () => { alive = false }
     }, [key])
