@@ -3700,3 +3700,59 @@ html.theme-anim *::after {
   .lp-js .lp-reveal { opacity: 1; transform: none; transition: none; }
   .lp-browser:hover { transform: none; }
 }
+
+/* landing nav links (Features / About) glide to their section instead of jumping.
+   scoped to the landing so the dashboard's own scrolling is untouched */
+html:has(.landing) { scroll-behavior: smooth; }
+.landing section[id] { scroll-margin-top: 24px; }
+@media (prefers-reduced-motion: reduce) {
+  html:has(.landing) { scroll-behavior: auto; }
+}
+
+/* ─── sign-in feedback ───────────────────────────── */
+
+/* small ring spinner in the button's text colour */
+.btn-spinner {
+  width: 15px; height: 15px; flex: none;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  opacity: 0.85;
+  animation: spin 0.6s linear infinite;
+}
+.login-btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; transition: filter var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease); }
+/* busy isn't "disabled-looking": it's working, so keep it at full strength */
+.login-btn.busy:disabled { opacity: 1; cursor: progress; }
+.login-field input:disabled { opacity: 0.6; }
+
+/* a wrong password nudges the card, like a head shake */
+.login-card.shake { animation: login-shake 380ms var(--ease); }
+@keyframes login-shake {
+  0%, 100% { transform: none; }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(2px); }
+}
+
+/* the hand-off between "credentials ok" and the dashboard appearing */
+.login-welcome { align-items: center; text-align: center; padding: 36px 24px; gap: 10px; animation: page-in var(--t-slow) var(--ease); }
+.login-welcome-check {
+  display: grid; place-items: center;
+  width: 46px; height: 46px; border-radius: 50%;
+  background: var(--accent); color: var(--on-accent);
+  animation: login-pop 420ms var(--ease);
+}
+.login-welcome-check svg { width: 24px; height: 24px; stroke-width: 2.6; }
+.login-welcome-title { font-size: var(--t-xl); font-weight: 600; margin-top: 4px; }
+.login-welcome-sub { display: inline-flex; align-items: center; gap: 8px; font-size: var(--t-sm); color: var(--dim); }
+.login-welcome-sub .btn-spinner { width: 13px; height: 13px; color: var(--accent-text); }
+@keyframes login-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  70% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-card.shake, .login-welcome, .login-welcome-check { animation: none; }
+}
