@@ -2,6 +2,9 @@ import "./App.css"
 import { API_URL, WS_URL } from "./config"
 import { useState, useEffect, useRef } from 'react';
 import GraphCanvas from './GraphCanvas';
+import GraphExplorer from './GraphExplorer';
+import { timeAgo, exactTime } from './time';
+import { scopeIds } from './graphScope';
 import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
@@ -48,23 +51,6 @@ const ENGINE_ROLE = {
 
 const pct = (n, total) => `${total ? (n / total) * 100 : 0}%`;
 
-function timeAgo(ts) {
-    const secs = Math.floor((Date.now() - new Date(ts)) / 1000);
-    if (secs < 60) return "just now";
-    const mins = Math.floor(secs / 60);
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    return days < 30 ? `${days}d ago` : new Date(ts).toLocaleDateString();
-}
-
-// full stored timestamp, for tooltips and the detail view (#10/#11)
-function exactTime(ts) {
-    if (!ts) return "";
-    try { return new Date(ts).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }); }
-    catch { return ""; }
-}
 
 // real time-series from the alerts: n buckets from the earliest alert to now,
 // counted by severity (replaces the sampleData threat-activity placeholder)
@@ -193,6 +179,8 @@ function App({ user, onLogout, onUserChange }) {
     }, [searchTerm, page]);
     // which top-bar dropdown is open: null | "search" | "bell" | "profile"
     const [menu, setMenu] = useState(null)
+    // "See in network graph": entities to light up on the graph tab, and what they came from
+    const [graphFocus, setGraphFocus] = useState(null)   // { label, ids: [...] } | null
     const [theme, setTheme] = useState(() => {
         try { return localStorage.getItem("og-theme") || "dark" } catch { return "dark" }
     })
@@ -427,6 +415,11 @@ function App({ user, onLogout, onUserChange }) {
     // labels for the pages an alert can be opened from
     const pageTitle = (p) => p === "search" ? "Search" : p === "overview" ? "Dashboard"
         : (NAV.flatMap(s => s.items).find(i => i.id === p)?.label ?? "Alerts");
+    // open the full graph with just these alerts' entities lit up
+    const seeInGraph = (subset, label) => {
+        setGraphFocus({ label, ids: [...scopeIds(subset)] });
+        setSelectedId(null); setPage("graph"); setMenu(null);
+    };
     const openAlert = (id) => {
         if (page !== "alert-detail") setCameFrom(page);
         setSelectedId(id); setPage("alert-detail");
@@ -508,7 +501,7 @@ function App({ user, onLogout, onUserChange }) {
                                 <button
                                     key={item.id}
                                     className={`nav-item ${page === item.id || (page === "alert-detail" && item.id === cameFrom) ? "active" : ""}`}
-                                    onClick={() => { setPage(item.id); setSelectedId(null); if (window.innerWidth <= 820) setNavOpen(false); }}
+                                    onClick={() => { setPage(item.id); setSelectedId(null); setGraphFocus(null); if (window.innerWidth <= 820) setNavOpen(false); }}
                                     title={item.label}
                                 >
                                     <span className="nav-icon"><Icon /></span>
@@ -844,7 +837,12 @@ function App({ user, onLogout, onUserChange }) {
                                 <div>
                                     {selected.description && <p className="note">{selected.description}</p>}
 
-                                    <Panel title="Attack graph" note={`neighbourhood of ${selected.host}`}>
+                                    <Panel
+                                        title="Attack graph"
+                                        note={`neighbourhood of ${selected.host}`}
+                                        action="See in network graph"
+                                        onAction={() => seeInGraph([selected], `this ${selected.event_type} alert`)}
+                                    >
                                         <GraphCanvas host={selected.host} refreshKey={alerts.length} compact />
                                     </Panel>
                                 </div>
@@ -1016,13 +1014,17 @@ function App({ user, onLogout, onUserChange }) {
                                 <Panel
                                     title="Network graph"
                                     note={`${countDistinct("host")} hosts · ${countDistinct("domain")} domains`}
-                                    action="Open"
-                                    onAction={() => setPage("graph")}
+                                    // filtered: light up what's filtered. unfiltered: just open the graph
+                                    action={(filter || srcFilter) ? "See in network graph" : "Open"}
+                                    onAction={() => (filter || srcFilter)
+                                        ? seeInGraph(scoped, [filter, srcFilter].filter(Boolean).join(" · ") + " alerts")
+                                        : (setGraphFocus(null), setPage("graph"))}
                                 >
                                     {alerts.length === 0 ? (
                                         <CardEmpty glyph={Share2} text="Graph is empty" />
                                     ) : (
-                                        <GraphCanvas compact refreshKey={alerts.length}/>
+                                        // follows the dashboard's severity/engine filters like every other panel
+                                        <GraphCanvas compact refreshKey={alerts.length} scope={(filter || srcFilter) ? scoped : null} />
                                     )}
                                 </Panel>
 
@@ -1203,7 +1205,14 @@ function App({ user, onLogout, onUserChange }) {
                             title="Attack graph"
                             note={`${countDistinct("host")} hosts · ${countDistinct("domain")} domains`}
                         >
-                            <GraphCanvas refreshKey={alerts.length}/>
+                            <GraphExplorer
+                                alerts={alerts}
+                                refreshKey={alerts.length}
+                                onOpenAlert={openAlert}
+                                onFilter={filterBy}
+                                focus={graphFocus}
+                                onClearFocus={() => setGraphFocus(null)}
+                            />
                         </Panel>
                     )}
 
@@ -1413,7 +1422,7 @@ function App({ user, onLogout, onUserChange }) {
                             {searchHits.length === 0 ? (
                                 <CardEmpty glyph={Search} text={`No alerts match “${searchTerm}”`} />
                             ) : (
-                                <ScopedDashboard alerts={searchHits} term={searchTerm} onOpen={openAlert} onFilter={filterBy} />
+                                <ScopedDashboard alerts={searchHits} term={searchTerm} onOpen={openAlert} onFilter={filterBy} onSeeGraph={seeInGraph} />
                             )}
                         </>
                     )}
@@ -2172,7 +2181,7 @@ function Stat({ icon: Icon, label, value, tone, foot, spark, onClick, active }) 
 
 /* a dashboard scoped to a subset of alerts (used by the search results page):
    stats + charts + the full matching list, all computed from `alerts`. */
-function ScopedDashboard({ alerts, term, onOpen, onFilter }) {
+function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph }) {
     const SEV = ["critical", "high", "medium", "low"];
     const [sevFilter, setSevFilter] = useState(null);
     const toggleSev = (s) => setSevFilter(prev => prev === s ? null : s);
@@ -2260,6 +2269,17 @@ function ScopedDashboard({ alerts, term, onOpen, onFilter }) {
                             {brands.map(([b, n]) => (<BarRow key={b} label={b} value={n} max={brandMax} tone="high" onClick={onFilter ? () => onFilter(b) : undefined} />))}
                         </div>
                     )}
+                </Panel>
+            </div>
+
+            <div className="grid-1">
+                <Panel
+                    title="Network graph"
+                    note={`entities in ${view.length === 1 ? "this alert" : `these ${view.length} alerts`}`}
+                    action={onSeeGraph && view.length ? "See in network graph" : null}
+                    onAction={() => onSeeGraph(view, `“${term}”${sevFilter ? ` · ${sevFilter}` : ""}`)}
+                >
+                    <GraphCanvas compact refreshKey={alerts.length} scope={view} />
                 </Panel>
             </div>
 

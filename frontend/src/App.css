@@ -3177,3 +3177,289 @@ button { font: inherit; color: inherit; }
 .cal-day:hover { background: var(--hover); }
 .cal-day.mid { background: var(--accent-wash); color: var(--accent-text); border-radius: 0; }
 .cal-day.sel { background: var(--accent); color: #fff; font-weight: 600; }
+
+/* ─── graph explorer (#29) ───────────────────────── */
+
+/* the canvas and everything drawn over it (zoom controls, panel, overlays).
+   cytoscape stacks its own canvas layers with z-index, so the canvas gets its
+   own stacking context or the graph paints over the panel */
+.graph-stage { position: relative; }
+.graph-stage .graph-canvas { position: relative; z-index: 0; }
+.graph.fullscreen .graph-stage { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+.graph-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-radius: var(--r-md);
+  color: var(--dim);
+  font-size: var(--t-sm);
+  pointer-events: none;
+}
+.graph-overlay button { pointer-events: auto; }
+.graph-overlay .spinner { width: 32px; height: 32px; }
+
+.graph-zoom {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  z-index: 2;
+}
+.graph-zoom button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 30px;
+  background: none;
+  border: 0;
+  color: var(--dim);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.graph-zoom button + button { border-top: 1px solid var(--line-soft); }
+.graph-zoom button:hover { background: var(--hover); color: var(--text); }
+.graph-zoom svg { width: 15px; height: 15px; stroke-width: 2; }
+
+/* legend chips double as show/hide switches on the explorer */
+.graph-legend-item.toggle {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 9px 3px 7px;
+  margin: -3px -4px;
+  font: inherit;
+  font-size: var(--t-xs);
+  color: var(--dim);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, opacity 0.12s;
+}
+.graph-legend-item.toggle:hover { background: var(--hover); color: var(--text); }
+.graph-legend-item.toggle.off { opacity: 0.45; text-decoration: line-through; }
+
+.gx-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-bottom: 14px;
+}
+
+.gx-find { position: relative; flex: 1 1 220px; max-width: 320px; }
+.gx-find > svg {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; color: var(--faint); pointer-events: none;
+}
+.gx-find input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px 0 31px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--t-sm);
+}
+.gx-find input:focus { outline: none; border-color: var(--accent); }
+
+.gx-find-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  min-width: 260px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 120;
+}
+.gx-find-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.gx-find-row:hover { background: var(--hover); }
+.gx-find-label { flex: 1; min-width: 0; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gx-find-type { font-size: var(--t-2xs); color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.gx-find-empty { padding: 9px 8px; font-size: var(--t-sm); color: var(--faint); }
+
+.gx-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 0;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: var(--t-xs);
+  font-weight: 500;
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.gx-reset svg { width: 13px; height: 13px; }
+.gx-reset:hover { text-decoration: underline; }
+
+/* node detail: floats over the canvas so opening it doesn't resize (and refit) the graph */
+.gx-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: 310px;
+  max-width: calc(100% - 24px);
+  overflow-y: auto;
+  padding: 14px 16px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg), var(--edge);
+  z-index: 3;
+  animation: gx-in 0.16s ease;
+}
+@keyframes gx-in { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+
+.gx-head { display: flex; align-items: center; justify-content: space-between; }
+.gx-type {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: var(--t-2xs); font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--dim);
+}
+.gx-close {
+  display: grid; place-items: center;
+  width: 26px; height: 26px; margin-right: -6px;
+  background: none; border: 0; border-radius: var(--r-sm);
+  color: var(--faint); cursor: pointer;
+}
+.gx-close:hover { background: var(--hover); color: var(--text); }
+.gx-close svg { width: 15px; height: 15px; }
+
+.gx-title {
+  margin: 6px 0 14px;
+  font-family: var(--mono);
+  font-size: var(--t-lg);
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.gx-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.gx-stats > div {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 9px 11px;
+}
+.gx-stats > div + div { border-left: 1px solid var(--line-soft); }
+.gx-stats b { font-size: var(--t-xl); font-weight: 600; color: var(--text); line-height: 1; }
+.gx-stats b.gx-none { color: var(--faint); }
+.gx-stats span:not(.sev) { font-size: var(--t-2xs); color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
+
+.gx-seen { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-xs); color: var(--dim); }
+.gx-seen div { display: flex; justify-content: space-between; gap: 10px; }
+.gx-seen span { color: var(--faint); }
+
+.gx-section { margin-top: 18px; }
+.gx-section-title {
+  display: flex; align-items: center; gap: 7px;
+  margin-bottom: 8px;
+  font-size: var(--t-2xs); font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--faint);
+}
+.gx-count {
+  padding: 1px 6px; border-radius: 999px;
+  background: var(--raised); color: var(--dim);
+  font-family: var(--mono); letter-spacing: 0;
+}
+.gx-empty { font-size: var(--t-sm); color: var(--faint); }
+
+.gx-group + .gx-group { margin-top: 10px; }
+.gx-rel {
+  display: flex; align-items: center; gap: 5px;
+  margin-bottom: 3px;
+  font-size: var(--t-xs); color: var(--dim);
+}
+.gx-rel svg { width: 12px; height: 12px; color: var(--faint); }
+
+.gx-link, .gx-alert {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  margin-left: -8px;
+  width: calc(100% + 16px);
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.gx-link:hover, .gx-alert:hover { background: var(--hover); }
+.gx-link span { min-width: 0; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.gx-alert-type { flex: 1; min-width: 0; font-family: var(--mono); font-size: var(--t-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gx-alert-time { font-size: var(--t-xs); color: var(--faint); white-space: nowrap; }
+
+.gx-more {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 8px; padding: 0;
+  background: none; border: 0;
+  font: inherit; font-size: var(--t-xs); font-weight: 500;
+  color: var(--accent-text); cursor: pointer;
+}
+.gx-more svg { width: 13px; height: 13px; }
+.gx-more:hover { text-decoration: underline; }
+
+@media (max-width: 640px) {
+  .gx-find { max-width: none; }
+  .gx-panel { top: auto; height: 62%; }
+}
+.gx-rel-n { margin-left: auto; font-family: var(--mono); color: var(--faint); }
+.gx-group .gx-more { margin-top: 2px; }
+
+/* "See in network graph": what's lit up on the explorer, and a way out */
+.gx-focus {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-bottom: 14px;
+  padding: 9px 12px;
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  color: var(--text);
+  font-size: var(--t-sm);
+}
+.gx-focus > svg { width: 15px; height: 15px; color: var(--accent-text); flex: none; }
+.gx-focus > span { flex: 1; min-width: 180px; }
+.gx-focus b { font-family: var(--mono); }

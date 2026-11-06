@@ -114,6 +114,13 @@ export function buildGraphStyle() {
 
         /* ---- interaction states ---- */
 
+        // filtered out by the explorer. display:none also hides every edge
+        // touching the node, and keeps it out of layouts and fits
+        {
+            selector: ".gone",
+            style: { "display": "none" },
+        },
+
         // everything outside the selected neighbourhood. Dimmed enough to push
         // it back, not so far that you lose the shape of the wider graph.
         {
