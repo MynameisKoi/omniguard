@@ -9,7 +9,7 @@ from status import check_mongo, check_neo4j, check_ollama
 from datetime import datetime, timezone, timedelta
 from typing import Literal
 from pydantic import BaseModel, Field
-from graph import ingest_alert, get_overview_graph, get_host_graph
+from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_view
 from dedup import compute_alert_simhash, find_matching_alert
 from ledger import (
     append_ledger_entry,
@@ -167,6 +167,20 @@ def get_graph() -> None:
     return get_overview_graph()
 
 # This endpoint is for individual alerts and for its graph 
+# graph at scale (#13): ask for only what will be drawn.
+#   limit    the N most-connected entities (None = all)
+#   include  entity ids that must be in it anyway ("Host:LAPTOP-10"), e.g. what
+#            "See in network graph" is about to light up
+#   only     exactly these entities, for the filtered views
+class GraphViewRequest(BaseModel):
+    limit: int | None = Field(default=None, ge=1, le=20000)
+    include: list[str] = Field(default_factory=list, max_length=5000)
+    only: list[str] | None = Field(default=None, max_length=5000)
+
+@app.post("/graph/view")
+async def graph_view(payload: GraphViewRequest):
+    return await run_in_threadpool(get_graph_view, payload.limit, payload.include, payload.only)
+
 @app.get("/graph/host/{hostname}")
 def get_host_graph_route(hostname: str):
     return get_host_graph(hostname)

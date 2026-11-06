@@ -5,6 +5,8 @@
  * CSS custom properties so everything follows the light/dark theme.
  */
 
+import { useState } from 'react';
+
 const SEVERITIES = ["critical", "high", "medium", "low"];
 
 /* ---- sparkline: one line, no axes, meant to be read as a trend ---- */
@@ -41,6 +43,7 @@ export function Sparkline({ values, stroke = "var(--accent)", width = 110, heigh
 /* ---- stacked area over time, one band per severity ---- */
 
 export function StackedArea({ data, height = 190 }) {
+    const [hover, setHover] = useState(null);
     if (!data || data.length === 0) return null;
 
     const width = 640;
@@ -79,39 +82,84 @@ export function StackedArea({ data, height = 190 }) {
         value: Math.round(niceMax * f),
     }));
 
+    const onMove = (e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const relX = ((e.clientX - rect.left) / rect.width) * width; // into viewBox space
+        let idx = Math.round(((relX - padLeft) / plotW) * (data.length - 1));
+        setHover(Math.max(0, Math.min(data.length - 1, idx)));
+    };
+
+    const hd = hover != null ? data[hover] : null;
+    const hTotal = hd ? (hd.critical || 0) + (hd.high || 0) + (hd.medium || 0) + (hd.low || 0) : 0;
+
     return (
-        <svg className="area-chart" viewBox={`0 0 ${width} ${height}`} role="img"
-             aria-label="Alert volume over the last 24 hours by severity">
-            {gridLines.map(g => (
-                <g key={g.value}>
-                    <line x1={padLeft} x2={width} y1={g.y} y2={g.y} className="chart-grid" />
-                    <text x={padLeft - 6} y={g.y + 3} className="chart-tick" textAnchor="end">
-                        {g.value}
-                    </text>
-                </g>
-            ))}
+        <div className="area-wrap">
+            <svg className="area-chart" viewBox={`0 0 ${width} ${height}`} role="img"
+                 preserveAspectRatio="none"
+                 onMouseMove={onMove} onMouseLeave={() => setHover(null)}
+                 aria-label="Alert volume over time by severity">
+                {gridLines.map(g => (
+                    <g key={g.value}>
+                        <line x1={padLeft} x2={width} y1={g.y} y2={g.y} className="chart-grid" />
+                        <text x={padLeft - 6} y={g.y + 3} className="chart-tick" textAnchor="end">
+                            {g.value}
+                        </text>
+                    </g>
+                ))}
 
-            {bands.map(b => (
-                <polygon key={b.sev} points={b.points} className={`area-band sev-${b.sev}`} />
-            ))}
+                {bands.map(b => (
+                    <polygon key={b.sev} points={b.points} className={`area-band sev-${b.sev}`} />
+                ))}
 
-            {data.map((d, i) =>
-                i % 4 === 0 ? (
-                    <text key={d.label} x={x(i)} y={height - 4} className="chart-tick" textAnchor="middle">
-                        {d.label}
-                    </text>
-                ) : null
+                {hover != null && (
+                    <>
+                        <line x1={x(hover)} x2={x(hover)} y1={0} y2={plotH} className="area-cursor" />
+                        {SEVERITIES.map(sev => (data[hover][sev] > 0
+                            ? <circle key={sev} cx={x(hover)} cy={y(tops[hover][sev])} r="3" className={`area-dot sev-${sev}`} />
+                            : null))}
+                    </>
+                )}
+
+                {data.map((d, i) =>
+                    i % 4 === 0 ? (
+                        <text key={d.label} x={x(i)} y={height - 4} className="chart-tick" textAnchor="middle">
+                            {d.label}
+                        </text>
+                    ) : null
+                )}
+            </svg>
+
+            {hd && (
+                <div className="area-tooltip" style={{ left: `${Math.max(13, Math.min(87, (x(hover) / width) * 100))}%` }}>
+                    <div className="att-label">{hd.label}</div>
+                    {SEVERITIES.map(sev => (
+                        <div className="att-row" key={sev}>
+                            <span className={`att-dot sev-${sev}`} />
+                            <span className="att-key">{sev}</span>
+                            <span className="att-n">{hd[sev] || 0}</span>
+                        </div>
+                    ))}
+                    <div className="att-total">total <b>{hTotal}</b></div>
+                </div>
             )}
-        </svg>
+        </div>
     );
 }
 
 /* ---- labelled horizontal bar, used for techniques and assets ---- */
 
-export function BarRow({ label, sub, value, max, tone }) {
+export function BarRow({ label, sub, value, max, tone, onClick }) {
     const pct = max ? Math.max(2, (value / max) * 100) : 0;
+    const clickable = typeof onClick === "function";
     return (
-        <div className="barrow">
+        <div
+            className={`barrow ${clickable ? "clickable" : ""}`}
+            onClick={onClick}
+            role={clickable ? "button" : undefined}
+            tabIndex={clickable ? 0 : undefined}
+            onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+            title={clickable ? `Filter by ${label}` : undefined}
+        >
             <span className="barrow-label">
                 {label}
                 {sub && <em>{sub}</em>}
@@ -120,6 +168,88 @@ export function BarRow({ label, sub, value, max, tone }) {
                 <span className={`barrow-fill ${tone ? `sev-${tone}` : ""}`} style={{ width: `${pct}%` }} />
             </span>
             <span className="barrow-value">{value}</span>
+        </div>
+    );
+}
+
+/* ---- pie chart: filled wedges + legend, for a few categories ---- */
+
+export function PieChart({ slices, size = 128, onSlice, activeKey }) {
+    const sum = slices.reduce((a, s) => a + s.n, 0);
+    const clickable = typeof onSlice === "function";
+    if (sum === 0) return <div className="empty">No data yet.</div>;
+
+    const cx = size / 2, cy = size / 2, r = size / 2 - 2;
+    let angle = -Math.PI / 2;
+    const wedges = slices.filter(s => s.n > 0).map(s => {
+        const frac = s.n / sum;
+        const a0 = angle, a1 = angle + frac * 2 * Math.PI;
+        angle = a1;
+        const large = frac > 0.5 ? 1 : 0;
+        const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+        const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+        // a single full-circle slice can't be drawn as an arc; draw a circle instead
+        const d = frac >= 0.999
+            ? `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - 0.01} ${cy - r} Z`
+            : `M ${cx} ${cy} L ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z`;
+        return { ...s, d };
+    });
+
+    return (
+        <div className="pie-wrap">
+            <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} className="pie" role="img">
+                {wedges.map(w => (
+                    <path
+                        key={w.key}
+                        d={w.d}
+                        className={`pie-slice ${clickable ? "clickable" : ""} ${activeKey && activeKey !== w.key ? "dim" : ""}`}
+                        style={{ fill: w.fill }}
+                        onClick={clickable ? () => onSlice(w.key) : undefined}
+                    >
+                        <title>{`${w.key}: ${w.n}`}</title>
+                    </path>
+                ))}
+            </svg>
+            <div className="pie-legend">
+                {slices.map(s => (
+                    <div
+                        className={`pie-row ${clickable ? "clickable" : ""} ${activeKey === s.key ? "active" : ""}`}
+                        key={s.key}
+                        onClick={clickable ? () => onSlice(s.key) : undefined}
+                        role={clickable ? "button" : undefined}
+                    >
+                        <span className="pie-swatch" style={{ background: s.fill }} />
+                        <span className="pie-key">{s.key}</span>
+                        <span className="pie-n">{s.n}</span>
+                        <span className="pie-pct">{Math.round((s.n / sum) * 100)}%</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+/* ---- vertical bar / column chart ---- */
+
+export function BarChart({ data, height = 160, onBar }) {
+    const max = Math.max(1, ...data.map(d => d.value));
+    const clickable = typeof onBar === "function";
+    return (
+        <div className="vbar-chart" style={{ height }}>
+            {data.map((d, i) => (
+                <div
+                    className={`vbar-col ${clickable ? "clickable" : ""}`}
+                    key={i}
+                    onClick={clickable ? () => onBar(d) : undefined}
+                    title={`${d.label}: ${d.value}`}
+                >
+                    <span className="vbar-val">{d.value}</span>
+                    <div className="vbar-track">
+                        <div className={`vbar ${d.tone ? `sev-${d.tone}` : ""}`} style={{ height: `${(d.value / max) * 100}%`, background: d.fill }} />
+                    </div>
+                    <span className="vbar-label">{d.label}</span>
+                </div>
+            ))}
         </div>
     );
 }
