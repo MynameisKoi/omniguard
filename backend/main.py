@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response
 from starlette.concurrency import run_in_threadpool
 from events import manager
 from models import Alert, AlertCreate
@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Literal
 from pydantic import BaseModel, Field
 from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_view
+from evidence import store_evidence, list_evidence, get_evidence, get_image, EvidenceError
 from dedup import compute_alert_simhash, find_matching_alert
 from ledger import (
     append_ledger_entry,
@@ -160,6 +161,66 @@ async def get_alert_ocsf(alert_id: str):
     if not alert:
         raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found")
     return alert_to_ocsf(alert)
+
+# ── agent evidence (#3) ─────────────────────────────────────────────
+# VerifyEye's sandboxed agent posts a screenshot + its verdict for every page
+# it checks (phishing or cleared). See evidence.py.
+class EvidenceCreate(BaseModel):
+    url: str = Field(max_length=4096)
+    final_url: str | None = Field(default=None, max_length=4096)
+    title: str | None = Field(default=None, max_length=500)
+    phishing: bool
+    confidence: float = Field(ge=0, le=1)
+    brand: str | None = Field(default=None, max_length=200)
+    off_domain: bool = False
+    credential_form: bool = False
+    # the agent hit a bot check and never saw the real page (no verdict)
+    blocked: bool = False
+    blocked_by: str | None = Field(default=None, max_length=100)
+    form_actions: list[str] = Field(default_factory=list, max_length=50)
+    image_type: Literal["image/jpeg", "image/png"] = "image/jpeg"
+    # base64 of the screenshot; the decoded image is capped at 5 MB in evidence.py
+    image_b64: str = Field(max_length=7_000_000)
+
+@app.post("/evidence", status_code=201)
+async def create_evidence(payload: EvidenceCreate):
+    try:
+        return await run_in_threadpool(store_evidence, payload.model_dump())
+    except EvidenceError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+@app.get("/evidence")
+async def evidence_list(domain: str | None = None, url: str | None = None,
+                        verdict: Literal["phishing", "cleared", "blocked"] | None = None, limit: int = 50):
+    return await run_in_threadpool(list_evidence, domain, url, verdict, max(1, min(limit, 200)))
+
+@app.get("/evidence/{evidence_id}")
+async def evidence_detail(evidence_id: str):
+    doc = await run_in_threadpool(get_evidence, evidence_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    return doc
+
+@app.get("/evidence/{evidence_id}/image")
+async def evidence_image(evidence_id: str):
+    doc = await run_in_threadpool(get_image, evidence_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    # captures never change once stored, so the browser can keep them
+    return Response(content=doc["image"], media_type=doc["image_type"], headers={
+        "Cache-Control": "private, max-age=86400, immutable",
+        "ETag": f'"{doc["image_sha256"]}"',
+    })
+
+@app.get("/alerts/{alert_id}/evidence")
+async def alert_evidence(alert_id: str):
+    """Every capture of the page this alert is about, newest first."""
+    alert = alerts_collection.find_one({"alert_id": alert_id}, {"_id": 0, "target_url": 1})
+    if not alert:
+        raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found")
+    if not alert.get("target_url"):
+        return []
+    return await run_in_threadpool(list_evidence, None, alert["target_url"], None, 20)
 
 # This is for graph to be shown in the frontend 
 @app.get("/graph")

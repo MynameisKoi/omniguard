@@ -9,7 +9,7 @@
 cd "$(dirname "$0")" || exit 1
 
 # site folder -> port. add a new fake site here and it just works.
-SITES="claude:5500 claude-popup:5550 spa-test:5600 google:5700 netflix:5800 tiktok:5900 amazon:6000 apple:6100"
+SITES="claude:5500 claude-popup:5550 spa-test:5600 google:5700 netflix:5800 tiktok:5900 amazon:6200 apple:6100"
 
 if [ "$1" = "stop" ]; then
   for pair in $SITES; do

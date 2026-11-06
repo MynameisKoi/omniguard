@@ -88,7 +88,20 @@ def ensure_schema():
         for rule in rules:
             session.run(rule)
 
-ensure_schema() # making sure that the rules are made before it does any alerts
+# make sure the rules exist before any alerts are written. if Neo4j is down at
+# startup, don't take the whole backend with it: alerts, evidence and the
+# dashboard still work, and the schema is retried on the next graph write
+_schema_ready = False
+
+def _try_schema():
+    global _schema_ready
+    try:
+        ensure_schema()
+        _schema_ready = True
+    except Exception as e:
+        print(f"Neo4j unreachable — graph unavailable until it's back ({e})")
+
+_try_schema()
 
 
 # the actual writes, all inside the transaction tx
@@ -271,6 +284,8 @@ def _write_alert(tx, alert: Alert):
 # what main.py calls. Opens one transaction so an alert is written
 # completely or not at all.
 def ingest_alert(alert: Alert):
+    if not _schema_ready:
+        _try_schema()
     with driver.session() as session:
         session.execute_write(_write_alert, alert)
 
