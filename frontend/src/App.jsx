@@ -5,12 +5,14 @@ import GraphCanvas from './GraphCanvas';
 import GraphExplorer from './GraphExplorer';
 import { timeAgo, exactTime } from './time';
 import { scopeIds } from './graphScope';
+import { label, humanize, MITRE_NAMES } from './labels';
 import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
     ShieldAlert, Globe, Check, TriangleAlert, Inbox, X,
     Siren, Users, Activity, Target, TrendingUp, TrendingDown, Search, Bell,
     UserRound, LogOut, Sparkles, RefreshCw, Send, Bot, Calendar,
+    GitMerge, Gauge, ShieldCheck, ShieldOff, UserCheck, Link2, Copy,
 } from 'lucide-react';
 import { Sparkline, StackedArea, BarRow, PieChart, BarChart, SampleBadge } from './charts';
 
@@ -159,6 +161,10 @@ function App({ user, onLogout, onUserChange }) {
     const [assetTab, setAssetTab] = useState("hosts")
     const [query, setQuery] = useState("")          // live text in the search box
     const [searchTerm, setSearchTerm] = useState(() => { try { return localStorage.getItem("og_searchTerm") || "" } catch { return "" } }) // committed term (Enter)
+    // the page a search / drill-down was opened from, so "Back" returns there
+    const [searchFrom, setSearchFrom] = useState("overview")
+    // the Alerts page's own search box: filters that list as you type
+    const [alertQuery, setAlertQuery] = useState("")
     const [searchKind, setSearchKind] = useState(() => { try { return localStorage.getItem("og_searchKind") || "search" } catch { return "search" } }) // "search" (typed) | "filter" (chart click)
     const [recentSearches, setRecentSearches] = useState(() => {
         try { return JSON.parse(localStorage.getItem("og_recent_searches") || "[]") } catch { return [] }
@@ -287,6 +293,8 @@ function App({ user, onLogout, onUserChange }) {
         return [
             a.host, a.user, a.event_type, a.domain, a.src_ip, a.dst_ip,
             a.source, a.mitre_technique, a.description, a.brand_target, a.status,
+            a.severity, a.target_url, a.action_endpoint, a.process_name, a.alert_id,
+            a.mitre_technique && MITRE[a.mitre_technique],
         ].some(v => v && String(v).toLowerCase().includes(t));
     };
     // live typeahead (as you type) and the committed results (after Enter)
@@ -308,6 +316,7 @@ function App({ user, onLogout, onUserChange }) {
         const t = (term || "").trim();
         if (!t) return;
         setSearchKind("search");
+        if (page !== "search") setSearchFrom(page);
         setSearchTerm(t); setQuery(t); setSelectedId(null); setPage("search"); setMenu(null);
         setRecentSearches(prev => {
             const next = [t, ...prev.filter(x => x.toLowerCase() !== t.toLowerCase())].slice(0, 8);
@@ -321,6 +330,7 @@ function App({ user, onLogout, onUserChange }) {
         const t = (term || "").trim();
         if (!t) return;
         setSearchKind("filter");
+        if (page !== "search") setSearchFrom(page);
         setSearchTerm(t); setQuery(""); setSelectedId(null); setPage("search"); setMenu(null);
     };
 
@@ -368,7 +378,7 @@ function App({ user, onLogout, onUserChange }) {
         }
         return true;
     };
-    const visible = [...scoped].filter(inDateRange).sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
+    const visible = [...scoped].filter(inDateRange).filter(a => matchesTerm(a, alertQuery)).sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
     const selected = alerts.find(a => a.alert_id === selectedId);
     const maxCount = Math.max(1, ...SEVERITIES.map(countOf));
     const engineCounts = countBy("source");
@@ -768,7 +778,24 @@ function App({ user, onLogout, onUserChange }) {
                                 <Stat label="Engines" value="2" tone="good" />
                             </div>
 
-                            <Panel title="Alerts" note={`${visible.length} shown`} flush>
+                            <Panel
+                                title="Alerts"
+                                note={alertQuery.trim() ? `${visible.length} match “${alertQuery.trim()}”` : `${visible.length} shown`}
+                                flush
+                            >
+                                <div className="alerts-search">
+                                    <Search />
+                                    <input
+                                        value={alertQuery}
+                                        onChange={e => setAlertQuery(e.target.value)}
+                                        onKeyDown={e => { if (e.key === "Escape") setAlertQuery("") }}
+                                        placeholder="Search these alerts — host, user, domain, IP, URL, process, technique…"
+                                        aria-label="Search alerts"
+                                    />
+                                    {alertQuery && (
+                                        <button className="search-clear" onClick={() => setAlertQuery("")} aria-label="Clear alert search"><X /></button>
+                                    )}
+                                </div>
                                 <div className="filterbar">
                                     <span className="label">Severity</span>
                                     <button className={`chip ${filter === null ? "on" : ""}`} onClick={() => setFilter(null)}>all</button>
@@ -789,9 +816,16 @@ function App({ user, onLogout, onUserChange }) {
                                 </div>
 
                                 {visible.length === 0 ? (
-                                    <div className="empty">
-                                        No alerts. Post one at <code>localhost:8000/docs</code>.
-                                    </div>
+                                    alertQuery.trim() ? (
+                                        <div className="empty">
+                                            No alerts match “{alertQuery.trim()}”{(filter || dateFilter) ? " with the current filters" : ""}.{" "}
+                                            <button className="link" onClick={() => setAlertQuery("")}>Clear search</button>
+                                        </div>
+                                    ) : (
+                                        <div className="empty">
+                                            No alerts. Post one at <code>localhost:8000/docs</code>.
+                                        </div>
+                                    )
                                 ) : (
                                     <table className="table">
                                         <thead>
@@ -811,7 +845,7 @@ function App({ user, onLogout, onUserChange }) {
                                                         <span className="cell">
                                                             <span className={`cell-mark ${a.severity}`} />
                                                             <span className="cell-main">
-                                                                <span className="cell-top">{a.event_type}</span>
+                                                                <span className="cell-top"><Hl text={a.event_type} q={alertQuery} /></span>
                                                                 <span className="cell-sub">{timeAgo(a.timestamp)} · {exactTime(a.timestamp)}</span>
                                                             </span>
                                                         </span>
@@ -819,12 +853,12 @@ function App({ user, onLogout, onUserChange }) {
                                                     <td><span className={`sev ${a.severity}`}>{a.severity}</span></td>
                                                     <td>
                                                         <span className="cell-main">
-                                                            <span className="cell-top">{a.host}</span>
-                                                            <span className="cell-sub">{a.user || "no user"}</span>
+                                                            <span className="cell-top"><Hl text={a.host} q={alertQuery} /></span>
+                                                            <span className="cell-sub">{a.user ? <Hl text={a.user} q={alertQuery} /> : "no user"}</span>
                                                         </span>
                                                     </td>
-                                                    <td className={`td-mono td-wide ${a.domain ? "td-dim" : "td-faint"}`}>{a.domain || "—"}</td>
-                                                    <td><span className="tag">{a.source}</span></td>
+                                                    <td className={`td-mono td-wide ${a.domain ? "td-dim" : "td-faint"}`}>{a.domain ? <Hl text={a.domain} q={alertQuery} /> : "—"}</td>
+                                                    <td><span className="tag"><Hl text={a.source} q={alertQuery} /></span></td>
                                                     <td className="td-dim">{a.status}</td>
                                                 </tr>
                                             ))}
@@ -1040,7 +1074,7 @@ function App({ user, onLogout, onUserChange }) {
                                         <CardEmpty glyph={Share2} text="Graph is empty" />
                                     ) : (
                                         // follows the dashboard's severity/engine filters like every other panel
-                                        <GraphCanvas compact refreshKey={alerts.length} scope={(filter || srcFilter) ? scoped : null} />
+                                        <GraphCanvas compact refreshKey={alerts.length} scope={(filter || srcFilter) ? scoped : null} limit={150} />
                                     )}
                                 </Panel>
 
@@ -1190,7 +1224,7 @@ function App({ user, onLogout, onUserChange }) {
                                             const hosts = [...new Set(mine.map(a => a.host))];
                                             const last = mine.map(a => new Date(a.timestamp)).sort((x, y) => y - x)[0];
                                             return (
-                                                <tr key={user} className="row-link" onClick={() => { setQuery(user); setFilter(null); setSrcFilter(null); setPage("alerts"); }}>
+                                                <tr key={user} className="row-link" onClick={() => filterBy(user)}>
                                                     <td>
                                                         <span className="cell">
                                                             <span className={`cell-mark ${worst}`} />
@@ -1269,7 +1303,7 @@ function App({ user, onLogout, onUserChange }) {
                                                 const domains = [...new Set(mine.map(a => a.domain).filter(Boolean))];
                                                 const last = mine.map(a => new Date(a.timestamp)).sort((x, y) => y - x)[0];
                                                 return (
-                                                    <tr key={host} className="row-link" onClick={() => { setQuery(host); setFilter(null); setSrcFilter(null); setPage("alerts"); }}>
+                                                    <tr key={host} className="row-link" onClick={() => filterBy(host)}>
                                                         <td className="td-mono">{host}</td>
                                                         <td><span className={`sev ${worst}`}>{worst}</span></td>
                                                         <td className="td-mono td-dim">{n}</td>
@@ -1298,7 +1332,7 @@ function App({ user, onLogout, onUserChange }) {
                                                 const worst = SEVERITIES.find(s => mine.some(a => a.severity === s));
                                                 const hosts = [...new Set(mine.map(a => a.host))];
                                                 return (
-                                                    <tr key={user} className="row-link" onClick={() => { setQuery(user); setFilter(null); setSrcFilter(null); setPage("alerts"); }}>
+                                                    <tr key={user} className="row-link" onClick={() => filterBy(user)}>
                                                         <td className="td-mono">{user}</td>
                                                         <td><span className={`sev ${worst}`}>{worst}</span></td>
                                                         <td className="td-mono td-dim">{n}</td>
@@ -1327,7 +1361,7 @@ function App({ user, onLogout, onUserChange }) {
                                                 const hosts = [...new Set(mine.map(a => a.host))];
                                                 const last = mine.map(a => new Date(a.timestamp)).sort((x, y) => y - x)[0];
                                                 return (
-                                                    <tr key={domain} className="row-link" onClick={() => { setQuery(domain); setFilter(null); setSrcFilter(null); setPage("alerts"); }}>
+                                                    <tr key={domain} className="row-link" onClick={() => filterBy(domain)}>
                                                         <td className="td-mono">{domain}</td>
                                                         <td><span className={`sev ${worst}`}>{worst}</span></td>
                                                         <td className="td-mono td-dim">{n}</td>
@@ -1410,8 +1444,8 @@ function App({ user, onLogout, onUserChange }) {
                     {/* ── search results: a full dashboard scoped to the term ── */}
                     {page === "search" && (
                         <>
-                            <button className="detail-back" onClick={() => setPage("overview")}>
-                                <ArrowRight style={{ transform: "rotate(180deg)" }} /> Back to dashboard
+                            <button className="detail-back" onClick={() => setPage(searchFrom)}>
+                                <ArrowRight style={{ transform: "rotate(180deg)" }} /> Back to {pageTitle(searchFrom).toLowerCase() === "dashboard" ? "dashboard" : pageTitle(searchFrom)}
                             </button>
                             {searchKind === "filter" ? (
                                 <div className="search-result-head">
@@ -1590,7 +1624,13 @@ function AlertActions({ alert }) {
             )}
             {investigation && (
                 <Modal onClose={() => setInvestigation(null)}>
-                    <InvestigationResult data={investigation} onClose={() => setInvestigation(null)} />
+                    <InvestigationResult
+                        data={investigation}
+                        onClose={() => setInvestigation(null)}
+                        onIsolate={isolate}
+                        isolating={busy === "isolate"}
+                        isolated={isolation}
+                    />
                 </Modal>
             )}
             {ocsf && (
@@ -1704,67 +1744,145 @@ function OcsfCard({ data, alertId, onClose }) {
 }
 
 // renders the multi-agent pipeline result (correlation -> triage -> containment)
-function InvestigationResult({ data, onClose }) {
+// the multi-agent investigation, laid out the way it ran: three agents in a
+// row, their verdict, the evidence, and a numbered response plan you can act on
+function InvestigationResult({ data, onClose, onIsolate, isolating, isolated }) {
     const cor = data.correlation || {}, t = data.triage || {}, c = data.containment || {}
-    const score = t.risk_score ?? 0
+    const score = Math.max(0, Math.min(100, t.risk_score ?? 0))
     const tone = score >= 70 ? "critical" : score >= 40 ? "high" : "good"
+    const actions = c.recommended_actions || []
+    const sources = cor.sources || []
+    const vectors = sources.includes("verifyeye") && sources.includes("spectrac2") ? "Phishing and C2"
+        : cor.is_multi_vector ? "Multiple" : "Single"
+    const steps = [
+        { icon: GitMerge, name: "Correlate", result: `${cor.alert_count ?? 0} alerts · ${sources.length} engine${sources.length === 1 ? "" : "s"}` },
+        { icon: Gauge, name: "Triage", result: label(t.classification) || "—" },
+        { icon: ShieldCheck, name: "Contain", result: `${actions.length} action${actions.length === 1 ? "" : "s"} proposed` },
+    ]
+    // score ring: r=30 -> circumference ≈ 188.5
+    const C = 2 * Math.PI * 30
+
     return (
-        <div className="invest-card">
-            <div className="invest-head">
-                <div className="invest-head-text">
-                    <span className="invest-eyebrow"><Sparkles /> AI investigation</span>
-                    <strong>{data.host}</strong>
+        <div className="iv">
+            <header className="iv-head">
+                <div>
+                    <span className="iv-eyebrow"><Sparkles /> AI investigation</span>
+                    <h3 className="iv-host">{data.host}</h3>
                 </div>
                 {onClose && <button className="icon-btn" onClick={onClose} aria-label="Close"><X /></button>}
-            </div>
+            </header>
 
-            <div className={`risk-hero ${tone}`}>
-                <div className="risk-score">
-                    <span className="risk-num">{score}</span>
-                    <span className="risk-den">/100</span>
-                </div>
-                <div className="risk-meta">
-                    <div className="risk-class">{t.classification || "—"}</div>
-                    <div className="risk-bar"><span style={{ width: `${Math.max(0, Math.min(100, score))}%` }} /></div>
-                    <div className="risk-sub">
-                        {t.confidence != null && <span>confidence {Math.round(t.confidence * 100)}%</span>}
-                        {t.false_positive_probability != null && <span>false-positive {Math.round(t.false_positive_probability * 100)}%</span>}
+            <ol className="iv-steps" aria-label="Agents that ran">
+                {steps.map((st, i) => (
+                    <li key={st.name} style={{ "--i": i }}>
+                        <span className="iv-step-ico"><st.icon /></span>
+                        <div><b>{st.name}</b><span>{st.result}</span></div>
+                    </li>
+                ))}
+            </ol>
+
+            <section className={`iv-verdict ${tone}`}>
+                <svg className="iv-ring" viewBox="0 0 72 72" role="img" aria-label={`Risk ${score} out of 100`}>
+                    <circle cx="36" cy="36" r="30" className="iv-ring-track" />
+                    <circle cx="36" cy="36" r="30" className="iv-ring-fill"
+                        strokeDasharray={`${(score / 100) * C} ${C}`} transform="rotate(-90 36 36)" />
+                    <text x="36" y="40" textAnchor="middle">{score}</text>
+                </svg>
+                <div className="iv-verdict-body">
+                    <span className="iv-k">Verdict · risk {score}/100</span>
+                    <div className="iv-verdict-title">{label(t.classification) || "No verdict"}</div>
+                    <div className="iv-meters">
+                        {t.confidence != null && (
+                            <div><span>Confidence</span><i><em style={{ width: `${Math.round(t.confidence * 100)}%` }} /></i><b>{Math.round(t.confidence * 100)}%</b></div>
+                        )}
+                        {t.false_positive_probability != null && (
+                            <div><span>False positive</span><i><em className="fp" style={{ width: `${Math.round(t.false_positive_probability * 100)}%` }} /></i><b>{Math.round(t.false_positive_probability * 100)}%</b></div>
+                        )}
                     </div>
                 </div>
-            </div>
+            </section>
 
-            <div className="ocsf-grid">
-                <div className="ocsf-f"><span className="ocsf-k">Blast radius</span>{cor.blast_radius || "—"}</div>
-                <div className="ocsf-f"><span className="ocsf-k">Multi-vector</span>{cor.is_multi_vector ? "Yes" : "No"}</div>
-                <div className="ocsf-f"><span className="ocsf-k">Alerts correlated</span>{cor.alert_count ?? "—"}</div>
-                <div className="ocsf-f"><span className="ocsf-k">Engines</span>{(cor.sources || []).join(", ") || "—"}</div>
-                <div className="ocsf-f ocsf-wide"><span className="ocsf-k">MITRE techniques</span>{(cor.mitre_techniques || []).join(", ") || "—"}</div>
-            </div>
-
-            <div className="ocsf-section">
-                <div className="ocsf-sec-title">
-                    Recommended actions
-                    {c.requires_human_approval && <span className="tag">needs human approval</span>}
+            <section className="iv-evidence">
+                <div><span className="iv-k">Scope</span><b>{label(cor.blast_radius) || "—"}</b></div>
+                <div><span className="iv-k">Attack vectors</span><b>{vectors}</b></div>
+                <div><span className="iv-k">Alerts correlated</span><b>{cor.alert_count ?? "—"}</b></div>
+                <div className="wide">
+                    <span className="iv-k">Engines</span>
+                    <div className="iv-chips">
+                        {sources.length ? sources.map(src => <span key={src} className={`iv-chip eng eng-${src}`}>{src}</span>) : "—"}
+                    </div>
                 </div>
-                <div className="rec-cards">
-                    {(c.recommended_actions || []).map((a, i) => (
-                        <div className="rec-card" key={i}>
-                            <div className="rec-card-head">
-                                <span className={`urg ${(a.urgency || "").toLowerCase()}`}>{a.urgency}</span>
-                                <strong>{a.action}</strong>
-                                {a.automated_executable && <span className="rec-auto">automatable</span>}
+                <div className="wide">
+                    <span className="iv-k">MITRE ATT&amp;CK</span>
+                    <div className="iv-chips">
+                        {(cor.mitre_techniques || []).length ? cor.mitre_techniques.map(id => (
+                            <span key={id} className="iv-chip"><b>{id}</b>{MITRE_NAMES[id] ? ` ${MITRE_NAMES[id]}` : ""}</span>
+                        )) : "—"}
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <div className="iv-sec-head">
+                    Recommended response
+                    {c.requires_human_approval && <span className="iv-approval"><UserCheck /> Needs your approval</span>}
+                </div>
+                <ol className="iv-actions">
+                    {actions.map((a, i) => (
+                        <li key={i} className="iv-action">
+                            <span className="iv-action-n">{i + 1}</span>
+                            <div className="iv-action-body">
+                                <div className="iv-action-top">
+                                    <b>{label(a.action)}</b>
+                                    <span className={`urg ${(a.urgency || "").toLowerCase()}`}>{humanize(a.urgency)}</span>
+                                </div>
+                                <p>{a.description}</p>
+                                {a.action === "NETWORK_ISOLATION" && onIsolate && (
+                                    isolated
+                                        ? <span className="iv-done"><Check /> Isolation recorded{isolated.simulated ? " (simulated)" : ""}</span>
+                                        : <button className="btn danger iv-act" onClick={onIsolate} disabled={isolating}>
+                                            {isolating ? <><span className="btn-spinner" /> Isolating…</> : <><ShieldOff /> Isolate {data.host}</>}
+                                          </button>
+                                )}
                             </div>
-                            <p className="rec-desc">{a.description}</p>
-                        </div>
+                        </li>
                     ))}
-                </div>
-            </div>
+                </ol>
+            </section>
         </div>
     )
 }
 
 // the decision ledger: lists hash-chained entries and verifies the chain
 const shortHash = (h) => h ? `${h.slice(0, 10)}…${h.slice(-6)}` : "—"
+
+// how each ledger stage looks, and a sentence for each entry
+const LEDGER_STAGES = {
+    AI_ANALYST_CONSULTATION: { icon: Bot, tone: "ai", name: "AI analyst" },
+    EDR_CONTAINMENT: { icon: ShieldOff, tone: "contain", name: "Containment" },
+}
+const ledgerStage = (e) => LEDGER_STAGES[e.stage] || { icon: Activity, tone: "", name: humanize(e.stage) }
+const ledgerTitle = (e) => (e.action_taken || "").startsWith("NETWORK_ISOLATION")
+    ? `Isolated ${e.entity_id}` : label(e.action_taken)
+const ledgerSimulated = (e) => (e.action_taken || "").endsWith("_SIMULATED")
+const ledgerByAI = (e) => (e.analyst_user || "").startsWith("system")
+function dayLabel(ts) {
+    const d = new Date(ts); if (isNaN(d)) return "Undated"
+    const start = new Date(); start.setHours(0, 0, 0, 0)
+    if (d >= start) return "Today"
+    if (d >= start - 864e5) return "Yesterday"
+    return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })
+}
+
+function LedgerActor({ entry }) {
+    const ai = ledgerByAI(entry)
+    return (
+        <span className={`lg-actor ${ai ? "ai" : "human"}`}>
+            {ai ? <Bot /> : <UserRound />}
+            {ai ? "AI" : entry.analyst_user}
+        </span>
+    )
+}
 
 function LedgerPage() {
     const [records, setRecords] = useState([])
@@ -1805,78 +1923,132 @@ function LedgerPage() {
             .finally(() => setVerifying(false))
     }
 
+    // newest first; block numbers count up from the genesis entry
+    const blockNo = (e) => records.length - records.findIndex(r => r.ledger_id === e.ledger_id)
+
     if (selected) {
         return (
             <LedgerEntryDetail
                 entry={selected}
                 all={records}
                 verify={verify}
-                blockNo={records.length - records.findIndex(r => r.ledger_id === selected.ledger_id)}
+                blockNo={blockNo(selected)}
                 onBack={() => setSelected(null)}
                 onOpen={setSelected}
             />
         )
     }
 
+    const byAI = records.filter(ledgerByAI).length
+    const state = verifying ? "checking" : !verify ? "unknown" : verify.valid ? "valid" : "broken"
+    const days = []
+    records.forEach(e => {
+        const d = dayLabel(e.timestamp)
+        if (!days.length || days[days.length - 1].label !== d) days.push({ label: d, items: [] })
+        days[days.length - 1].items.push(e)
+    })
+
     return (
-        <Panel title="Decision ledger" note="immutable SHA-256 hash-chained audit trail" action="Refresh" actionIcon={RefreshCw} onAction={load}>
-                {err && <div className="login-error">{err}</div>}
-                <div className="actions" style={{ marginBottom: 14 }}>
-                    <button className="btn" onClick={runVerify} disabled={verifying}>
-                        {verifying ? "Verifying…" : "Verify chain integrity"}
-                    </button>
-                    {verify && (
-                        <span className={`verify-badge ${verify.valid ? "good" : "bad"}`}>
-                            {verify.valid
-                                ? `✓ Verified — ${verify.records_checked} blocks, no tampering`
-                                : `✗ Tamper detected (id ${verify.failing_ledger_id})`}
+        <Panel title="Decision ledger" note="every AI and analyst decision, hash-chained" action="Refresh" actionIcon={RefreshCw} onAction={load}>
+            {err && <div className="login-error">{err}</div>}
+
+            <section className={`lg-summary ${state}`}>
+                <div className="lg-integrity">
+                    <span className="lg-integrity-ico">
+                        {state === "valid" ? <ShieldCheck /> : state === "broken" ? <ShieldAlert /> : <Link2 />}
+                    </span>
+                    <div>
+                        <b>
+                            {state === "valid" ? "Chain verified"
+                                : state === "broken" ? "Tampering detected"
+                                : state === "checking" ? "Checking every block…"
+                                : "Integrity not checked yet"}
+                        </b>
+                        <span>
+                            {state === "valid" ? `${verify.records_checked} blocks re-hashed — nothing has been altered.`
+                                : state === "broken" ? `The chain breaks at entry ${verify.failing_ledger_id}.`
+                                : "Re-hash every entry and check each one links to the one before it."}
                         </span>
-                    )}
-                </div>
-                {loading ? <div className="panel-loading"><div className="spinner" /></div> : records.length === 0 ? (
-                    <p className="note">No ledger entries yet. Isolate a host or ask the AI analyst to create one.</p>
-                ) : (
-                    <div className="chain-list">
-                        {records.map((e, i) => (
-                            <button className="chain-row" key={e.ledger_id || i} onClick={() => setSelected(e)}>
-                                <span className="chain-ico"><Activity /></span>
-                                <div className="chain-col chain-id">
-                                    <span className="chain-hash">{shortHash(e.entry_hash)}</span>
-                                    <span className="chain-sub">{e.timestamp ? timeAgo(e.timestamp) : "—"}</span>
-                                </div>
-                                <div className="chain-col">
-                                    <span className="chain-line"><span className="chain-k">Stage</span> {e.stage}</span>
-                                    <span className="chain-line chain-sub">{e.action_taken}</span>
-                                </div>
-                                <div className="chain-col">
-                                    <span className="chain-line"><span className="chain-k">Entity</span> {e.entity_type}: {e.entity_id}</span>
-                                    <span className="chain-line chain-sub">by {e.analyst_user}</span>
-                                </div>
-                                <span className="chain-block">#{records.length - i}</span>
-                            </button>
-                        ))}
                     </div>
-                )}
+                    <button className="btn" onClick={runVerify} disabled={verifying}>
+                        {verifying ? <><span className="btn-spinner" /> Verifying…</> : "Verify chain"}
+                    </button>
+                </div>
+                <dl className="lg-stats">
+                    <div><dt>Blocks</dt><dd>{records.length}</dd></div>
+                    <div><dt>By AI</dt><dd>{byAI}</dd></div>
+                    <div><dt>By analysts</dt><dd>{records.length - byAI}</dd></div>
+                    <div><dt>Latest</dt><dd>{records[0]?.timestamp ? timeAgo(records[0].timestamp) : "—"}</dd></div>
+                </dl>
+            </section>
+
+            {loading ? <div className="panel-loading"><div className="spinner" /></div> : records.length === 0 ? (
+                <p className="note">No ledger entries yet. Isolate a host or ask the AI analyst to create one.</p>
+            ) : (
+                <div className={`lg-chain ${state === "valid" ? "verified" : ""}`}>
+                    {days.map(day => (
+                        <div className="lg-day" key={day.label}>
+                            <div className="lg-day-label">{day.label}</div>
+                            {day.items.map(e => {
+                                const st = ledgerStage(e)
+                                return (
+                                    <button className={`lg-block ${st.tone}`} key={e.ledger_id} onClick={() => setSelected(e)}>
+                                        <span className="lg-node"><st.icon /></span>
+                                        <div className="lg-main">
+                                            <div className="lg-title">
+                                                {ledgerTitle(e)}
+                                                {ledgerSimulated(e) && <span className="tag">simulated</span>}
+                                            </div>
+                                            <div className="lg-meta">
+                                                <LedgerActor entry={e} />
+                                                <span>{st.name}</span>
+                                                <span title={exactTime(e.timestamp)}>{e.timestamp ? timeAgo(e.timestamp) : "—"}</span>
+                                            </div>
+                                        </div>
+                                        <div className="lg-side">
+                                            <span className="lg-no">#{blockNo(e)}</span>
+                                            <span className="lg-hash">{shortHash(e.entry_hash)}</span>
+                                        </div>
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    ))}
+                </div>
+            )}
         </Panel>
     )
 }
 
-// Etherscan-style detail for one ledger entry ("transaction")
+// one ledger entry: what was decided and by whom, then the proof (hashes) and
+// its neighbours in the chain
 function LedgerEntryDetail({ entry, all, verify, blockNo, onBack, onOpen }) {
     const prev = all.find(e => e.entry_hash === entry.prev_hash)
+    const next = all.find(e => e.prev_hash === entry.entry_hash)
     const isGenesis = /^0+$/.test(entry.prev_hash || "")
-    const copy = (t) => { try { navigator.clipboard.writeText(t) } catch (e) {} }
+    const [copied, setCopied] = useState(null)
+    const copy = (t, which) => {
+        try { navigator.clipboard.writeText(t); setCopied(which); setTimeout(() => setCopied(null), 1200) } catch { /* no clipboard */ }
+    }
     const hasContext = entry.input_context && Object.keys(entry.input_context).length > 0
+    const st = ledgerStage(entry)
 
     return (
         <>
             <button className="detail-back" onClick={onBack}><ArrowRight style={{ transform: "rotate(180deg)" }} /> Decision ledger</button>
-            <Panel title={`Ledger entry · block #${blockNo}`} note="replayable, hash-chained decision record">
-                <div className="tx-head">
-                    <span className="chain-ico big"><Activity /></span>
-                    <div className="tx-head-main">
-                        <div className="tx-hash mono" onClick={() => copy(entry.entry_hash)} title="click to copy">{entry.entry_hash}</div>
-                        <div className="chain-sub">{entry.timestamp ? `${new Date(entry.timestamp).toLocaleString()} · ${timeAgo(entry.timestamp)}` : "—"}</div>
+            <Panel title={`Block #${blockNo}`} note="replayable, hash-chained decision record">
+                <div className={`lg-detail-head ${st.tone}`}>
+                    <span className="lg-node big"><st.icon /></span>
+                    <div>
+                        <div className="lg-title big">
+                            {ledgerTitle(entry)}
+                            {ledgerSimulated(entry) && <span className="tag">simulated</span>}
+                        </div>
+                        <div className="lg-meta">
+                            <LedgerActor entry={entry} />
+                            <span>{st.name}</span>
+                            <span>{entry.timestamp ? `${exactTime(entry.timestamp)} · ${timeAgo(entry.timestamp)}` : "—"}</span>
+                        </div>
                     </div>
                     {verify && (
                         <span className={`verify-badge ${verify.valid ? "good" : "bad"}`}>
@@ -1885,31 +2057,49 @@ function LedgerEntryDetail({ entry, all, verify, blockNo, onBack, onOpen }) {
                     )}
                 </div>
 
+                {entry.reasoning_output && (
+                    <div className="lg-reason">
+                        <span className="iv-k">Reasoning</span>
+                        <p>{entry.reasoning_output}</p>
+                    </div>
+                )}
+
                 <div className="tx-grid">
-                    <div className="tx-row"><span className="tx-k">Stage</span><span>{entry.stage}</span></div>
-                    <div className="tx-row"><span className="tx-k">Action</span><span>{entry.action_taken}</span></div>
-                    <div className="tx-row"><span className="tx-k">Entity</span><span>{entry.entity_type}: {entry.entity_id}</span></div>
-                    <div className="tx-row"><span className="tx-k">Actor</span><span>{entry.analyst_user}</span></div>
+                    <div className="tx-row"><span className="tx-k">Entity</span><span>{humanize(entry.entity_type)} · {entry.entity_id}</span></div>
                     <div className="tx-row"><span className="tx-k">Incident</span><span>{entry.incident_id || "—"}</span></div>
-                    <div className="tx-row"><span className="tx-k">Reasoning</span><span>{entry.reasoning_output}</span></div>
-                    <div className="tx-row"><span className="tx-k">Entry hash</span><span className="mono wrap">{entry.entry_hash}</span></div>
-                    <div className="tx-row">
-                        <span className="tx-k">Previous hash</span>
-                        {isGenesis ? (
-                            <span className="mono wrap">{entry.prev_hash} <span className="tag">genesis</span></span>
-                        ) : prev ? (
-                            <button className="link mono wrap" onClick={() => onOpen(prev)}>{entry.prev_hash} ↗</button>
-                        ) : (
-                            <span className="mono wrap">{entry.prev_hash}</span>
-                        )}
+                    <div className="tx-row"><span className="tx-k">Recorded as</span><span className="mono">{entry.stage} / {entry.action_taken}</span></div>
+                </div>
+
+                <div className="lg-proof">
+                    <div className="iv-sec-head">Proof</div>
+                    <div className="lg-proof-row">
+                        <span className="tx-k">This block</span>
+                        <button className="mono wrap lg-copy" onClick={() => copy(entry.entry_hash, "this")} title="Copy hash">
+                            {entry.entry_hash} <Copy />{copied === "this" && <em>copied</em>}
+                        </button>
+                    </div>
+                    <div className="lg-proof-row">
+                        <span className="tx-k">Links to</span>
+                        {isGenesis
+                            ? <span className="mono wrap">{entry.prev_hash} <span className="tag">genesis</span></span>
+                            : <span className="mono wrap">{entry.prev_hash}</span>}
                     </div>
                 </div>
 
+                <nav className="lg-nav" aria-label="Neighbouring blocks">
+                    <button className="btn" disabled={!prev} onClick={() => prev && onOpen(prev)}>
+                        <ArrowRight style={{ transform: "rotate(180deg)" }} /> {prev ? `Block #${blockNo - 1}` : "Genesis"}
+                    </button>
+                    <button className="btn" disabled={!next} onClick={() => next && onOpen(next)}>
+                        {next ? `Block #${blockNo + 1}` : "Latest block"} <ArrowRight />
+                    </button>
+                </nav>
+
                 {hasContext && (
-                    <>
-                        <div className="rec-title">Input context</div>
+                    <details className="lg-context">
+                        <summary>Input context the decision was made from</summary>
                         <pre className="code-block">{JSON.stringify(entry.input_context, null, 2)}</pre>
-                    </>
+                    </details>
                 )}
             </Panel>
         </>
@@ -2643,6 +2833,16 @@ function RankList({ data }) {
             ))}
         </div>
     );
+}
+
+// highlight where the search text appears in a value
+function Hl({ text, q }) {
+    const t = (q || "").trim();
+    const str = String(text ?? "");
+    if (!t) return str;
+    const i = str.toLowerCase().indexOf(t.toLowerCase());
+    if (i < 0) return str;
+    return <>{str.slice(0, i)}<mark className="hl-match">{str.slice(i, i + t.length)}</mark>{str.slice(i + t.length)}</>;
 }
 
 function KV({ k, v }) {
