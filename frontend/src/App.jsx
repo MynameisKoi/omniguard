@@ -770,12 +770,18 @@ function App({ user, onLogout, onUserChange }) {
                                     ))}
                                     <span className="filterbar-sep" />
                                     <span className="label">When</span>
-                                    <button className={`chip ${dateFilter === null ? "on" : ""}`} onClick={() => setDateFilter(null)}>all time</button>
-                                    {[["today", "today"], ["yesterday", "yesterday"], ["7d", "last 7 days"], ["30d", "last 30 days"], ["custom", "custom…"]].map(([k, label]) => (
-                                        <button key={k} className={`chip ${dateFilter === k ? "on" : ""}`} onClick={() => setDateFilter(k)}>
-                                            {label}
-                                        </button>
-                                    ))}
+                                    <select
+                                        className="date-select"
+                                        value={dateFilter || "all"}
+                                        onChange={e => setDateFilter(e.target.value === "all" ? null : e.target.value)}
+                                    >
+                                        <option value="all">All time</option>
+                                        <option value="today">Today</option>
+                                        <option value="yesterday">Yesterday</option>
+                                        <option value="7d">Last 7 days</option>
+                                        <option value="30d">Last 30 days</option>
+                                        <option value="custom">Custom range…</option>
+                                    </select>
                                     {dateFilter === "custom" && (
                                         <span className="date-range">
                                             <input type="date" className="date-input" value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)} />

@@ -3018,3 +3018,14 @@ button { font: inherit; color: inherit; }
 }
 .date-input:focus { outline: none; border-color: var(--accent); }
 .dropdown.notif-dd { background: var(--surface); z-index: 160; }
+
+/* alerts filter bar: wrap instead of overflow; date as a clean dropdown */
+.filterbar { flex-wrap: wrap; row-gap: 8px; }
+.filterbar .chip { white-space: nowrap; }
+.date-select {
+    padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--raised); color: var(--text); font-size: var(--t-xs);
+    font-family: inherit; font-weight: 500; cursor: pointer;
+}
+.date-select:hover { border-color: var(--accent-line); }
+.date-select:focus { outline: none; border-color: var(--accent); }
