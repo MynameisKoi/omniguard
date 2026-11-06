@@ -2289,6 +2289,53 @@ function ScopedDashboard({ alerts, term, onOpen }) {
 }
 
 /* one segmented control: "All" plus every option, joined into a single pill */
+// themed month calendar with start→end range selection (no native date widget)
+function RangeCalendar({ from, to, onChange }) {
+    const [view, setView] = useState(() => {
+        const d = from ? new Date(from + "T00:00") : new Date();
+        return { y: d.getFullYear(), m: d.getMonth() };
+    });
+    const iso = (d) => `${view.y}-${String(view.m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const pick = (ds) => {
+        if (!from || (from && to)) onChange(ds, "");          // start a new range
+        else if (ds < from) onChange(ds, from);                // picked an earlier end → swap
+        else onChange(from, ds);                               // complete the range
+    };
+    const first = new Date(view.y, view.m, 1);
+    const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < first.getDay(); i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+    const step = (n) => setView(v => {
+        const m = v.m + n;
+        return m < 0 ? { y: v.y - 1, m: 11 } : m > 11 ? { y: v.y + 1, m: 0 } : { y: v.y, m };
+    });
+
+    return (
+        <div className="cal">
+            <div className="cal-head">
+                <button type="button" className="cal-nav" onClick={() => step(-1)} aria-label="Previous month"><ChevronDown style={{ transform: "rotate(90deg)" }} /></button>
+                <span className="cal-title">{new Date(view.y, view.m).toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
+                <button type="button" className="cal-nav" onClick={() => step(1)} aria-label="Next month"><ChevronDown style={{ transform: "rotate(-90deg)" }} /></button>
+            </div>
+            <div className="cal-grid cal-dow">{["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <span key={i}>{d}</span>)}</div>
+            <div className="cal-grid">
+                {cells.map((d, i) => d === null
+                    ? <span key={i} />
+                    : (() => {
+                        const ds = iso(d);
+                        const sel = ds === from || ds === to;
+                        const mid = from && to && ds > from && ds < to;
+                        return (
+                            <button type="button" key={i} className={`cal-day ${sel ? "sel" : ""} ${mid ? "mid" : ""}`} onClick={() => pick(ds)}>{d}</button>
+                        );
+                    })()
+                )}
+            </div>
+        </div>
+    );
+}
+
 // GA-style date range picker: one trigger button → popover with presets + custom range
 function DateRangePicker({ value, from, to, onPreset, onCustom }) {
     const [open, setOpen] = useState(false);
@@ -2340,13 +2387,13 @@ function DateRangePicker({ value, from, to, onPreset, onCustom }) {
                     </div>
                     <div className="drp-custom">
                         <div className="drp-custom-title">Custom range</div>
-                        <label className="drp-field"><span>Start</span>
-                            <input type="date" value={cFrom} max={cTo || undefined} onChange={e => setCFrom(e.target.value)} />
-                        </label>
-                        <label className="drp-field"><span>End</span>
-                            <input type="date" value={cTo} min={cFrom || undefined} onChange={e => setCTo(e.target.value)} />
-                        </label>
-                        <button className="drp-apply" disabled={!cFrom || !cTo} onClick={() => { onCustom(cFrom, cTo); setOpen(false); }}>Apply</button>
+                        <div className="drp-range-labels">
+                            <div className={`drp-rl ${cFrom && !cTo ? "active" : ""}`}><span>Start</span><b>{cFrom ? fmt(cFrom) : "—"}</b></div>
+                            <span className="drp-rl-dash">→</span>
+                            <div className="drp-rl"><span>End</span><b>{cTo ? fmt(cTo) : "—"}</b></div>
+                        </div>
+                        <RangeCalendar from={cFrom} to={cTo} onChange={(f, t) => { setCFrom(f); setCTo(t); }} />
+                        <button className="drp-apply" disabled={!cFrom || !cTo} onClick={() => { onCustom(cFrom, cTo); setOpen(false); }}>Apply range</button>
                     </div>
                 </div>
             )}
