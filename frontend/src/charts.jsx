@@ -5,6 +5,8 @@
  * CSS custom properties so everything follows the light/dark theme.
  */
 
+import { useState } from 'react';
+
 const SEVERITIES = ["critical", "high", "medium", "low"];
 
 /* ---- sparkline: one line, no axes, meant to be read as a trend ---- */
@@ -41,6 +43,7 @@ export function Sparkline({ values, stroke = "var(--accent)", width = 110, heigh
 /* ---- stacked area over time, one band per severity ---- */
 
 export function StackedArea({ data, height = 190 }) {
+    const [hover, setHover] = useState(null);
     if (!data || data.length === 0) return null;
 
     const width = 640;
@@ -79,30 +82,67 @@ export function StackedArea({ data, height = 190 }) {
         value: Math.round(niceMax * f),
     }));
 
+    const onMove = (e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const relX = ((e.clientX - rect.left) / rect.width) * width; // into viewBox space
+        let idx = Math.round(((relX - padLeft) / plotW) * (data.length - 1));
+        setHover(Math.max(0, Math.min(data.length - 1, idx)));
+    };
+
+    const hd = hover != null ? data[hover] : null;
+    const hTotal = hd ? (hd.critical || 0) + (hd.high || 0) + (hd.medium || 0) + (hd.low || 0) : 0;
+
     return (
-        <svg className="area-chart" viewBox={`0 0 ${width} ${height}`} role="img"
-             aria-label="Alert volume over the last 24 hours by severity">
-            {gridLines.map(g => (
-                <g key={g.value}>
-                    <line x1={padLeft} x2={width} y1={g.y} y2={g.y} className="chart-grid" />
-                    <text x={padLeft - 6} y={g.y + 3} className="chart-tick" textAnchor="end">
-                        {g.value}
-                    </text>
-                </g>
-            ))}
+        <div className="area-wrap">
+            <svg className="area-chart" viewBox={`0 0 ${width} ${height}`} role="img"
+                 preserveAspectRatio="none"
+                 onMouseMove={onMove} onMouseLeave={() => setHover(null)}
+                 aria-label="Alert volume over time by severity">
+                {gridLines.map(g => (
+                    <g key={g.value}>
+                        <line x1={padLeft} x2={width} y1={g.y} y2={g.y} className="chart-grid" />
+                        <text x={padLeft - 6} y={g.y + 3} className="chart-tick" textAnchor="end">
+                            {g.value}
+                        </text>
+                    </g>
+                ))}
 
-            {bands.map(b => (
-                <polygon key={b.sev} points={b.points} className={`area-band sev-${b.sev}`} />
-            ))}
+                {bands.map(b => (
+                    <polygon key={b.sev} points={b.points} className={`area-band sev-${b.sev}`} />
+                ))}
 
-            {data.map((d, i) =>
-                i % 4 === 0 ? (
-                    <text key={d.label} x={x(i)} y={height - 4} className="chart-tick" textAnchor="middle">
-                        {d.label}
-                    </text>
-                ) : null
+                {hover != null && (
+                    <>
+                        <line x1={x(hover)} x2={x(hover)} y1={0} y2={plotH} className="area-cursor" />
+                        {SEVERITIES.map(sev => (data[hover][sev] > 0
+                            ? <circle key={sev} cx={x(hover)} cy={y(tops[hover][sev])} r="3" className={`area-dot sev-${sev}`} />
+                            : null))}
+                    </>
+                )}
+
+                {data.map((d, i) =>
+                    i % 4 === 0 ? (
+                        <text key={d.label} x={x(i)} y={height - 4} className="chart-tick" textAnchor="middle">
+                            {d.label}
+                        </text>
+                    ) : null
+                )}
+            </svg>
+
+            {hd && (
+                <div className="area-tooltip" style={{ left: `${Math.max(13, Math.min(87, (x(hover) / width) * 100))}%` }}>
+                    <div className="att-label">{hd.label}</div>
+                    {SEVERITIES.map(sev => (
+                        <div className="att-row" key={sev}>
+                            <span className={`att-dot sev-${sev}`} />
+                            <span className="att-key">{sev}</span>
+                            <span className="att-n">{hd[sev] || 0}</span>
+                        </div>
+                    ))}
+                    <div className="att-total">total <b>{hTotal}</b></div>
+                </div>
             )}
-        </svg>
+        </div>
     );
 }
 

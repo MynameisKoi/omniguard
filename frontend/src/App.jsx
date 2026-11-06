@@ -360,6 +360,17 @@ function App({ user, onLogout, onUserChange }) {
     const STATUSES = ["new", "triaged", "resolved"];
     const statusCounts = STATUSES.map(s => [s, scoped.filter(a => a.status === s).length]);
     const statusMax = Math.max(1, ...statusCounts.map(s => s[1]));
+    // more charts: top targeted domains, alerts by user, confidence distribution
+    const domains = topN("domain", 5);
+    const domainMax = Math.max(1, ...domains.map(d => d[1]));
+    const users = topN("user", 5);
+    const userMax = Math.max(1, ...users.map(u => u[1]));
+    const CONF_BANDS = [[0, 20], [20, 40], [40, 60], [60, 80], [80, 100]];
+    const confBuckets = CONF_BANDS.map(([lo, hi]) => {
+        const n = scoped.filter(a => a.confidence != null && a.confidence * 100 >= lo && (hi === 100 ? a.confidence * 100 <= 100 : a.confidence * 100 < hi)).length;
+        return [`${lo}–${hi}%`, n];
+    });
+    const confMax = Math.max(1, ...confBuckets.map(c => c[1]));
 
     const byNewest = [...scoped].sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
     const recent = byNewest.slice(0, 7);
@@ -938,6 +949,40 @@ function App({ user, onLogout, onUserChange }) {
                                                 max={statusMax}
                                                 tone={s === "resolved" ? "low" : s === "triaged" ? "medium" : "critical"}
                                             />
+                                        ))}
+                                    </div>
+                                </Panel>
+                            </div>
+
+                            <div className="grid-3">
+                                <Panel title="Top targeted domains" note="by alert count">
+                                    {domains.length === 0 ? (
+                                        <div className="empty">No domains seen.</div>
+                                    ) : (
+                                        <div className="barrows">
+                                            {domains.map(([d, n]) => (
+                                                <BarRow key={d} label={d} value={n} max={domainMax} tone="high" onClick={() => filterBy(d)} />
+                                            ))}
+                                        </div>
+                                    )}
+                                </Panel>
+
+                                <Panel title="Alerts by user" note="most affected accounts">
+                                    {users.length === 0 ? (
+                                        <div className="empty">No users attributed.</div>
+                                    ) : (
+                                        <div className="barrows">
+                                            {users.map(([u, n]) => (
+                                                <BarRow key={u} label={u} value={n} max={userMax} onClick={() => filterBy(u)} />
+                                            ))}
+                                        </div>
+                                    )}
+                                </Panel>
+
+                                <Panel title="Confidence distribution" note="detector confidence">
+                                    <div className="barrows">
+                                        {confBuckets.map(([band, n]) => (
+                                            <BarRow key={band} label={band} value={n} max={confMax} tone="low" />
                                         ))}
                                     </div>
                                 </Panel>
@@ -2125,6 +2170,10 @@ function ScopedDashboard({ alerts, term, onOpen }) {
     const engineMax = Math.max(1, ...engines.map(e => e[1]));
     const brands = topN("brand_target", 5);
     const brandMax = Math.max(1, ...brands.map(b => b[1]));
+    const domains = topN("domain", 5);
+    const domainMax = Math.max(1, ...domains.map(d => d[1]));
+    const users = topN("user", 5);
+    const userMax = Math.max(1, ...users.map(u => u[1]));
     const sorted = [...view].sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
 
     return (
@@ -2153,7 +2202,12 @@ function ScopedDashboard({ alerts, term, onOpen }) {
                     <StackedArea data={activity} />
                 </Panel>
                 <Panel title="Severity distribution" note={`${view.length} alerts`}>
-                    <Donut total={view.length} slices={SEV.map(s => ({ key: s, n: vcountOf(s) }))} />
+                    <Donut
+                        total={alerts.length}
+                        slices={SEV.map(s => ({ key: s, n: countOf(s) }))}
+                        onSlice={(key) => setSevFilter(f => f === key ? null : key)}
+                        activeKey={sevFilter}
+                    />
                 </Panel>
                 <Panel title="Detections by engine" note="sources">
                     {engines.length === 0 ? <div className="empty">No detections.</div> : (
@@ -2167,15 +2221,29 @@ function ScopedDashboard({ alerts, term, onOpen }) {
                 </Panel>
             </div>
 
-            {brands.length > 0 && (
-                <div className="grid-1">
-                    <Panel title="Impersonated brands in these results" note="phishing targets">
+            <div className="grid-3">
+                <Panel title="Top targeted domains" note="by alert count">
+                    {domains.length === 0 ? <div className="empty">No domains.</div> : (
+                        <div className="barrows">
+                            {domains.map(([d, n]) => (<BarRow key={d} label={d} value={n} max={domainMax} tone="high" />))}
+                        </div>
+                    )}
+                </Panel>
+                <Panel title="Alerts by user" note="most affected">
+                    {users.length === 0 ? <div className="empty">No users attributed.</div> : (
+                        <div className="barrows">
+                            {users.map(([u, n]) => (<BarRow key={u} label={u} value={n} max={userMax} />))}
+                        </div>
+                    )}
+                </Panel>
+                <Panel title="Impersonated brands" note="phishing targets">
+                    {brands.length === 0 ? <div className="empty">None in these results.</div> : (
                         <div className="barrows">
                             {brands.map(([b, n]) => (<BarRow key={b} label={b} value={n} max={brandMax} tone="high" />))}
                         </div>
-                    </Panel>
-                </div>
-            )}
+                    )}
+                </Panel>
+            </div>
 
             <div className="grid-1">
                 <Panel title="All matching alerts" note={`${sorted.length} alert${sorted.length === 1 ? "" : "s"}`} flush>

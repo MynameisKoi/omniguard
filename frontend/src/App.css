@@ -2909,3 +2909,31 @@ button { font: inherit; color: inherit; }
 
 /* spinner scoped to the content region (sidebar + topbar stay visible) */
 .content-spinner { display: grid; place-items: center; min-height: 65vh; }
+
+/* interactive threat-activity chart: hover guide + tooltip */
+.area-wrap { position: relative; }
+.area-chart { width: 100%; display: block; cursor: crosshair; }
+.area-cursor { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
+.area-dot { stroke: var(--surface); stroke-width: 1.5; }
+.area-dot.sev-critical { fill: var(--fill-critical); }
+.area-dot.sev-high { fill: var(--fill-high); }
+.area-dot.sev-medium { fill: var(--fill-medium); }
+.area-dot.sev-low { fill: var(--fill-low); }
+.area-tooltip {
+    position: absolute; top: 6px; transform: translateX(-50%);
+    min-width: 128px; padding: 8px 10px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 8px; box-shadow: var(--shadow-lg);
+    pointer-events: none; z-index: 5; font-size: 12px;
+}
+.att-label { font-weight: 600; margin-bottom: 6px; color: var(--text); }
+.att-row { display: flex; align-items: center; gap: 7px; padding: 1px 0; color: var(--dim); }
+.att-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.att-dot.sev-critical { background: var(--fill-critical); }
+.att-dot.sev-high { background: var(--fill-high); }
+.att-dot.sev-medium { background: var(--fill-medium); }
+.att-dot.sev-low { background: var(--fill-low); }
+.att-key { text-transform: capitalize; }
+.att-n { margin-left: auto; font-family: ui-monospace, Menlo, monospace; color: var(--text); }
+.att-total { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--line-soft); color: var(--faint); }
+.att-total b { color: var(--text); }
