@@ -17,6 +17,9 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 API_BASE_URL = os.environ.get("OMNIGUARD_API_URL", "http://localhost:8000")
+# the backend requires sign-in for alerts / graphs / isolation. machine clients
+# use a service token: set the same value in the backend's API_SERVICE_TOKENS
+API_TOKEN = os.environ.get("OMNIGUARD_API_TOKEN", "")
 
 TOOLS = [
     {
@@ -81,7 +84,8 @@ def execute_tool(name: str, arguments: Dict[str, Any], client: Optional[httpx.Cl
     """Dispatches tool execution against the OmniGuard SOC REST API."""
     should_close = False
     if client is None:
-        client = httpx.Client(base_url=API_BASE_URL, timeout=10.0)
+        headers = {"Authorization": f"Bearer {API_TOKEN}"} if API_TOKEN else {}
+        client = httpx.Client(base_url=API_BASE_URL, timeout=10.0, headers=headers)
         should_close = True
 
     try:

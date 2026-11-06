@@ -1,5 +1,5 @@
 import "./App.css"
-import { API_URL, WS_URL } from "./config"
+import { api, wsUrl } from "./api"
 import { useState, useEffect, useRef, Fragment } from 'react';
 import GraphCanvas from './GraphCanvas';
 import GraphExplorer from './GraphExplorer';
@@ -205,7 +205,7 @@ function App({ user, onLogout, onUserChange }) {
 
     // we will fetch the alerts from backend
     useEffect(() => {
-        fetch(`${API_URL}/alerts`)
+        api(`/alerts`)
         .then((res) => res.json())
         .then((data) => setAlerts(data))
         .catch(err => setError(err.message))
@@ -215,7 +215,7 @@ function App({ user, onLogout, onUserChange }) {
     useEffect(() => {
         let alive = true
         const pull = () => {
-            fetch(`${API_URL}/status`)
+            api(`/status`)
             .then(res => res.json())
             .then(data => {
                 if (alive) setServices(STATUS_ROWS.map(([key, name]) => ({ name, ok: !!data[key] })))
@@ -237,12 +237,12 @@ function App({ user, onLogout, onUserChange }) {
         let dropped = false
 
         const connect = () => {
-            socket = new WebSocket(`${WS_URL}/ws/alerts`)
+            socket = new WebSocket(wsUrl("/ws/alerts"))
 
             socket.onopen = () => {
                 setError(null)
                 if (dropped) {
-                    fetch(`${API_URL}/alerts`).then(res => res.json()).then(setAlerts).catch(() => {})
+                    api(`/alerts`).then(res => res.json()).then(setAlerts).catch(() => {})
                 }
             }
 
@@ -541,7 +541,7 @@ function App({ user, onLogout, onUserChange }) {
         setAiError(null)
 
         try {
-            const res = await fetch(`${API_URL}/ai/summary`)
+            const res = await api(`/ai/summary`)
             if (!res.ok) throw new Error(res.status)
             const data = await res.json()
             setAiText(data.triage)
@@ -558,7 +558,7 @@ function App({ user, onLogout, onUserChange }) {
         setChatMessages(prev => [...prev, { role: "user", text: question }])
         setChatLoading(true)
         try {
-            const res = await fetch(`${API_URL}/ai/chat`, {
+            const res = await api(`/ai/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ question, history }),
@@ -1583,7 +1583,7 @@ function ProfilePage({ user, onSaved }) {
         if (next !== confirm) return setMsg({ tone: "bad", text: "New passwords don't match." })
         setSaving(true)
         setMsg(null)
-        fetch(`${API_URL}/auth/profile`, {
+        api(`/auth/profile`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ email: user.email, current_password: current, name, new_password: next || null }),
@@ -1656,7 +1656,7 @@ function AlertActions({ alert }) {
     }
 
     const investigate = () => run("investigate", async () => {
-        const res = await fetch(`${API_URL}/ai/investigate/pipeline`, {
+        const res = await api(`/ai/investigate/pipeline`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ hostname: alert.host }),
         })
@@ -1664,12 +1664,12 @@ function AlertActions({ alert }) {
         setInvestigation(await res.json())
     })
     const isolate = () => run("isolate", async () => {
-        const res = await fetch(`${API_URL}/hosts/${encodeURIComponent(alert.host)}/isolate`, { method: "POST" })
+        const res = await api(`/hosts/${encodeURIComponent(alert.host)}/isolate`, { method: "POST" })
         if (!res.ok) throw new Error()
         setIsolation(await res.json())
     })
     const exportOcsf = () => run("ocsf", async () => {
-        const res = await fetch(`${API_URL}/alerts/${alert.alert_id}/ocsf`)
+        const res = await api(`/alerts/${alert.alert_id}/ocsf`)
         if (!res.ok) throw new Error()
         setOcsf(await res.json())
     })
@@ -1976,7 +1976,7 @@ function LedgerPage() {
 
     const load = () => {
         setLoading(true); setErr(null)
-        fetch(`${API_URL}/investigations/ledger?limit=50`)
+        api(`/investigations/ledger?limit=50`)
             .then(r => r.json())
             .then(d => setRecords(d.records || []))
             .catch(() => setErr("Can't reach the backend."))
@@ -1988,7 +1988,7 @@ function LedgerPage() {
 
     const runVerify = () => {
         setVerifying(true); setVerify(null)
-        fetch(`${API_URL}/investigations/ledger/verify`)
+        api(`/investigations/ledger/verify`)
             .then(r => r.json())
             .then(setVerify)
             .catch(() => setErr("Verify failed."))
