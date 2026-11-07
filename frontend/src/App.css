@@ -4292,3 +4292,12 @@ mark.hl-match { background: var(--accent-wash); color: var(--accent-text); borde
   .ask-full { inset: 0; border-radius: 0; }
   .ask-graphx .graph-canvas { height: 320px; }
 }
+
+/* "Did you mean ...?" names under an Ask AI reply */
+.ask-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ask-choices button {
+  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--accent-line);
+  background: var(--accent-wash); color: var(--accent-text); font: inherit; font-weight: 600; cursor: pointer;
+}
+.ask-choices button:hover:not(:disabled) { background: var(--hover); }
+.ask-choices button:disabled { opacity: .5; cursor: default; }

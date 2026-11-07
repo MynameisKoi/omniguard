@@ -424,7 +424,18 @@ function Steps({ steps, live }) {
 
 const WIDE = new Set(["dashboard", "graph_explorer", "screenshots", "compare"])
 
-function Message({ m, live, onOpenAlert, onFilter, onDecide, views }) {
+// "Did you mean ...?": each close name re-asks the question with that name
+function Choices({ data, onAsk, disabled }) {
+    return (
+        <div className="ask-choices">
+            {(data.options || []).map(o => (
+                <button key={o.name} disabled={disabled} onClick={() => onAsk(o.ask)}>{o.name}</button>
+            ))}
+        </div>
+    )
+}
+
+function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views }) {
     if (m.role === "user") return <div className="ask-msg user"><div className="ask-bubble">{m.content}</div></div>
     const thinking = live && !m.content && !(m.steps || []).length
     return (
@@ -432,10 +443,11 @@ function Message({ m, live, onOpenAlert, onFilter, onDecide, views }) {
             <span className="ask-avatar"><Sparkles /></span>
             <div className="ask-body">
                 {(m.steps || []).length > 0 && <Steps steps={m.steps} live={live} />}
-                {(m.blocks || []).map((b, i) => <Block key={i} block={b} onOpenAlert={onOpenAlert} onFilter={onFilter} views={views} />)}
+                {(m.blocks || []).filter(b => b.render !== "choices").map((b, i) => <Block key={i} block={b} onOpenAlert={onOpenAlert} onFilter={onFilter} views={views} />)}
                 {(m.approvals || []).map(a => <ApprovalCard key={a.approval_id} approval={a} onDecide={(ap, ok) => onDecide(m, ap, ok)} />)}
                 {thinking ? <div className="ai-loading"><span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />Thinking…</div>
                     : m.content ? <AiMarkdown text={m.content} /> : null}
+                {(m.blocks || []).filter(b => b.render === "choices").map((b, i) => <Choices key={i} data={b.data || {}} onAsk={onAsk} disabled={busy} />)}
             </div>
         </div>
     )
@@ -637,7 +649,8 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
                             </div>
                         ) : messages.map((m, i) => (
                             <Message key={m.message_id || i} m={m} live={!!m.live}
-                                onOpenAlert={onOpenAlert} onFilter={onFilter} onDecide={decide} views={views} />
+                                onOpenAlert={onOpenAlert} onFilter={onFilter} onDecide={decide}
+                                onAsk={send} busy={streaming} views={views} />
                         ))}
                     {error && <div className="login-error ask-error">{error}</div>}
                 </div>

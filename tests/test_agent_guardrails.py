@@ -215,3 +215,13 @@ def test_tool_talk_is_dropped():
 ])
 def test_general_questions_skip_the_tools(known_names, text, general):
     assert agent._general(text) is general
+
+
+def test_did_you_mean_offers_the_question_with_each_name():
+    text, options = agent._did_you_mean([{"typed": "mahirjan", "matches": ["maharjan"]}], "what about the user mahirjan")
+    assert text == "I don't have any **mahirjan** in the alerts. Closest match: **maharjan**. Did you mean that one?"
+    assert options == [{"name": "maharjan", "ask": "what about the user maharjan"}]
+    text, options = agent._did_you_mean([{"typed": "FINANCE-PC-1", "matches": ["FINANCE-PC-11", "FINANCE-PC-07"]}],
+                                        "show the graph for finance-pc-1")
+    assert text.endswith("Closest matches: **FINANCE-PC-11**, **FINANCE-PC-07**. Did you mean one of these?")
+    assert [o["ask"] for o in options] == ["show the graph for FINANCE-PC-11", "show the graph for FINANCE-PC-07"]

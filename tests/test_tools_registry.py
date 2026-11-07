@@ -17,7 +17,7 @@ if backend_dir not in sys.path:
 
 import tools  # noqa: E402
 
-REAL_CORRECT_NAMES = tools._correct_names   # before the fixture stubs it
+REAL_CHECK_NAMES = tools._check_names   # before the fixture stubs it
 
 CALLS = []
 
@@ -56,7 +56,7 @@ def stub_registry(monkeypatch):
         "broken": dict(fn=broken_stub, kind="read", render="text", description="d", parameters={}, required=[]),
         "offline": dict(fn=offline_stub, kind="read", render="graph", description="d", parameters={}, required=[]),
     })
-    monkeypatch.setattr(tools, "_correct_names", lambda name, args: (args, []))   # no database
+    monkeypatch.setattr(tools, "_check_names", lambda name, args: (args, []))   # no database
 
 
 def test_read_tool_runs_and_reports_how_to_draw_it():
@@ -143,11 +143,15 @@ def test_screenshots_read_a_verdict_word_as_the_verdict(monkeypatch):
     assert seen["verdict"] == "phishing" and "1 phishing" in r["reply"].replace("*", "")
 
 
-def test_misspelt_names_are_corrected(monkeypatch):
-    monkeypatch.setattr(tools, "_entity_values", lambda: {"maharjan", "LAPTOP-10", "cdn-telemetry-sync.net"})
+def test_misspelt_names_are_asked_about_not_replaced(monkeypatch):
+    monkeypatch.setattr(tools, "_entity_values", lambda: {"maharjan", "LAPTOP-10", "FINANCE-PC-11", "FINANCE-PC-07",
+                                                         "cdn-telemetry-sync.net"})
     assert tools.closest_entity("mahirjan") == "maharjan"
-    assert tools.closest_entity("laptop-10") == "LAPTOP-10"
     assert tools.closest_entity("cdn-telemetry-sync.com") is None   # a different (lookalike) domain
     assert tools.closest_entity("phishing") is None
-    args, fixed = REAL_CORRECT_NAMES("entity_summary", {"name": "mahirjan"})
-    assert args == {"name": "maharjan"} and fixed == [("mahirjan", "maharjan", [])]
+    args, misses = REAL_CHECK_NAMES("entity_summary", {"name": "mahirjan"})
+    assert args == {"name": "mahirjan"} and misses == [{"typed": "mahirjan", "matches": ["maharjan"]}]
+    args, misses = REAL_CHECK_NAMES("entity_summary", {"name": "laptop-10"})        # just the case: fixed quietly
+    assert args == {"name": "LAPTOP-10"} and misses == []
+    _, misses = REAL_CHECK_NAMES("get_host_graph", {"hostname": "FINANCE-PC-1"})
+    assert misses[0]["matches"][:2] == ["FINANCE-PC-11", "FINANCE-PC-07"]

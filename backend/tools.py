@@ -125,27 +125,33 @@ def closest_entity(name):
 NAME_ARGS = ("name", "hostname", "entity", "host", "domain")
 
 
-def _correct_names(name, args):
-    """Fix misspelt names in a tool's arguments. Returns (args, [(typed, meant, other close names)])."""
-    fixed = []
-    def fix(v):
+def _check_names(name, args):
+    """Names in a tool's arguments that aren't in the alerts but are spelt like
+    ones that are ("mahirjan"). Returns (args, misses): case is fixed silently
+    (laptop-10 -> LAPTOP-10); a misspelling is NOT replaced, it goes back to
+    the analyst as "did you mean ...?" with the close names."""
+    misses = []
+    def check(v):
         typed = str(v).strip()
         found = close_entities(typed, n=4, cutoff=0.7)
-        if found and found[0].lower() != typed.lower() and closest_entity(typed) == found[0]:
-            fixed.append((typed, found[0], found[1:]))
+        if not found:
+            return v
+        if found[0].lower() == typed.lower():
             return found[0]
+        if closest_entity(typed):             # one close enough to be a typo
+            misses.append({"typed": typed, "matches": found})
         return v
     for k in NAME_ARGS:
         if _given(args.get(k)):
-            args[k] = fix(args[k])
+            args[k] = check(args[k])
     if name == "compare_entities" and _given(args.get("names")):
         parts = re.split(r"\s*(?:,|\band\b|\bvs\.?\b|\bversus\b)\s*", str(args["names"]))
-        args["names"] = ", ".join(fix(p) for p in parts if p.strip())
+        args["names"] = ", ".join(check(p) for p in parts if p.strip())
     if name == "search_alerts" and _given(args.get("query")) and " " not in str(args["query"]).strip():
-        # one word that matches nothing as typed but is one letter off a real name
+        # one word that matches nothing as typed but is a letter off a real name
         if not alerts_collection.count_documents(_alert_query(query=args["query"])):
-            args["query"] = fix(args["query"])
-    return args, fixed
+            args["query"] = check(args["query"])
+    return args, misses
 
 
 # ── read tools ────────────────────────────────────────────────────────────
@@ -741,7 +747,11 @@ def run_tool(name, args=None, analyst="unknown", approved=False):
     missing = [r for r in t["required"] if r not in args]
     if missing:
         return {"ok": False, "summary": f"{name} needs {', '.join(missing)}.", "render": "text", "data": None}
-    args, fixed = _correct_names(name, args)
+    args, misses = _check_names(name, args)
+    if misses:
+        said = "; ".join(f"no '{m['typed']}' in the alerts (close names: {', '.join(m['matches'])})" for m in misses)
+        return {"ok": False, "render": "choices", "did_you_mean": misses, "data": None,
+                "summary": f"{said}. The analyst has been asked which one they meant."}
     if t["kind"] == "action":
         if not approved:
             return {"ok": False, "needs_approval": True, "render": "approval", "data": {"tool": name, "args": args},
@@ -749,16 +759,6 @@ def run_tool(name, args=None, analyst="unknown", approved=False):
         args["analyst"] = analyst
     try:
         out = t["fn"](**args)
-        if fixed:
-            note = "; ".join(f"no '{a}' in the alerts, so this is {b}" for a, b, _ in fixed)
-            out["summary"] = f"({note}) " + out.get("summary", "")
-            said = " ".join(f"There's no **{a}** in the alerts. The closest match is **{b}**, shown below."
-                            + (f" Other close matches: {', '.join(others)}." if others else "")
-                            for a, b, others in fixed)
-            if out.get("reply"):
-                out["reply"] = said + "\n\n" + out["reply"]
-            else:
-                out["facts"] = said + ("\n\n" + out["facts"] if out.get("facts") else "")
         args.pop("analyst", None)
         return {"ok": True, "render": t["render"], "args": args, **out}
     except ToolError as e:

@@ -464,6 +464,24 @@ def _not_found(failed):
     return " ".join(lines) + (" Check the spelling, or ask me to search for part of the name." if named else "")
 
 
+def _did_you_mean(misses, text):
+    """'I don't have any mahirjan in the alerts. Closest matches: maharjan.
+    Did you mean one of these?' plus one clickable option per close name, each
+    the analyst's own question with the name swapped in."""
+    lines, options = [], []
+    for m in misses:
+        many = len(m["matches"]) > 1
+        lines.append(f"I don't have any **{m['typed']}** in the alerts. Closest match{'es' if many else ''}: "
+                     + ", ".join(f"**{x}**" for x in m["matches"]) + ".")
+        rx = re.compile(re.escape(m["typed"]), re.I)
+        for x in m["matches"]:
+            ask = rx.sub(x, text, count=1) if rx.search(text or "") else f"tell me about {x}"
+            if all(o["name"] != x for o in options):
+                options.append({"name": x, "ask": ask})
+    one = len(options) == 1
+    return " ".join(lines) + (" Did you mean that one?" if one else " Did you mean one of these?"), options
+
+
 def run_turn(owner, conversation_id, text, context=None):
     """One analyst message -> a stream of newline-delimited JSON events."""
     convo = get_conversation(owner, conversation_id)
@@ -486,6 +504,7 @@ def run_turn(owner, conversation_id, text, context=None):
     tools = [] if answer_only else _ollama_tools(text, context)
 
     steps, blocks, approvals, answer = [], [], [], ""
+    asked = False      # a name wasn't found: we asked which one was meant
     lead = []          # facts written from the data, shown first
     reference = text   # everything this turn's results say, for the grounding check
     try:
@@ -508,7 +527,7 @@ def run_turn(owner, conversation_id, text, context=None):
                 calls = reply["tool_calls"]
             messages.append({"role": "assistant", "content": "" if routed else reply["content"], "tool_calls": calls})
 
-            proposed, written = False, []
+            proposed, written, misses = False, [], []
             for call in calls:
                 name = call["function"]["name"]
                 args = call["function"].get("arguments") or {}
@@ -523,7 +542,9 @@ def run_turn(owner, conversation_id, text, context=None):
                 steps.append(step)
                 yield _event("step", **step, status="done")
 
-                if result.get("needs_approval"):
+                if result.get("did_you_mean"):
+                    misses += result["did_you_mean"]
+                elif result.get("needs_approval"):
                     proposed = True
                     approval = {"approval_id": str(uuid.uuid4()), "tool": name, "args": result["data"]["args"],
                                 "description": TOOLS[name]["description"], "status": "pending"}
@@ -541,6 +562,15 @@ def run_turn(owner, conversation_id, text, context=None):
                     lead.append(result["facts"])
                     reference += "\n" + result["facts"]
                     yield _event("token", text=result["facts"] + "\n\n")
+            # a name that isn't in the alerts but is spelt like one: ask, don't pick
+            if misses:
+                text_out, options = _did_you_mean(misses, text)
+                block = {"render": "choices", "tool": "did_you_mean", "data": {"options": options}}
+                blocks.append(block)
+                yield _event("block", **block)
+                lead, answer, asked = [], text_out, True
+                yield _event("token", text=text_out)
+                break
             # tools that write their own reply (screenshots: the model can't see them
             # and would invent what they show): that IS the answer, no model call
             if written and len(written) == len(calls):
@@ -581,7 +611,7 @@ def run_turn(owner, conversation_id, text, context=None):
         yield _event("token", text=note)
 
     # asked to contain a known host but the model didn't propose it: propose it
-    for host in _contain_intent(text, convo):
+    for host in ([] if asked else _contain_intent(text, convo)):
         if not any(a["tool"] == "isolate_host" and a["args"].get("hostname", "").lower() == host.lower() for a in approvals):
             approval = {"approval_id": str(uuid.uuid4()), "tool": "isolate_host", "args": {"hostname": host},
                         "description": TOOLS["isolate_host"]["description"], "status": "pending"}
