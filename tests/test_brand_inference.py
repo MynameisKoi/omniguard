@@ -13,7 +13,9 @@ import pytest
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 verifyeye_dir = os.path.join(repo_root, "verifyeye-ingress")
 if verifyeye_dir not in sys.path:
-    sys.path.insert(0, verifyeye_dir)
+    # appended, not first: verifyeye-ingress has its own main.py, and first on the
+    # path it would shadow the backend's main for every test that runs after this one
+    sys.path.append(verifyeye_dir)
 
 from visual.detector import infer_brand_from_page  # noqa: E402
 
