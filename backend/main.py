@@ -13,6 +13,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_view
 from tools import tool_specs, run_tool
+from conversations import (create_conversation, list_conversations, get_conversation,
+                           rename_conversation, delete_conversation)
 from evidence import store_evidence, list_evidence, get_evidence, get_image, EvidenceError
 from dedup import compute_alert_simhash, find_matching_alert
 from ledger import (
@@ -270,6 +272,37 @@ class ToolCall(BaseModel):
 @app.post("/agent/tools/{name}")
 async def call_tool(name: str, payload: ToolCall, me: dict = Depends(current_user)):
     return await run_in_threadpool(run_tool, name, payload.args, me["email"], payload.approved)
+
+# ── saved AI conversations (#1): ChatGPT-style threads, per analyst ──
+class ConversationIn(BaseModel):
+    title: str | None = Field(default=None, max_length=80)
+
+@app.get("/conversations")
+async def conversations_list(me: dict = Depends(current_user)):
+    return await run_in_threadpool(list_conversations, me["email"])
+
+@app.post("/conversations", status_code=201)
+async def conversations_create(payload: ConversationIn, me: dict = Depends(current_user)):
+    return await run_in_threadpool(create_conversation, me["email"], payload.title)
+
+@app.get("/conversations/{conversation_id}")
+async def conversations_get(conversation_id: str, me: dict = Depends(current_user)):
+    convo = await run_in_threadpool(get_conversation, me["email"], conversation_id)
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return convo
+
+@app.patch("/conversations/{conversation_id}")
+async def conversations_rename(conversation_id: str, payload: ConversationIn, me: dict = Depends(current_user)):
+    convo = await run_in_threadpool(rename_conversation, me["email"], conversation_id, payload.title)
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return convo
+
+@app.delete("/conversations/{conversation_id}", status_code=204)
+async def conversations_delete(conversation_id: str, me: dict = Depends(current_user)):
+    if not await run_in_threadpool(delete_conversation, me["email"], conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
 class AlertStatus(BaseModel):
     status: Literal["new", "triaged", "resolved"]
