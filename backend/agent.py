@@ -52,8 +52,11 @@ AFTER_VIEW = ("The view is drawn above your reply and the analyst is looking at 
 # the facts are already written (from the data) and shown: the model only adds
 # meaning. A 3B model gets counts and names wrong when it restates them
 INTERPRET = ("The analyst already sees this, written from the data:\n{facts}\n\n"
-             "Add ONE or TWO short sentences after it: what it means and the next step. Don't repeat its "
-             "numbers or names, don't add new facts, no lists.")
+             "Add ONE or TWO short sentences after it: what it means and the single most useful next step.\n"
+             "Rules: no numbers or counts, don't repeat the names or facts above, don't add new facts. "
+             "Only call something compromised if the text above says so (both phishing and C2, or a compromise verdict). "
+             "Only suggest isolating a host the text above calls compromised; for phishing alone, suggest checking "
+             "whether the user entered their password and resetting it.")
 
 RETRY = ("A tool above failed. If another tool (usually search_alerts) can answer the question, call it now; "
          "otherwise tell the analyst plainly what you couldn't find.")
@@ -64,7 +67,7 @@ AFTER_TOOLS = ("Now reply to the analyst in 2-4 short sentences, using only the 
 
 
 PRIORITY = re.compile(r"(look at|start|focus on|work on) first|where (do|should) i start|priorit|needs? attention"
-                      r"|what('s| is) urgent|most important|what('s| is) going on", re.I)
+                      r"|what('s| is) urgent|most important|what('s| is) going on|\bworst\b|riskiest|most (at risk|dangerous|affected)", re.I)
 
 
 # "which of THOSE hosts...", "what about THEM": a follow-up on the last results
@@ -142,6 +145,13 @@ ENGINE = [(re.compile(r"phish", re.I), "verifyeye"), (re.compile(r"\bc2\b|beacon
 STATUS_WORD = [(re.compile(r"untriaged|\bnew\b|\bopen\b", re.I), "new"),
                (re.compile(r"\bresolved\b|\bclosed\b", re.I), "resolved"), (re.compile(r"\btriaged\b", re.I), "triaged")]
 SEVERITY_WORD = re.compile(r"\b(critical|high|medium|low)\b", re.I)
+SET_ASK = re.compile(r"\b(which|how many|any|list|were there|did we (get|have|see))\b", re.I)
+SHOW_WORD = re.compile(r"\b(?:show|display|draw)\b.*?\b([\w.-]+) alerts\b", re.I)
+ALERTS_WORD = re.compile(r"\b([\w.-]+) alerts\b", re.I)
+# words before "alerts" that aren't a search term
+NOT_A_TERM = {"the", "all", "my", "our", "these", "those", "any", "new", "open", "recent", "latest", "critical", "high",
+              "medium", "low", "phishing", "c2", "untriaged", "resolved", "triaged", "me", "of", "many", "some", "more",
+              "other", "same", "today's", "verifyeye", "spectrac2", "beacon", "beaconing", "much", "unresolved"}
 WHOLE_VIEW = re.compile(r"dashboard|overview|everything|all (the )?alerts|break ?down", re.I)
 
 
@@ -259,11 +269,22 @@ def _route(text, convo=None):
         args = _filters(text)
         for v, kind in named[:1]:
             args["host" if kind == "host" else "query"] = v
+        m = SHOW_WORD.search(text)
+        if not args and m and m.group(1).lower() not in NOT_A_TERM:
+            args["query"] = m.group(1)          # "show me powershell alerts"
         if args or WHOLE_VIEW.search(text):
             return [("show_dashboard", args)]
-        return None          # "show me powershell alerts": the model picks the filters
+        return None
     if PRIORITY.search(text):
         return [("attention_findings", {})]
+    if not names and SET_ASK.search(text):
+        # "which hosts had phishing?", "any critical alerts today?"
+        args = _filters(text)
+        m = ALERTS_WORD.search(text)
+        if m and m.group(1).lower() not in NOT_A_TERM:
+            args.setdefault("query", m.group(1))
+        if args:
+            return [("search_alerts", args)]
     if STATUS.search(text):
         return [("system_status", {})]
     if names and (not from_focus or ABOUT.search(text) or INVESTIGATE.search(text)):
@@ -361,12 +382,21 @@ def _plain(text):
     """NETWORK_ISOLATION -> network isolation: the model echoes internal names.
     "(call the isolation tool)": the analyst doesn't call tools."""
     text = re.sub(r"\s*\((call|use|using|via) [^)]*\btool\b[^)]*\)", "", text, flags=re.I)
+    text = re.sub(r"\s*\b(using|with|via|through) (the |an? )?\**[\w -]{0,30}\btools?\b\**", "", text, flags=re.I)
     return re.sub(r"\*{0,2}\b([A-Z]{2,}(?:_[A-Z]{2,})+)\b\*{0,2}", lambda m: m.group(1).replace("_", " ").lower(), text)
 
 
 def _first_sentences(text, n=3):
     parts = re.split(r"(?<=[.!?])\s+", text.strip())
     return " ".join(parts[:n])
+
+
+# a count ("9 critical", "21 alerts"), not a digit inside a name like LAPTOP-10 or 10.0.0.42
+COUNT = re.compile(r"(?<![\w.\-])\d+(?![\w.\-])")
+
+
+# advice only the data can justify: isolation, or calling something compromised
+DRASTIC = re.compile(r"\b(isolat\w*|quarantin\w*|contain(ed|ment)?|compromis\w*|cut (it|them) off|take (it|them) offline)\b", re.I)
 
 
 class _Cleaner:
@@ -389,6 +419,10 @@ class _Cleaner:
             return False
         if self.facts and not _new_only(s, self.facts):
             return False
+        if self.facts and COUNT.search(s):
+            return False      # counts are in the facts already; the model gets them wrong
+        if self.facts and "compromis" not in self.facts.lower() and DRASTIC.search(s):
+            return False      # "isolate it" / "it's compromised" with nothing in the data saying so
         if self.reference is not None and not _grounded(s, self.reference):
             return False
         if self.convo is not None and not _not_repeated(s, self.convo):
@@ -399,13 +433,13 @@ class _Cleaner:
         return True
 
     def _emit(self, s, sep):
-        s = s.strip()
+        s = _plain(s.strip())
         if self.done or not self.keep(s):
             return ""
         self.count += 1
         if self.limit and self.count >= self.limit:
             self.done = True
-        return _plain(s) + sep
+        return s + sep
 
     def feed(self, token):
         self.buf += token
@@ -678,7 +712,7 @@ def run_turn(owner, conversation_id, text, context=None):
                 # the meaning, with no tools so it can't wander off. Only what's new
                 # and grounded in the results gets shown, at most 3 sentences
                 acting = bool(approvals) or bool(ACTION_ASK.search(text or ""))
-                cleaner = (_Cleaner(facts="\n".join(lead), reference=reference, convo=convo, acting=acting, limit=3)
+                cleaner = (_Cleaner(facts="\n".join(lead), reference=reference, convo=convo, acting=acting, limit=2)
                            if lead else _Cleaner(acting=acting))
                 for ev in model([], cleaner):
                     if not isinstance(ev, tuple):

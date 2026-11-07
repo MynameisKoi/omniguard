@@ -162,7 +162,7 @@ def known_names(monkeypatch):
     ("isolate LAPTOP-10", None),              # actions: model + approval card
     ("what is a C2 beacon?", None),           # general knowledge
     ("what is spectrac2?", None),             # an engine, not something to look up
-    ("show me powershell alerts", None),      # filters the router can't read
+    ("what does phishing mean for us", None),  # open question: the model decides
 ])
 def test_plain_requests_are_routed_with_exact_names(known_names, text, plan):
     assert agent._route(text) == plan
@@ -228,7 +228,7 @@ def test_did_you_mean_offers_the_question_with_each_name():
 
 
 def test_cleaner_shows_only_finished_clean_sentences(known_names):
-    facts = "**LAPTOP-10** is a host in **10 alerts** (9 critical, 1 high)."
+    facts = "**LAPTOP-10** is a host in **10 alerts** (9 critical, 1 high), which usually means a real compromise."
     c = agent._Cleaner(facts=facts, reference=facts, convo={"messages": []}, acting=True, limit=2)
     out = ""
     for tok in ["LAPTOP-10 is a host in 10 ", "alerts (9 critical, 1 high). Treat it ",
@@ -246,3 +246,30 @@ def test_cleaner_holds_a_sentence_until_it_ends():
     assert c.feed("C2 means command ") == ""
     assert c.feed("and control. It") == "C2 means command and control. "
     assert c.finish() == "It"
+
+
+@pytest.mark.parametrize("text, plan", [
+    ("which hosts had phishing?", [("search_alerts", {"engine": "verifyeye"})]),
+    ("any critical alerts today?", [("search_alerts", {"since_hours": 24, "severity": "critical"})]),
+    ("how many C2 alerts are untriaged?", [("search_alerts", {"engine": "spectrac2", "status": "new"})]),
+    ("did we get any mimikatz alerts?", [("search_alerts", {"query": "mimikatz"})]),
+    ("show me powershell alerts", [("show_dashboard", {"query": "powershell"})]),
+    ("which host is the worst?", [("attention_findings", {})]),
+])
+def test_alert_set_questions_are_routed(known_names, text, plan):
+    assert agent._route(text) == plan
+
+
+def test_model_counts_are_never_shown():
+    c = agent._Cleaner(facts="**21 alerts** match.", limit=3)
+    out = c.feed("LAPTOP-10 had 9 phishing alerts. Reset the password for maharjan. ") + c.finish()
+    assert out.strip() == "Reset the password for maharjan."
+
+
+def test_isolation_advice_needs_the_data_to_say_compromise():
+    phishing_only = agent._Cleaner(facts="**BUILD-SRV-02** is a host in **4 alerts**. Phishing pages: github-sso-verify.com.")
+    out = phishing_only.feed("Isolate BUILD-SRV-02 now. Reset the ci-runner password. ") + phishing_only.finish()
+    assert out.strip() == "Reset the ci-runner password."
+    both = agent._Cleaner(facts="It has **both phishing and C2** alerts, which usually means a real compromise.")
+    out = both.feed("Isolate LAPTOP-10 using the **isolation tool**. ") + both.finish()
+    assert out.strip() == "Isolate LAPTOP-10."
