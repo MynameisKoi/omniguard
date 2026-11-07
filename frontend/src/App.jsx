@@ -1517,7 +1517,25 @@ function App({ user, onLogout, onUserChange }) {
                     {page === "ledger" && <LedgerPage />}
 
                     {/* ── the SOC agent: saved chats, tools, approvals ── */}
-                    {page === "ask" && <AskAI onOpenAlert={openAlert} onFilter={filterBy} />}
+                    {page === "ask" && (
+                        <AskAI
+                            onOpenAlert={openAlert}
+                            onFilter={filterBy}
+                            // the dashboard's own views, for the agent to draw inside its replies
+                            views={{
+                                alerts,
+                                dashboard: (subset, term) => (
+                                    <ScopedDashboard alerts={subset} term={term} onOpen={openAlert} onFilter={filterBy} onSeeGraph={seeInGraph} />
+                                ),
+                                graph: (focus, onClear) => (
+                                    <GraphExplorer alerts={alerts} refreshKey={alerts.length} onOpenAlert={openAlert}
+                                        onFilter={filterBy} focus={focus} onClearFocus={onClear} />
+                                ),
+                                openGraph: seeInGraph,
+                                openLedger: () => { setSelectedId(null); setPage("ledger") },
+                            }}
+                        />
+                    )}
 
                     {/* ── search results: a full dashboard scoped to the term ── */}
                     {page === "search" && (

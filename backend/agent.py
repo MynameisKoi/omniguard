@@ -43,6 +43,12 @@ About OmniGuard (the system you're part of):
 - SpectraC2 is OmniGuard's own network engine: it detects command-and-control (C2) beaconing from infected hosts. It is NOT an attacker or threat group.
 - A host is a machine (e.g. LAPTOP-10); a user is a person's account."""
 
+# after a whole view was drawn: the analyst is looking at it, so point out
+# what stands out instead of restating it, and stick to what the result says
+AFTER_VIEW = ("The view is drawn above your reply and the analyst is looking at it. In 2-3 short sentences, "
+              "point out what stands out in it and the next step. Only state facts that appear in the tool "
+              "result above: don't guess at causes, compromises or actions that it doesn't mention.")
+
 RETRY = ("A tool above failed. If another tool (usually search_alerts) can answer the question, call it now; "
          "otherwise tell the analyst plainly what you couldn't find.")
 
@@ -59,12 +65,34 @@ PRIORITY = re.compile(r"(look at|start|focus on|work on) first|where (do|should)
 FOLLOW_UP = re.compile(r"\b(those|these|them|they|that one|the same|of it|about it)\b", re.I)
 
 
+# "show me / draw / visualise ...": which whole dashboard view fits. View tools
+# are only offered when one of these matches, so a 3B model isn't choosing
+# between 16 tools on every question.
+VIEWS = [
+    ("compare_entities", re.compile(r"\bcompare\b|\bvs\.?\b|\bversus\b|side by side|difference between", re.I)),
+    ("show_graph", re.compile(r"\bgraph\b|network (graph|map|view)|connections?|linked to|connected to|\bmap\b", re.I)),
+    ("show_screenshots", re.compile(r"screenshots?|look(ed)? like|\bpages? (it |they )?(saw|visited)|captures?", re.I)),
+    ("show_ledger", re.compile(r"\bledger\b|audit|\btrail\b|hash chain|\bchain\b|tamper", re.I)),
+    ("show_dashboard", re.compile(r"\bshow\b|dashboard|visuali[sz]e|\bdraw\b|overview|break ?down|everything about|\bdisplay\b", re.I)),
+]
+
+
+def _views(text):
+    """The view tools this message asks for, best match first."""
+    return [name for name, rx in VIEWS if rx.search(text or "")]
+
+
 def _hints(text, history=()):
     hints = ""
+    views = _views(text)
+    if views:
+        hints += (f"\n\nThe analyst wants to SEE something: call {views[0]} so the whole view is drawn in your reply"
+                  + (" (names comma separated)" if views[0] == "compare_entities" else "") + ".")
     known = mentioned_entities(text)
     if known:
         hints += "\n\nNames in this message that exist in the alerts: " + "; ".join(
-            f"{v} is a {label}" for v, label in known) + ". Use entity_summary or search_alerts for them."
+            f"{v} is a {label}" for v, label in known) + (
+            f". Pass them to {_views(text)[0]}." if _views(text) else ". Use entity_summary or search_alerts for them.")
     if PRIORITY.search(text or ""):
         hints += "\n\nThis is a question about priorities: call attention_findings."
     if FOLLOW_UP.search(text or "") and any(m.get("role") == "tool" for m in history):
@@ -72,6 +100,17 @@ def _hints(text, history=()):
                   "above (look for lines like 'also had phishing'): answer from them, word for word, "
                   "and only call a tool if they really don't cover it.")
     return hints
+
+
+def _from_history(text, history):
+    """A follow-up about results already on screen ("which of those hosts got hit
+    most?") with no new name and no new view: answer from them, with no tools.
+    Left to choose, a 3B model looks up the word "hosts" instead."""
+    if not FOLLOW_UP.search(text or "") or _views(text) or ACTION_ASK.search(text or ""):
+        return False
+    if mentioned_entities(text):
+        return False
+    return any(m.get("role") == "tool" and m.get("content") for m in history[-6:])
 
 
 def _text_tool_call(content):
@@ -134,6 +173,9 @@ def _tidy(answer):
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+# when a view is asked for, the smaller tool it replaces is hidden
+SUPERSEDED = {"show_screenshots": "get_evidence", "show_graph": "get_host_graph", "show_ledger": "ledger_lookup"}
+VIEW_RENDERS = {"dashboard", "graph_explorer", "screenshots", "ledger_view", "compare"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
@@ -142,9 +184,13 @@ def _ollama_tools(text, context):
     offered only when the message or context has one, or a small model makes
     ids up instead of searching."""
     has_id = UUID.search(f"{text} {context or ''}")
+    views = set(_views(text))
+    hidden = {SUPERSEDED[v] for v in views if v in SUPERSEDED}   # one obvious choice, not two similar ones
     return [{"type": "function", "function": {"name": t["name"], "description": t["description"],
                                               "parameters": t["inputSchema"]}}
-            for t in tool_specs() if t["name"] != "get_alert" or has_id]
+            for t in tool_specs()
+            if (t["name"] != "get_alert" or has_id) and t["name"] not in hidden
+            and (t.get("render") not in VIEW_RENDERS or t["name"] in views)]
 
 
 def _history(convo):
@@ -159,7 +205,7 @@ def _history(convo):
             if steps:
                 out.append({"role": "assistant", "content": "", "tool_calls": [
                     {"function": {"name": s["tool"], "arguments": s.get("args") or {}}} for s in steps]})
-                out += [{"role": "tool", "content": s.get("summary", "")[:600], "tool_name": s["tool"]} for s in steps]
+                out += [{"role": "tool", "content": s.get("summary", "")[:1200], "tool_name": s["tool"]} for s in steps]
             out.append({"role": "assistant", "content": m.get("content") or ""})
     return out
 
@@ -215,7 +261,7 @@ def run_turn(owner, conversation_id, text, context=None):
                  + (f"\n\nThe analyst is looking at: {context}" if context else "")}]
     messages += history
     messages.append({"role": "user", "content": text})
-    tools = _ollama_tools(text, context)
+    tools = [] if _from_history(text, history) else _ollama_tools(text, context)
 
     steps, blocks, approvals, answer = [], [], [], ""
     try:
@@ -231,7 +277,7 @@ def run_turn(owner, conversation_id, text, context=None):
                 break
 
             messages.append({"role": "assistant", "content": reply["content"], "tool_calls": reply["tool_calls"]})
-            proposed = False
+            proposed, written = False, []
             for call in reply["tool_calls"]:
                 name = call["function"]["name"]
                 args = call["function"].get("arguments") or {}
@@ -256,10 +302,20 @@ def run_turn(owner, conversation_id, text, context=None):
                     block = {"render": result["render"], "tool": name, "data": result["data"]}
                     blocks.append(block)
                     yield _event("block", **block)
+                    if result.get("reply"):
+                        written.append(result["reply"])
                 messages.append({"role": "tool", "content": result["summary"], "tool_name": name})
+            # tools that write their own reply (screenshots: the model can't see them
+            # and would invent what they show): that IS the answer, no model call
+            if written and len(written) == len(reply["tool_calls"]):
+                text_out = "\n\n".join(written)
+                answer += text_out
+                yield _event("token", text=text_out)
+                break
             # all good: answer now. something failed: let it try another tool first
             failed = [st for st in steps[-len(reply["tool_calls"]):] if not st["ok"] and "approval" not in st["summary"]]
-            messages[-1]["content"] += "\n\n" + (RETRY if failed else AFTER_TOOLS)
+            viewed = any(b["render"] in VIEW_RENDERS for b in blocks)
+            messages[-1]["content"] += "\n\n" + (RETRY if failed else AFTER_VIEW if viewed else AFTER_TOOLS)
 
             if proposed:
                 # an action waits for the analyst: let the model say so, without more tools

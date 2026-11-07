@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import {
     Sparkles, Plus, Send, MessageSquare, Trash2, Pencil, Check, X, ArrowRight,
-    ShieldAlert, ShieldCheck, ShieldOff, CircleAlert, Wrench,
+    ShieldAlert, ShieldCheck, ShieldOff, CircleAlert, Wrench, Maximize2, Link2, Lock, LockOpen,
 } from 'lucide-react'
 import { api } from './api'
 import AiMarkdown from './AiMarkdown'
@@ -9,6 +9,7 @@ import GraphCanvas from './GraphCanvas'
 import { EvidenceList } from './Evidence'
 import { timeAgo, exactTime } from './time'
 import { label, humanize, MITRE_NAMES } from './labels'
+import { scopeIds } from './graphScope'
 
 /* Ask AI (#1, #23, #19): the SOC agent. Saved conversations on the left; on
  * the right the agent answers by calling tools, and what they return is drawn
@@ -20,7 +21,10 @@ const SUGGESTIONS = [
     "Which hosts had both phishing and C2?",
     "Tell me about cdn-telemetry-sync.net",
     "What happened on LAPTOP-10?",
-    "What's been done in the audit ledger recently?",
+    "Show me the audit trail for LAPTOP-10",
+    "Show me everything about phishing this week",
+    "Show me the network graph around LAPTOP-10",
+    "Compare BUILD-SRV-02 and DEV-BOX-11",
     "What is a C2 beacon?",
 ]
 
@@ -31,10 +35,13 @@ const STEP_WORDS = {
     attention_findings: "Checking what needs attention", system_status: "Checking the systems",
     ledger_lookup: "Reading the audit ledger", investigate_host: "Running a full investigation on",
     isolate_host: "Proposing to isolate", set_alert_status: "Proposing a status change",
+    show_dashboard: "Building a dashboard of", show_graph: "Lighting up the graph around",
+    show_screenshots: "Laying out the agent's screenshots", show_ledger: "Walking the audit chain for",
+    compare_entities: "Comparing",
 }
 function stepText(step) {
     const a = step.args || {}
-    const subject = a.name || a.hostname || a.host || a.entity || a.query || a.domain || a.severity || ""
+    const subject = a.names || a.name || a.hostname || a.host || a.entity || a.query || a.domain || a.severity || ""
     return `${STEP_WORDS[step.tool] || humanize(step.tool)}${subject ? ` ${subject}` : ""}`
 }
 
@@ -178,7 +185,161 @@ function StatusBlock({ data }) {
     )
 }
 
-function Block({ block, onOpenAlert, onFilter }) {
+/* ── whole dashboard views, drawn inside a reply ──────────────────────────
+ * The agent's show_* tools say WHICH view and WHAT it's scoped to; the view
+ * itself is the dashboard's real component (passed in from App as `views`),
+ * so it's as interactive here as on its own tab. "Full screen" lifts the same
+ * view into an overlay without leaving the chat. */
+
+function ViewFrame({ title, note, onTab, tabLabel, children, full: renderFull, tall = false }) {
+    const [full, setFull] = useState(false)
+    const [open, setOpen] = useState(!tall)   // tall views start as a preview
+    useEffect(() => {
+        if (!full) return
+        const esc = (e) => e.key === "Escape" && setFull(false)
+        window.addEventListener("keydown", esc)
+        return () => window.removeEventListener("keydown", esc)
+    }, [full])
+    const head = (inFull) => (
+        <header className="ask-view-head">
+            <div>
+                <span className="ask-eyebrow">{note}</span>
+                <b>{title}</b>
+            </div>
+            <span className="ask-view-tools">
+                {onTab && <button className="ask-link" onClick={onTab}>{tabLabel} <ArrowRight /></button>}
+                {inFull
+                    ? <button className="btn" onClick={() => setFull(false)}><X /> Close</button>
+                    : <button className="btn" onClick={() => setFull(true)}><Maximize2 /> Full screen</button>}
+            </span>
+        </header>
+    )
+    return (
+        <>
+            <div className="ask-block ask-view">
+                {head(false)}
+                <div className={`ask-view-body${open ? "" : " clipped"}`}>{children}</div>
+                {tall && (
+                    <button className="ask-view-more" onClick={() => setOpen(!open)}>
+                        {open ? "Show less" : "Show everything — charts, hosts, graph and every alert"}
+                    </button>
+                )}
+            </div>
+            {full && (
+                <div className="ask-full" role="dialog" aria-modal="true" aria-label={title}>
+                    {head(true)}
+                    <div className="ask-full-body">{renderFull ? renderFull() : children}</div>
+                </div>
+            )}
+        </>
+    )
+}
+
+// the alerts a view is about, from the live list the page already holds
+function useSubset(views, ids) {
+    return useMemo(() => {
+        const want = new Set(ids || [])
+        return (views?.alerts || []).filter(a => want.has(a.alert_id))
+    }, [views?.alerts, ids])
+}
+
+function DashboardView({ data, views, onFilter }) {
+    const subset = useSubset(views, data.alert_ids)
+    if (!data.alert_ids?.length) return <div className="ask-block ask-empty">No alerts match {data.label}.</div>
+    if (!subset.length) return <div className="ask-block ask-empty">Loading {data.label}…</div>
+    const gone = data.alert_ids.length - subset.length
+    return (
+        <ViewFrame
+            title={data.label} note={`Dashboard · ${subset.length} alert${subset.length === 1 ? "" : "s"}${gone > 0 ? ` (${gone} since removed)` : ""}`}
+            onTab={data.term && data.term !== data.label ? () => onFilter(data.term) : () => views.openGraph(subset, data.label)}
+            tabLabel={data.term && data.term !== data.label ? "Open in Search" : "Open in graph"}
+            tall
+        >
+            <div className="ask-dash">{views.dashboard(subset, data.term || data.label)}</div>
+        </ViewFrame>
+    )
+}
+
+function GraphView({ data, views }) {
+    const subset = useSubset(views, data.alert_ids)
+    // one stable focus per block, so the explorer lights it up once
+    const focus = useMemo(() => ({ label: data.entity, ids: [...scopeIds(subset)] }), [data.entity, subset])
+    const [cleared, setCleared] = useState(false)
+    if (!subset.length) return <div className="ask-block ask-empty">Loading the graph around {data.entity}…</div>
+    return (
+        <ViewFrame title={data.entity} note="Network graph · everything linked to it lit up"
+            onTab={() => views.openGraph(subset, data.entity)} tabLabel="Open the graph tab">
+            <div className="ask-graphx">{views.graph(cleared ? null : focus, () => setCleared(true))}</div>
+        </ViewFrame>
+    )
+}
+
+function ScreenshotsView({ data }) {
+    const items = data.evidence || []
+    if (!items.length) return <div className="ask-block ask-empty">The agent hasn't screenshotted anything matching that yet.</div>
+    const phish = items.filter(e => e.phishing).length
+    return (
+        <ViewFrame title={`${items.length} page${items.length === 1 ? "" : "s"} the agent visited`}
+            note={`Screenshots · ${phish} phishing`} full={() => <EvidenceList items={items} limit={items.length} />}>
+            <EvidenceList items={items} limit={8} />
+        </ViewFrame>
+    )
+}
+
+function LedgerChain({ data, views }) {
+    const rows = data.records || [], chain = data.chain || {}
+    const body = (n) => (
+        <>
+            <div className={`ask-chain-status ${chain.valid ? "ok" : "bad"}`}>
+                {chain.valid ? <Lock /> : <LockOpen />}
+                {chain.valid
+                    ? <>All {chain.checked} blocks verify — every hash links to the one before it, nothing was altered.</>
+                    : <>Chain broken at entry <span className="mono">{chain.failing}</span> — a record was changed or removed.</>}
+            </div>
+            {!rows.length ? <div className="ask-empty">No entries{data.entity ? ` for ${data.entity}` : ""} yet.</div> : (
+                <ol className="ask-chain">
+                    {rows.slice(0, n).map((r, i) => (
+                        // joined to the entry above only if that one's prev_hash IS this hash;
+                        // filtered to one host, other entries sit in between
+                        <li key={r.ledger_id || r.entry_hash}
+                            className={[chain.failing === r.ledger_id && "bad", i > 0 && rows[i - 1].prev_hash !== r.entry_hash && "gap"].filter(Boolean).join(" ")}
+                            title={i > 0 && rows[i - 1].prev_hash !== r.entry_hash ? "Other ledger entries sit between these two" : undefined}>
+                            <div className="ask-chain-top">
+                                <b>{(r.action_taken || "").startsWith("NETWORK_ISOLATION") ? `Isolated ${r.entity_id}` : `${label(r.action_taken)} · ${r.entity_id}`}</b>
+                                <time title={exactTime(r.timestamp)}>{r.timestamp ? timeAgo(r.timestamp) : ""}</time>
+                            </div>
+                            <span className="td-faint">{label(r.stage)} · {(r.analyst_user || "").startsWith("system") ? "AI" : r.analyst_user}</span>
+                            {r.reasoning_output && <p>{r.reasoning_output}</p>}
+                            <span className="ask-hash mono" title={`hash ${r.entry_hash}\nprevious ${r.prev_hash}`}>
+                                <Link2 /> {String(r.entry_hash || "").slice(0, 12)} ← {String(r.prev_hash || "").slice(0, 12)}
+                            </span>
+                        </li>
+                    ))}
+                </ol>
+            )}
+        </>
+    )
+    return (
+        <ViewFrame title={data.entity ? `Audit trail for ${data.entity}` : "Recent audit trail"}
+            note={`Ledger · ${rows.length} entr${rows.length === 1 ? "y" : "ies"}`}
+            onTab={views?.openLedger} tabLabel="Open the ledger" full={() => body(rows.length)}>
+            {body(5)}
+        </ViewFrame>
+    )
+}
+
+function CompareView({ data, onFilter }) {
+    const items = data.entities || []
+    return (
+        <ViewFrame title={items.map(e => e.name).join(" vs ")} note={`Comparison · ${items.length} side by side`}>
+            <div className="ask-compare" style={{ "--cols": items.length }}>
+                {items.map(e => <EntityBlock key={e.name} data={e} onFilter={onFilter} />)}
+            </div>
+        </ViewFrame>
+    )
+}
+
+function Block({ block, onOpenAlert, onFilter, views }) {
     const d = block.data || {}
     switch (block.render) {
         case "alerts": return <AlertsBlock data={d} onOpenAlert={onOpenAlert} />
@@ -190,11 +351,17 @@ function Block({ block, onOpenAlert, onFilter }) {
                 <button className="ask-link" onClick={() => onFilter(d.host)}>Open {d.host} <ArrowRight /></button>
             </div>
         )
-        case "evidence": return <div className="ask-block"><EvidenceList items={d.evidence} /></div>
+        case "evidence": return d.evidence?.length ? <div className="ask-block"><EvidenceList items={d.evidence} /></div>
+            : <div className="ask-block ask-empty">The agent has no screenshot of that page yet.</div>
         case "findings": return <FindingsBlock data={d} onFilter={onFilter} />
         case "ledger": return <LedgerBlock data={d} />
         case "investigation": return <InvestigationBlock data={d} />
         case "status": return <StatusBlock data={d} />
+        case "dashboard": return views ? <DashboardView data={d} views={views} onFilter={onFilter} /> : null
+        case "graph_explorer": return views ? <GraphView data={d} views={views} /> : null
+        case "screenshots": return <ScreenshotsView data={d} />
+        case "ledger_view": return <LedgerChain data={d} views={views} />
+        case "compare": return <CompareView data={d} onFilter={onFilter} />
         default: return null
     }
 }
@@ -255,15 +422,17 @@ function Steps({ steps, live }) {
     )
 }
 
-function Message({ m, live, onOpenAlert, onFilter, onDecide }) {
+const WIDE = new Set(["dashboard", "graph_explorer", "screenshots", "compare"])
+
+function Message({ m, live, onOpenAlert, onFilter, onDecide, views }) {
     if (m.role === "user") return <div className="ask-msg user"><div className="ask-bubble">{m.content}</div></div>
     const thinking = live && !m.content && !(m.steps || []).length
     return (
-        <div className="ask-msg ai">
+        <div className={`ask-msg ai${(m.blocks || []).some(b => WIDE.has(b.render)) ? " wide" : ""}`}>
             <span className="ask-avatar"><Sparkles /></span>
             <div className="ask-body">
                 {(m.steps || []).length > 0 && <Steps steps={m.steps} live={live} />}
-                {(m.blocks || []).map((b, i) => <Block key={i} block={b} onOpenAlert={onOpenAlert} onFilter={onFilter} />)}
+                {(m.blocks || []).map((b, i) => <Block key={i} block={b} onOpenAlert={onOpenAlert} onFilter={onFilter} views={views} />)}
                 {(m.approvals || []).map(a => <ApprovalCard key={a.approval_id} approval={a} onDecide={(ap, ok) => onDecide(m, ap, ok)} />)}
                 {thinking ? <div className="ai-loading"><span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />Thinking…</div>
                     : m.content ? <AiMarkdown text={m.content} /> : null}
@@ -272,7 +441,7 @@ function Message({ m, live, onOpenAlert, onFilter, onDecide }) {
     )
 }
 
-export default function AskAI({ onOpenAlert, onFilter }) {
+export default function AskAI({ onOpenAlert, onFilter, views }) {
     const [convos, setConvos] = useState([])
     const [activeId, setActiveId] = useState(() => { try { return localStorage.getItem("og_ask_convo") } catch { return null } })
     const [messages, setMessages] = useState([])
@@ -468,7 +637,7 @@ export default function AskAI({ onOpenAlert, onFilter }) {
                             </div>
                         ) : messages.map((m, i) => (
                             <Message key={m.message_id || i} m={m} live={!!m.live}
-                                onOpenAlert={onOpenAlert} onFilter={onFilter} onDecide={decide} />
+                                onOpenAlert={onOpenAlert} onFilter={onFilter} onDecide={decide} views={views} />
                         ))}
                     {error && <div className="login-error ask-error">{error}</div>}
                 </div>

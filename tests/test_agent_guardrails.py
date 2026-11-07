@@ -72,3 +72,38 @@ def test_get_alert_only_offered_with_a_real_id(monkeypatch):
     names = lambda tools: [t["function"]["name"] for t in tools]
     assert names(agent._ollama_tools("which hosts had phishing?", None)) == ["search_alerts"]
     assert names(agent._ollama_tools("explain this", "alert 60197cfe-ca50-4bfb-9467-25d72cb9d6a0")) == ["search_alerts", "get_alert"]
+
+
+@pytest.mark.parametrize("text, view", [
+    ("show me everything about phishing this week", "show_dashboard"),
+    ("show me the network graph around LAPTOP-10", "show_graph"),
+    ("what did the phishing pages look like?", "show_screenshots"),
+    ("show me the audit trail for LAPTOP-10", "show_ledger"),
+    ("compare BUILD-SRV-02 and DEV-BOX-11", "compare_entities"),
+    ("isolate LAPTOP-10 from the network", None),
+    ("which hosts had phishing?", None),
+])
+def test_view_requests_pick_the_right_view(text, view):
+    views = agent._views(text)
+    assert (views[0] if views else None) == view
+
+
+def test_view_tools_only_offered_when_asked_to_see_something(monkeypatch):
+    monkeypatch.setattr(agent, "tool_specs", lambda: [
+        {"name": "search_alerts", "description": "d", "inputSchema": {}, "render": "alerts"},
+        {"name": "show_graph", "description": "d", "inputSchema": {}, "render": "graph_explorer"},
+        {"name": "show_dashboard", "description": "d", "inputSchema": {}, "render": "dashboard"}])
+    names = lambda tools: [t["function"]["name"] for t in tools]
+    assert names(agent._ollama_tools("which hosts had phishing?", None)) == ["search_alerts"]
+    assert names(agent._ollama_tools("show me the graph around LAPTOP-10", None)) == ["search_alerts", "show_graph", "show_dashboard"]
+
+
+def test_follow_up_on_results_answers_without_tools(monkeypatch):
+    monkeypatch.setattr(agent, "mentioned_entities", lambda text: [("LAPTOP-10", "host")] if "LAPTOP-10" in text else [])
+    history = [{"role": "user", "content": "show me phishing this week"},
+               {"role": "tool", "content": "Dashboard ... Hosts: LAPTOP-10 (2) ...", "tool_name": "show_dashboard"}]
+    assert agent._from_history("which of those hosts got hit the most?", history)
+    assert not agent._from_history("which of those hosts got hit the most?", [])           # nothing to answer from
+    assert not agent._from_history("show me the graph for those", history)                   # a new view
+    assert not agent._from_history("tell me about LAPTOP-10 and those users", history)       # a new name
+    assert not agent._from_history("isolate those hosts", history)                           # an action

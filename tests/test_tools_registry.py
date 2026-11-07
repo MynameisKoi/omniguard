@@ -110,3 +110,30 @@ def test_specs_split_read_and_action():
     assert specs["isolate"]["kind"] == "action"
     assert specs["lookup"]["inputSchema"]["required"] == ["name"]
     assert [s["name"] for s in tools.tool_specs(kinds=("read",))] == ["lookup", "broken", "offline"]
+
+
+
+REAL_TOOLS = dict(tools.TOOLS)   # captured at import, before the stubs go in
+
+
+def test_view_tools_are_read_only_and_drawn_as_views():
+    for name, render in [("show_dashboard", "dashboard"), ("show_graph", "graph_explorer"),
+                         ("show_screenshots", "screenshots"), ("show_ledger", "ledger_view"),
+                         ("compare_entities", "compare")]:
+        assert REAL_TOOLS[name]["kind"] == "read"
+        assert REAL_TOOLS[name]["render"] == render
+
+
+def test_compare_needs_two_names():
+    with pytest.raises(tools.ToolError, match="at least two"):
+        tools.compare_entities("LAPTOP-10")
+
+
+def test_screenshots_read_a_verdict_word_as_the_verdict(monkeypatch):
+    seen = {}
+    def fake_list(verdict=None, limit=50, **_):
+        seen["verdict"] = verdict
+        return [{"evidence_id": "e1", "url": "https://x.test", "domain": "x.test", "phishing": True, "confidence": 0.9}]
+    monkeypatch.setattr(tools, "list_evidence", fake_list)
+    r = tools.show_screenshots(query="phishing")
+    assert seen["verdict"] == "phishing" and "1 phishing" in r["reply"].replace("*", "")

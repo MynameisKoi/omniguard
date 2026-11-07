@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from db import database
 from evidence import list_evidence
 from graph import get_host_graph
-from ledger import append_ledger_entry, get_ledger_for_entity, get_recent_ledger
+from ledger import append_ledger_entry, get_ledger_for_entity, get_recent_ledger, verify_ledger_integrity
 from status import check_mongo, check_neo4j, check_ollama
 from agents import MultiAgentInvestigationPipeline
 
@@ -82,7 +82,9 @@ def mentioned_entities(text, limit=5):
 
 # ── read tools ────────────────────────────────────────────────────────────
 
-def search_alerts(query=None, severity=None, engine=None, host=None, status=None, since_hours=None, limit=20):
+def _alert_query(query=None, severity=None, engine=None, host=None, status=None, since_hours=None):
+    """The Mongo filter behind search_alerts and show_dashboard, so a list and
+    a dashboard of "the same thing" always agree."""
     q = {}
     if _given(severity):
         if severity not in SEVERITIES:
@@ -99,6 +101,11 @@ def search_alerts(query=None, severity=None, engine=None, host=None, status=None
     if _given(query):
         rx = {"$regex": re.escape(str(query)), "$options": "i"}
         q["$or"] = [{f: rx} for f in SEARCH_FIELDS]
+    return q
+
+
+def search_alerts(query=None, severity=None, engine=None, host=None, status=None, since_hours=None, limit=20):
+    q = _alert_query(query, severity, engine, host, status, since_hours)
     limit = max(1, min(int(limit or 20), 100))
     total = alerts_collection.count_documents(q)
     rows = list(alerts_collection.find(q, ALERT_FIELDS).sort("timestamp", -1).limit(limit))
@@ -244,14 +251,14 @@ def get_evidence(alert_id=None, url=None, domain=None):
         raise ToolError("give an alert_id, a url or a domain")
     shots = list_evidence(domain=domain if _given(domain) else None, url=url if _given(url) else None, limit=6)
     if not shots:
-        return {"summary": "The VerifyEye agent has no screenshot of that page yet.", "data": {"evidence": []}}
+        raise ToolError("The VerifyEye agent has no screenshot of that page yet. Say so plainly; don't describe any page.")
     e = shots[0]
     verdict = "phishing" if e["phishing"] else "blocked by a bot check" if e.get("blocked") else "cleared"
     summary = (f"{len(shots)} screenshot(s). Latest: {e['url']} — {verdict}"
                + (f", confidence {e['confidence']:.0%}" if e["phishing"] else "")
                + (f", looks like {e['brand']}" if e.get("brand") else "")
                + (f", password goes to {', '.join(e['form_actions'][:2])}" if e.get("off_domain") else "")
-               + ". Shown to the analyst.")
+               + ". Shown to the analyst. You can't see the image: don't describe what the page looks like.")
     return {"summary": summary, "data": {"evidence": shots}}
 
 
@@ -324,6 +331,148 @@ def investigate_host(hostname):
     return {"summary": summary, "data": {"investigation": result}}
 
 
+# ── view tools: draw a whole dashboard view inside the reply ─────────────
+# Each returns what a real dashboard component draws (alert ids: the page
+# already holds the live alerts, so saved chats stay small), plus a summary dense
+# enough that the model can answer follow-ups ("which host is worst?") from it.
+
+def _top(rows, field, n=5):
+    c = Counter(a.get(field) for a in rows if a.get(field))
+    return ", ".join(f"{v} ({k})" for v, k in c.most_common(n)) or "none"
+
+
+def _view_label(query=None, severity=None, engine=None, host=None, status=None, since_hours=None):
+    bits = [f"“{query}”" if _given(query) else None, host if _given(host) else None,
+            severity if _given(severity) else None,
+            str(engine).lower() if _given(engine) and str(engine).lower() in ENGINE_WORD else None,
+            status if _given(status) else None,
+            f"last {_hours(since_hours)}" if _given(since_hours) else None]
+    return " · ".join(b for b in bits if b) or "all alerts"
+
+
+def _hours(h):
+    h = float(h)
+    return f"{h / 24:g} days" if h >= 48 else f"{h:g} hours"
+
+
+def show_dashboard(query=None, severity=None, engine=None, host=None, status=None, since_hours=None):
+    q = _alert_query(query, severity, engine, host, status, since_hours)
+    rows = list(alerts_collection.find(q, ALERT_FIELDS).sort("timestamp", -1).limit(500))
+    label = _view_label(query, severity, engine, host, status, since_hours)
+    if not rows:
+        raise ToolError(f"No alerts match {label}. Try search_alerts with fewer filters, or tell the analyst.")
+    sev = Counter(a.get("severity") for a in rows)
+    times = [a["timestamp"] for a in rows if isinstance(a.get("timestamp"), datetime)]
+    summary = (f"Dashboard of {label} drawn for the analyst: {len(rows)} alert(s) "
+               f"({', '.join(f'{sev[s]} {s}' for s in SEVERITIES if sev[s])}), "
+               f"{sum(1 for a in rows if a.get('status') == 'new')} untriaged. "
+               f"From {_when(min(times)) if times else '?'} to {_when(max(times)) if times else '?'}. "
+               f"Engines: {_top(rows, 'source')}. Hosts: {_top(rows, 'host', 8)}. "
+               f"Users: {_top(rows, 'user')}. Domains: {_top(rows, 'domain')}. "
+               f"Brands impersonated: {_top(rows, 'brand_target')}. Techniques: {_top(rows, 'mitre_technique')}.")
+    return {"summary": summary, "data": {"label": label, "term": str(query) if _given(query) else label,
+                                          "alert_ids": [a["alert_id"] for a in rows]}}
+
+
+def _alerts_about(name):
+    """Every alert a name appears in, as any kind of entity (exact match),
+    falling back to a text search."""
+    rx = {"$regex": f"^{re.escape(name)}$", "$options": "i"}
+    rows = list(alerts_collection.find({"$or": [{f: rx} for f, _ in ENTITY_FIELDS]}, ALERT_FIELDS))
+    return rows or list(alerts_collection.find(_alert_query(query=name), ALERT_FIELDS).limit(200))
+
+
+def show_graph(entity):
+    name = str(entity or "").strip()
+    if not name:
+        raise ToolError("give a host, user, domain, IP or brand to centre the graph on")
+    rows = _alerts_about(name)
+    if not rows:
+        raise ToolError(f"'{name}' isn't in any alert, so there's nothing to light up in the graph")
+    distinct = lambda f: sorted({a[f] for a in rows if a.get(f)} - {name})
+    ips = sorted(({a.get("src_ip") for a in rows} | {a.get("dst_ip") for a in rows}) - {None, "", name})
+    summary = (f"Network graph drawn with everything linked to {name} lit up ({len(rows)} alert(s)). "
+               f"Connected hosts: {', '.join(distinct('host')[:8]) or 'none'}. "
+               f"Users: {', '.join(distinct('user')[:6]) or 'none'}. "
+               f"Domains: {', '.join(distinct('domain')[:6]) or 'none'}. IPs: {', '.join(ips[:6]) or 'none'}. "
+               f"Techniques: {', '.join(distinct('mitre_technique')[:4]) or 'none'}.")
+    return {"summary": summary, "data": {"entity": name, "alert_ids": [a["alert_id"] for a in rows]}}
+
+
+# what a small model puts in `query` when it means the verdict
+VERDICT_WORDS = {"phishing": "phishing", "phish": "phishing", "malicious": "phishing", "fake": "phishing",
+                 "cleared": "cleared", "safe": "cleared", "genuine": "cleared", "legit": "cleared", "legitimate": "cleared",
+                 "blocked": "blocked", "bot check": "blocked", "captcha": "blocked"}
+
+
+def show_screenshots(domain=None, query=None, verdict=None):
+    verdict = verdict if verdict in ("phishing", "cleared", "blocked") else None
+    if _given(query) and str(query).strip().lower() in VERDICT_WORDS:
+        verdict, query = verdict or VERDICT_WORDS[str(query).strip().lower()], None
+    shots = list_evidence(verdict=verdict, limit=300)
+    # loose match on purpose: "GitHub" should find github.com and a GitHub look-alike
+    for term in (t for t in (domain, query) if _given(t)):
+        tl = str(term).lower()
+        shots = [e for e in shots if tl in " ".join(str(e.get(k) or "") for k in ("url", "domain", "brand")).lower()]
+    shots = shots[:24]
+    if not shots:
+        what = " / ".join(str(t) for t in (domain, query, verdict) if _given(t)) or "anything"
+        raise ToolError(f"The VerifyEye agent has no screenshots of {what}. Say so plainly; don't describe any page.")
+    def line(e):
+        v = "phishing" if e.get("phishing") else "blocked by a bot check" if e.get("blocked") else "cleared"
+        return (f"- {e.get('domain') or e.get('url')}: {v}" + (f", looks like {e['brand']}" if e.get("brand") else "")
+                + (f", {e['confidence']:.0%} confident" if e.get("phishing") and e.get("confidence") else "")
+                + (", password sent off-domain" if e.get("off_domain") else "") + f", {_when(e.get('captured_at'))}")
+    n_phish = sum(1 for e in shots if e.get("phishing"))
+    n_block = sum(1 for e in shots if e.get("blocked"))
+    n_clear = len(shots) - n_phish - n_block
+    phish_domains = sorted({e.get("domain") for e in shots if e.get("phishing") and e.get("domain")})
+    # the model can't see images and will invent what they show: the reply is
+    # written from the verdicts instead (agent.py uses "reply" as the answer)
+    reply = (f"Here {'is' if len(shots) == 1 else 'are'} {len(shots)} page{'s' if len(shots) != 1 else ''} the VerifyEye agent visited: "
+             + ", ".join(x for x in (f"**{n_phish} phishing**" if n_phish else "", f"{n_clear} cleared as genuine" if n_clear else "",
+                                     f"{n_block} blocked by a bot check" if n_block else "") if x) + "."
+             + (f" The phishing ones are on {', '.join(phish_domains[:4])}." if phish_domains else "")
+             + " Click any screenshot to see it full size with the agent's reasoning.")
+    return {"reply": reply, "summary": (f"{len(shots)} screenshot(s) shown to the analyst. You can't see the images: describe only "
+                        "these verdicts, never what a page looks like.\n" + "\n".join(line(e) for e in shots[:10])),
+            "data": {"evidence": shots}}
+
+
+def show_ledger(entity=None):
+    rows = get_ledger_for_entity(entity) if _given(entity) else get_recent_ledger(25)
+    rows = [{k: v for k, v in r.items() if k != "_id"} for r in rows][:25]
+    valid, failing, checked = verify_ledger_integrity()
+    chain = {"valid": valid, "failing": failing, "checked": checked}
+    head = (f"The whole ledger chain ({checked} blocks) verifies: no entry has been altered. " if valid
+            else f"WARNING: the ledger chain is BROKEN at entry {failing}: a record was altered or removed. ")
+    if not rows:
+        return {"summary": head + "No entries" + (f" for {entity}" if _given(entity) else "") + ".",
+                "data": {"records": [], "chain": chain, "entity": entity}}
+    summary = head + f"{len(rows)} entr{'y' if len(rows) == 1 else 'ies'}" + (f" for {entity}" if _given(entity) else "") + ", newest first:\n" + \
+        "\n".join(f"- {str(r.get('timestamp', ''))[:16]} {r.get('action_taken')} on {r.get('entity_id')} "
+                  f"by {r.get('analyst_user')}" for r in rows[:10])
+    return {"summary": summary, "data": {"records": rows, "chain": chain, "entity": entity if _given(entity) else None}}
+
+
+def compare_entities(names):
+    items = names if isinstance(names, list) else re.split(r"\s*(?:,|\band\b|\bvs\.?\b|\bversus\b)\s*", str(names or ""))
+    items = [str(n).strip() for n in items if str(n).strip()][:4]
+    if len(items) < 2:
+        raise ToolError("give at least two names to compare, separated by commas")
+    out, lines = [], []
+    for n in items:
+        try:
+            r = entity_summary(n)
+            out.append(r["data"])
+            lines.append(f"{n}: {r['summary']}")
+        except ToolError as e:
+            lines.append(f"{n}: {e}")
+    if not out:
+        raise ToolError("none of those names are in the alerts")
+    return {"summary": "Shown side by side.\n" + "\n".join(lines), "data": {"entities": out}}
+
+
 # ── action tools: only run after an analyst approves ─────────────────────
 
 def isolate_host(hostname, reason=None, analyst="unknown"):
@@ -382,6 +531,22 @@ TOOLS = {
     "investigate_host": dict(fn=investigate_host, kind="read", render="investigation",
         description="Run the multi-agent investigation (correlate, triage, contain) on one host and get a verdict with recommended actions.",
         parameters={"hostname": S}, required=["hostname"]),
+    "show_dashboard": dict(fn=show_dashboard, kind="read", render="dashboard",
+        description="Draw a full mini dashboard (stats, charts, affected hosts, graph, every alert) for alerts matching text, severity, engine, host, status or recent hours. Use when the analyst asks to SEE, show or visualise a set of alerts.",
+        parameters={"query": S, "severity": {"type": "string", "enum": SEVERITIES}, "engine": {"type": "string", "enum": ["verifyeye", "spectrac2"]},
+                    "host": S, "status": {"type": "string", "enum": STATUSES}, "since_hours": N}, required=[]),
+    "show_graph": dict(fn=show_graph, kind="read", render="graph_explorer",
+        description="Draw the interactive network graph with everything linked to one host, user, domain, IP or brand lit up.",
+        parameters={"entity": S}, required=["entity"]),
+    "show_screenshots": dict(fn=show_screenshots, kind="read", render="screenshots",
+        description="Show a gallery of the pages the VerifyEye agent screenshotted, optionally for a domain, a brand/text, or a verdict (phishing, cleared, blocked).",
+        parameters={"domain": S, "query": S, "verdict": {"type": "string", "enum": ["phishing", "cleared", "blocked"]}}, required=[]),
+    "show_ledger": dict(fn=show_ledger, kind="read", render="ledger_view",
+        description="Show the audit trail as its hash chain, for one host/alert or the most recent entries, and whether the chain verifies (nothing tampered).",
+        parameters={"entity": S}, required=[]),
+    "compare_entities": dict(fn=compare_entities, kind="read", render="compare",
+        description="Compare two to four hosts, users, domains or IPs side by side. names is comma separated, e.g. 'BUILD-SRV-02, DEV-BOX-11'.",
+        parameters={"names": S}, required=["names"]),
     "isolate_host": dict(fn=isolate_host, kind="action", render="action",
         description="Isolate a compromised host from the network. Needs the analyst's approval before it runs.",
         parameters={"hostname": S, "reason": S}, required=["hostname"]),
