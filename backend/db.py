@@ -2,7 +2,10 @@ from pymongo import MongoClient
 
 from config import MONGO_URI, MONGO_DB
 
-client = MongoClient(MONGO_URI)
+# tz_aware: every stored time is UTC. without it they come back with no zone,
+# get sent as e.g. "2026-11-06T21:08:36", and browsers read that as local time
+# (an 8-hour shift in California)
+client = MongoClient(MONGO_URI, tz_aware=True)
 
 # creating the database and also the collection 
 database = client[MONGO_DB]

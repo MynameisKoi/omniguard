@@ -4,7 +4,7 @@ import { API_URL } from "./config"
 
 // v1 analyst login: checks email + password against the backend, then
 // hands the user up to main.jsx which swaps in the dashboard
-export default function Login({ onLogin, onBack }) {
+export default function Login({ onLogin, onBack, notice }) {
     const [email, setEmail] = useState("")
     const [password, setPassword] = useState("")
     const [error, setError] = useState(null)
@@ -69,6 +69,8 @@ export default function Login({ onLogin, onBack }) {
                         <div className="login-sub">Sign in to the analyst dashboard</div>
                     </div>
                 </div>
+
+                {notice && <div className="login-notice" role="status">{notice}</div>}
 
                 <label className="login-field">
                     <span>Email</span>

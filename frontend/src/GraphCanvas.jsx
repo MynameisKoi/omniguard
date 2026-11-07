@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useMemo }  from 'react'
 import cytoscape from 'cytoscape'
 import fcose from 'cytoscape-fcose'
-import { API_URL } from "./config"
+import { api } from "./api"
 import { Maximize2, Minimize2, Plus, Minus, Scan, Shuffle } from 'lucide-react'
 import { buildGraphStyle, attachGraphInteractions, NODE_TYPES, TOKEN } from './graphStyle'
 import { scopeIds } from './graphScope'
@@ -75,8 +75,8 @@ function GraphCanvas({ compact = false, refreshKey, host, onReady, onGraph, tool
         let cancelled = false
         const run = () => {
             const req = host
-                ? fetch(`${API_URL}/graph/host/${encodeURIComponent(host)}`)
-                : fetch(`${API_URL}/graph/view`, {
+                ? api(`/graph/host/${encodeURIComponent(host)}`)
+                : api(`/graph/view`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(scopedIds
@@ -84,7 +84,11 @@ function GraphCanvas({ compact = false, refreshKey, host, onReady, onGraph, tool
                         : { limit, include: includeKey ? includeKey.split("\n") : [] }),
                 })
             req
-            .then(res => res.json())
+            .then(res => {
+                if (res.status === 503) throw new Error("the graph database (Neo4j) is offline")
+                if (!res.ok) throw new Error(`the server answered ${res.status}`)
+                return res.json()
+            })
             .then(data => { if (!cancelled) { setGraph(data); onGraph?.(data) } })
             .catch(err => { if (!cancelled) setError(err.message) })
             .finally(() => { if (!cancelled) setLoading(false) })

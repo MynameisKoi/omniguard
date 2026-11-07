@@ -1,15 +1,18 @@
-from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request
+from fastapi.responses import JSONResponse
+from neo4j.exceptions import ServiceUnavailable
 from starlette.concurrency import run_in_threadpool
 from events import manager
 from models import Alert, AlertCreate
 from db import database, brands_collection
 from ai import run_triage, answer_question
-from auth import check_login, update_user
+from auth import check_login, update_user, create_session, session_user, end_session
 from status import check_mongo, check_neo4j, check_ollama
 from datetime import datetime, timezone, timedelta
 from typing import Literal
 from pydantic import BaseModel, Field
 from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_view
+from evidence import store_evidence, list_evidence, get_evidence, get_image, EvidenceError
 from dedup import compute_alert_simhash, find_matching_alert
 from ledger import (
     append_ledger_entry,
@@ -30,6 +33,11 @@ alerts_collection = database["alerts"]
 
 app = FastAPI(title="OmniGuard SOC API")
 
+# graph endpoints while Neo4j is down: a clear 503, not a hang or a bare 500
+@app.exception_handler(ServiceUnavailable)
+async def neo4j_unavailable(request, exc):
+    return JSONResponse(status_code=503, content={"detail": "Graph database (Neo4j) is unavailable"})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -38,6 +46,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+# ── who's asking (#18) ──────────────────────────────────────────────
+# the dashboard sends "Authorization: Bearer <session token>" (from
+# /auth/login); machine clients send a service token. Endpoints the detectors
+# use to report (POST /alerts, POST /evidence, GET /brands) stay open for now.
+def bearer_token(request: Request):
+    header = request.headers.get("authorization", "")
+    return header[7:].strip() if header.lower().startswith("bearer ") else None
+
+def current_user(request: Request):
+    user = session_user(bearer_token(request))
+    if not user:
+        raise HTTPException(status_code=401, detail="Not signed in", headers={"WWW-Authenticate": "Bearer"})
+    return user
+
+AUTH = [Depends(current_user)]
 
 @app.get("/health")
 def get_health():
@@ -54,7 +78,14 @@ async def login(payload: LoginRequest):
     user = await run_in_threadpool(check_login, payload.email, payload.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    return user
+    token, expires = await run_in_threadpool(create_session, user)
+    return {**user, "token": token, "expires_at": expires}
+
+@app.post("/auth/logout", status_code=204)
+async def logout(request: Request):
+    token = bearer_token(request)
+    if token:
+        await run_in_threadpool(end_session, token)
 
 class ProfileUpdate(BaseModel):
     email: str
@@ -64,9 +95,12 @@ class ProfileUpdate(BaseModel):
 
 # profile page: change display name and/or password
 @app.post("/auth/profile")
-async def update_profile(payload: ProfileUpdate):
+async def update_profile(payload: ProfileUpdate, request: Request, me: dict = Depends(current_user)):
+    if payload.email.strip().lower() != me["email"]:
+        raise HTTPException(status_code=403, detail="You can only change your own account")
     user = await run_in_threadpool(
-        update_user, payload.email, payload.current_password, payload.name, payload.new_password
+        update_user, payload.email, payload.current_password, payload.name, payload.new_password,
+        bearer_token(request),
     )
     if not user:
         raise HTTPException(status_code=401, detail="Current password is incorrect")
@@ -139,21 +173,21 @@ async def create_alert(payload: AlertCreate) -> Alert:
     return alert
 
 # This is for the frontend 
-@app.get("/alerts", response_model=list[Alert])
+@app.get("/alerts", response_model=list[Alert], dependencies=AUTH)
 def get_alerts() -> list[Alert]:
     alerts: list[Alert] = list(alerts_collection.find({}, {"_id": 0}))
     return alerts
 
 # ── OCSF Export Endpoints (Enterprise SIEM Integration) ─────────────
 
-@app.get("/alerts/export/ocsf")
+@app.get("/alerts/export/ocsf", dependencies=AUTH)
 async def export_ocsf(limit: int = 200):
     """Exports alerts in standardized OCSF v1.2.0 batch envelope for Splunk/AWS Security Lake."""
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
     return export_alerts_to_ocsf(alerts)
 
 
-@app.get("/alerts/{alert_id}/ocsf")
+@app.get("/alerts/{alert_id}/ocsf", dependencies=AUTH)
 async def get_alert_ocsf(alert_id: str):
     """Retrieves an individual alert formatted as an OCSF Class 2001 (Security Finding)."""
     alert = alerts_collection.find_one({"alert_id": alert_id}, {"_id": 0})
@@ -161,8 +195,68 @@ async def get_alert_ocsf(alert_id: str):
         raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found")
     return alert_to_ocsf(alert)
 
+# ── agent evidence (#3) ─────────────────────────────────────────────
+# VerifyEye's sandboxed agent posts a screenshot + its verdict for every page
+# it checks (phishing or cleared). See evidence.py.
+class EvidenceCreate(BaseModel):
+    url: str = Field(max_length=4096)
+    final_url: str | None = Field(default=None, max_length=4096)
+    title: str | None = Field(default=None, max_length=500)
+    phishing: bool
+    confidence: float = Field(ge=0, le=1)
+    brand: str | None = Field(default=None, max_length=200)
+    off_domain: bool = False
+    credential_form: bool = False
+    # the agent hit a bot check and never saw the real page (no verdict)
+    blocked: bool = False
+    blocked_by: str | None = Field(default=None, max_length=100)
+    form_actions: list[str] = Field(default_factory=list, max_length=50)
+    image_type: Literal["image/jpeg", "image/png"] = "image/jpeg"
+    # base64 of the screenshot; the decoded image is capped at 5 MB in evidence.py
+    image_b64: str = Field(max_length=7_000_000)
+
+@app.post("/evidence", status_code=201)
+async def create_evidence(payload: EvidenceCreate):
+    try:
+        return await run_in_threadpool(store_evidence, payload.model_dump())
+    except EvidenceError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+@app.get("/evidence", dependencies=AUTH)
+async def evidence_list(domain: str | None = None, url: str | None = None,
+                        verdict: Literal["phishing", "cleared", "blocked"] | None = None, limit: int = 50):
+    return await run_in_threadpool(list_evidence, domain, url, verdict, max(1, min(limit, 200)))
+
+@app.get("/evidence/{evidence_id}", dependencies=AUTH)
+async def evidence_detail(evidence_id: str):
+    doc = await run_in_threadpool(get_evidence, evidence_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    return doc
+
+@app.get("/evidence/{evidence_id}/image", dependencies=AUTH)
+async def evidence_image(evidence_id: str):
+    doc = await run_in_threadpool(get_image, evidence_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    # captures never change once stored, so the browser can keep them
+    return Response(content=doc["image"], media_type=doc["image_type"], headers={
+        "Cache-Control": "private, max-age=86400, immutable",
+        "ETag": f'"{doc["image_sha256"]}"',
+    })
+
+@app.get("/alerts/{alert_id}/evidence", dependencies=AUTH)
+async def alert_evidence(alert_id: str):
+    """Every capture of the page this alert is about, newest first."""
+    alert = alerts_collection.find_one({"alert_id": alert_id}, {"_id": 0, "target_url": 1})
+    if not alert:
+        raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found")
+    if not alert.get("target_url"):
+        return []
+    return await run_in_threadpool(list_evidence, None, alert["target_url"], None, 20)
+
 # This is for graph to be shown in the frontend 
-@app.get("/graph")
+@app.get("/graph", dependencies=AUTH)
 def get_graph() -> None:
     return get_overview_graph()
 
@@ -177,24 +271,30 @@ class GraphViewRequest(BaseModel):
     include: list[str] = Field(default_factory=list, max_length=5000)
     only: list[str] | None = Field(default=None, max_length=5000)
 
-@app.post("/graph/view")
+@app.post("/graph/view", dependencies=AUTH)
 async def graph_view(payload: GraphViewRequest):
     return await run_in_threadpool(get_graph_view, payload.limit, payload.include, payload.only)
 
-@app.get("/graph/host/{hostname}")
+@app.get("/graph/host/{hostname}", dependencies=AUTH)
 def get_host_graph_route(hostname: str):
     return get_host_graph(hostname)
 
 
 # making the websocket connection for live alert in the frontend 
 @app.websocket("/ws/alerts")
-async def get_live_alerts(websocket: WebSocket) -> None: 
+async def get_live_alerts(websocket: WebSocket) -> None:
+    # browsers can't set headers on a websocket, so the token rides in the query
+    user = await run_in_threadpool(session_user, websocket.query_params.get("token"))
+    if not user:
+        await websocket.close(code=1008, reason="Not signed in")
+        return
     await manager.connect(websocket)
-    while True: 
+    while True:
         try:
             await websocket.receive_text()
         except WebSocketDisconnect:
             manager.disconnect(websocket)
+            break
 
 # new endpoint for getting the brands
 @app.get("/brands")
@@ -202,7 +302,7 @@ def get_brands():
     return list(brands_collection.find({}, {"_id": 0}))
 
 # endpoint for ai summary for all the alerts
-@app.get("/ai/summary")
+@app.get("/ai/summary", dependencies=AUTH)
 async def ai_summary():
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(50))
     triage = await run_in_threadpool(run_triage, alerts)
@@ -212,7 +312,7 @@ async def ai_summary():
 # block (they talk to mongo/neo4j/ollama over the network) so we run them off the
 # event loop. "ingestion" means the pipeline can actually store alerts — mongo is
 # up and at least one alert has landed.
-@app.get("/status")
+@app.get("/status", dependencies=AUTH)
 async def get_status():
     def gather():
         mongo = check_mongo()
@@ -233,7 +333,7 @@ class ChatRequest(BaseModel):
     question: str
     history: list[ChatTurn] = Field(default_factory=list, max_length=10)
 
-@app.post("/ai/chat")
+@app.post("/ai/chat", dependencies=AUTH)
 async def ai_chat(payload: ChatRequest):
     # newest first; counts use all of them, the prompt only lists the newest 50
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(2000))
@@ -261,7 +361,7 @@ class PipelineInvestigationRequest(BaseModel):
     hostname: str
 
 
-@app.post("/ai/investigate/pipeline")
+@app.post("/ai/investigate/pipeline", dependencies=AUTH)
 async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
     """
     Runs multi-agent investigation workflow on a target host:
@@ -274,7 +374,7 @@ async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
 
 
 @app.post("/hosts/{hostname}/isolate", status_code=202)
-async def isolate_host(hostname: str):
+async def isolate_host(hostname: str, me: dict = Depends(current_user)):
     """
     Host containment (DEMO STUB).
     Records the containment decision to the immutable ledger and returns what the
@@ -290,7 +390,7 @@ async def isolate_host(hostname: str):
             stage="EDR_CONTAINMENT",
             action_taken="NETWORK_ISOLATION_SIMULATED",
             reasoning_output=msg,
-            analyst_user="analyst@omniguard.io",
+            analyst_user=me["email"],   # who actually pressed it
         )
     except Exception as e:
         print(f"Ledger write notice: {e}")
@@ -306,21 +406,21 @@ async def isolate_host(hostname: str):
 
 # ── Decision Ledger Audit Endpoints ─────────────────────────────────
 
-@app.get("/investigations/ledger")
+@app.get("/investigations/ledger", dependencies=AUTH)
 async def read_ledger(limit: int = 50):
     """Retrieves newest entries from the replayable investigation decision ledger."""
     records = await run_in_threadpool(get_recent_ledger, limit)
     return {"records": records, "count": len(records)}
 
 
-@app.get("/investigations/ledger/host/{hostname}")
+@app.get("/investigations/ledger/host/{hostname}", dependencies=AUTH)
 async def read_host_ledger(hostname: str):
     """Retrieves all decision ledger records associated with a specific host."""
     records = await run_in_threadpool(get_ledger_for_entity, hostname)
     return {"host": hostname, "records": records, "count": len(records)}
 
 
-@app.get("/investigations/ledger/verify")
+@app.get("/investigations/ledger/verify", dependencies=AUTH)
 async def verify_ledger():
     """
     Cryptographic verification endpoint:
