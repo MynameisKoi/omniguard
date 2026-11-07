@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
     Sparkles, Plus, Send, MessageSquare, Trash2, Pencil, Check, X, ArrowRight,
     ShieldAlert, ShieldCheck, ShieldOff, CircleAlert, Wrench, Maximize2, Link2, Lock, LockOpen,
@@ -436,7 +436,29 @@ function Choices({ data, onAsk, disabled }) {
     )
 }
 
-function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views }) {
+// A reply that's coming in is revealed a few letters at a time, left to right.
+// The server sends whole checked sentences; this smooths them out, and speeds up
+// when it falls behind so it never lags far. Saved replies show at once.
+function useTypewriter(text, animate) {
+    const [n, setN] = useState(animate ? 0 : text.length)
+    const typing = animate && n < text.length
+    useEffect(() => {
+        if (!typing) return
+        const id = requestAnimationFrame(() =>
+            setN(k => Math.min(text.length, k + Math.max(2, Math.ceil((text.length - k) / 40)))))
+        return () => cancelAnimationFrame(id)
+    }, [typing, n, text])
+    if (!animate) return { shown: text, typing: false }
+    let shown = text.slice(0, n)
+    if ((shown.match(/\*\*/g) || []).length % 2) shown += "**"     // don't flash a half-open **bold**
+    return { shown, typing }
+}
+
+function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views, onGrow }) {
+    // animate replies that were still coming in when this message appeared
+    const [animate] = useState(!!live)
+    const { shown: text } = useTypewriter(m.content || "", animate)
+    useEffect(() => { if (animate) onGrow?.() }, [text, animate, onGrow])
     if (m.role === "user") return <div className="ask-msg user"><div className="ask-bubble">{m.content}</div></div>
     // while the reply is still coming: what it's doing, at the bottom, until it's done
     // (hidden while a tool's own step line is spinning)
@@ -449,7 +471,7 @@ function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views 
                 {(m.steps || []).length > 0 && <Steps steps={m.steps} live={live} />}
                 {(m.blocks || []).filter(b => b.render !== "choices").map((b, i) => <Block key={i} block={b} onOpenAlert={onOpenAlert} onFilter={onFilter} views={views} />)}
                 {(m.approvals || []).map(a => <ApprovalCard key={a.approval_id} approval={a} onDecide={(ap, ok) => onDecide(m, ap, ok)} />)}
-                {m.content ? <AiMarkdown text={m.content} /> : null}
+                {text ? <AiMarkdown text={text} /> : null}
                 {working && (
                     <div className="ai-loading ask-working" role="status">
                         <span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />
@@ -462,7 +484,9 @@ function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views 
     )
 }
 
-const emptyReply = () => ({ role: "assistant", content: "", steps: [], blocks: [], approvals: [], live: true })
+// uid: the same Message stays mounted when the live reply becomes the saved one
+const emptyReply = () => ({ role: "assistant", content: "", steps: [], blocks: [], approvals: [], live: true,
+                            uid: Math.random().toString(36).slice(2) })
 
 export default function AskAI({ onOpenAlert, onFilter, views }) {
     const [convos, setConvos] = useState([])
@@ -537,6 +561,12 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
     const reply = activeId && loadedId === activeId ? live[activeId] : null
     const shown = reply ? [...messages, reply] : messages
     const busy = !!reply
+
+    // while a reply types out: keep following it, unless the analyst scrolled up to read
+    const stickToBottom = useCallback(() => {
+        const el = logRef.current
+        if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight
+    }, [])
 
     // keep the newest message in view while the agent works
     useEffect(() => {
@@ -740,7 +770,7 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
                                 </div>
                             </div>
                         ) : shown.map((m, i) => (
-                            <Message key={m.message_id || i} m={m} live={!!m.live}
+                            <Message key={m.uid || m.message_id || i} m={m} live={!!m.live} onGrow={stickToBottom}
                                 onOpenAlert={onOpenAlert} onFilter={onFilter} onDecide={decide}
                                 onAsk={send} busy={busy} views={views} />
                         ))}
