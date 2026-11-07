@@ -1,5 +1,5 @@
 from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from neo4j.exceptions import ServiceUnavailable
 from starlette.concurrency import run_in_threadpool
 from events import manager
@@ -12,6 +12,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Literal
 from pydantic import BaseModel, Field
 from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_view
+from tools import tool_specs, run_tool
+from conversations import (create_conversation, list_conversations, get_conversation,
+                           rename_conversation, delete_conversation)
+from agent import run_turn, decide_approval
 from evidence import store_evidence, list_evidence, get_evidence, get_image, EvidenceError
 from dedup import compute_alert_simhash, find_matching_alert
 from ledger import (
@@ -255,6 +259,93 @@ async def alert_evidence(alert_id: str):
         return []
     return await run_in_threadpool(list_evidence, None, alert["target_url"], None, 20)
 
+# ── SOC tools (tools.py): one registry for the AI agent and the MCP server ──
+@app.get("/agent/tools", dependencies=AUTH)
+async def list_tools():
+    return tool_specs()
+
+class ToolCall(BaseModel):
+    args: dict = Field(default_factory=dict)
+    # action tools only run when approved. An analyst (or a service client
+    # with its own approval step, like an MCP host) sets this deliberately
+    approved: bool = False
+
+@app.post("/agent/tools/{name}")
+async def call_tool(name: str, payload: ToolCall, me: dict = Depends(current_user)):
+    return await run_in_threadpool(run_tool, name, payload.args, me["email"], payload.approved)
+
+# ── saved AI conversations (#1): ChatGPT-style threads, per analyst ──
+class ConversationIn(BaseModel):
+    title: str | None = Field(default=None, max_length=80)
+
+@app.get("/conversations")
+async def conversations_list(me: dict = Depends(current_user)):
+    return await run_in_threadpool(list_conversations, me["email"])
+
+@app.post("/conversations", status_code=201)
+async def conversations_create(payload: ConversationIn, me: dict = Depends(current_user)):
+    return await run_in_threadpool(create_conversation, me["email"], payload.title)
+
+@app.get("/conversations/{conversation_id}")
+async def conversations_get(conversation_id: str, me: dict = Depends(current_user)):
+    convo = await run_in_threadpool(get_conversation, me["email"], conversation_id)
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return convo
+
+@app.patch("/conversations/{conversation_id}")
+async def conversations_rename(conversation_id: str, payload: ConversationIn, me: dict = Depends(current_user)):
+    convo = await run_in_threadpool(rename_conversation, me["email"], conversation_id, payload.title)
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return convo
+
+@app.delete("/conversations/{conversation_id}", status_code=204)
+async def conversations_delete(conversation_id: str, me: dict = Depends(current_user)):
+    if not await run_in_threadpool(delete_conversation, me["email"], conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+# ── the SOC agent: a message in, a live stream of steps / visuals / answer out ──
+class AgentMessage(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+    # what the analyst is looking at, e.g. "alert 60197cfe… on LAPTOP-10" (Triage this alert)
+    context: str | None = Field(default=None, max_length=500)
+
+@app.post("/conversations/{conversation_id}/messages")
+async def agent_message(conversation_id: str, payload: AgentMessage, me: dict = Depends(current_user)):
+    if not await run_in_threadpool(get_conversation, me["email"], conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    # newline-delimited JSON events: step, block, approval, token, done
+    return StreamingResponse(run_turn(me["email"], conversation_id, payload.content, payload.context),
+                             media_type="application/x-ndjson")
+
+class ApprovalDecision(BaseModel):
+    approve: bool
+
+@app.post("/conversations/{conversation_id}/approvals/{approval_id}")
+async def agent_approval(conversation_id: str, approval_id: str, payload: ApprovalDecision,
+                         me: dict = Depends(current_user)):
+    out = await run_in_threadpool(decide_approval, me["email"], conversation_id, approval_id, payload.approve)
+    if not out:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if out["already"]:
+        raise HTTPException(status_code=409, detail=f"Already {out['approval']['status']}")
+    return out["approval"]
+
+class AlertStatus(BaseModel):
+    status: Literal["new", "triaged", "resolved"]
+    note: str | None = Field(default=None, max_length=500)
+
+# mark an alert triaged / resolved from the dashboard (recorded in the ledger)
+@app.post("/alerts/{alert_id}/status")
+async def update_alert_status(alert_id: str, payload: AlertStatus, me: dict = Depends(current_user)):
+    out = await run_in_threadpool(run_tool, "set_alert_status",
+                                  {"alert_id": alert_id, "status": payload.status, "note": payload.note},
+                                  me["email"], True)
+    if not out["ok"]:
+        raise HTTPException(status_code=404 if "no alert" in out["summary"] else 400, detail=out["summary"])
+    return out["data"]
+
 # This is for graph to be shown in the frontend 
 @app.get("/graph", dependencies=AUTH)
 def get_graph() -> None:
@@ -375,33 +466,12 @@ async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
 
 @app.post("/hosts/{hostname}/isolate", status_code=202)
 async def isolate_host(hostname: str, me: dict = Depends(current_user)):
-    """
-    Host containment (DEMO STUB).
-    Records the containment decision to the immutable ledger and returns what the
-    dashboard would show. It does NOT yet perform real network isolation or update
-    the attack graph — real EDR enforcement + Neo4j graph isolation are planned.
-    """
-    msg = f"Containment requested for '{hostname}'. Simulated for now — no real network action is taken yet."
-    try:
-        await run_in_threadpool(
-            append_ledger_entry,
-            entity_type="HOST",
-            entity_id=hostname,
-            stage="EDR_CONTAINMENT",
-            action_taken="NETWORK_ISOLATION_SIMULATED",
-            reasoning_output=msg,
-            analyst_user=me["email"],   # who actually pressed it
-        )
-    except Exception as e:
-        print(f"Ledger write notice: {e}")
-
-    return {
-        "status": "isolation_requested",
-        "simulated": True,
-        "host": hostname,
-        "action": "network_isolation",
-        "message": msg,
-    }
+    """Host containment (DEMO STUB): recorded in the ledger, no real network
+    action yet. Same code the AI agent's approved isolate_host runs (tools.py)."""
+    out = await run_in_threadpool(run_tool, "isolate_host", {"hostname": hostname}, me["email"], True)
+    if not out["ok"]:
+        raise HTTPException(status_code=400, detail=out["summary"])
+    return {**out["data"], "action": "network_isolation"}
 
 
 # ── Decision Ledger Audit Endpoints ─────────────────────────────────

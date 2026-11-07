@@ -200,3 +200,25 @@ export function EvidenceGallery({ alerts }) {
         </>
     )
 }
+
+// a row of captures already fetched (the Ask AI page gets them from a tool)
+export function EvidenceList({ items, limit = 4 }) {
+    const [open, setOpen] = useState(null)
+    if (!items?.length) return null
+    return (
+        <>
+            <div className="ev-grid">
+                {items.slice(0, limit).map(e => (
+                    <figure key={e.evidence_id} className="ev-card">
+                        <Shot evidence={e} onOpen={setOpen} />
+                        <figcaption>
+                            <span className="mono">{host(e.url)}</span>
+                            <VerdictBadge evidence={e} />
+                        </figcaption>
+                    </figure>
+                ))}
+            </div>
+            {open && <EvidenceViewer evidence={open} onClose={() => setOpen(null)} />}
+        </>
+    )
+}
