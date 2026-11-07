@@ -55,7 +55,11 @@ PRIORITY = re.compile(r"(look at|start|focus on|work on) first|where (do|should)
                       r"|what('s| is) urgent|most important|what('s| is) going on", re.I)
 
 
-def _hints(text):
+# "which of THOSE hosts...", "what about THEM": a follow-up on the last results
+FOLLOW_UP = re.compile(r"\b(those|these|them|they|that one|the same|of it|about it)\b", re.I)
+
+
+def _hints(text, history=()):
     hints = ""
     known = mentioned_entities(text)
     if known:
@@ -63,6 +67,10 @@ def _hints(text):
             f"{v} is a {label}" for v, label in known) + ". Use entity_summary or search_alerts for them."
     if PRIORITY.search(text or ""):
         hints += "\n\nThis is a question about priorities: call attention_findings."
+    if FOLLOW_UP.search(text or "") and any(m.get("role") == "tool" for m in history):
+        hints += ("\n\nThis follows up on earlier results. The answer is probably already in the tool results "
+                  "above (look for lines like 'also had phishing'): answer from them, word for word, "
+                  "and only call a tool if they really don't cover it.")
     return hints
 
 
@@ -85,6 +93,7 @@ def _text_tool_call(content):
 
 # "contain / isolate / quarantine LAPTOP-10", with a host that exists
 CONTAIN = re.compile(r"\b(contain|isolate|quarantine|cut (it|them) off|take (it|them) offline)\b", re.I)
+ACTION_ASK = re.compile(r"\b(contain|isolate|quarantine|block|resolve|close|triage|mark|cut (it|them) off)\b", re.I)
 CLAIMED_ACTION = re.compile(r"\b(has|have) been (isolated|contained|quarantined|resolved|blocked|triaged)\b"
                             r"|\bis now (isolated|contained|quarantined|offline)\b", re.I)
 
@@ -178,9 +187,10 @@ def run_turn(owner, conversation_id, text, context=None):
         return
     append_message(owner, conversation_id, "user", text)
 
-    messages = [{"role": "system", "content": SYSTEM + _hints(text)
+    history = _history(convo)
+    messages = [{"role": "system", "content": SYSTEM + _hints(text, history)
                  + (f"\n\nThe analyst is looking at: {context}" if context else "")}]
-    messages += _history(convo)
+    messages += history
     messages.append({"role": "user", "content": text})
     tools = _ollama_tools(text, context)
 
@@ -252,7 +262,10 @@ def run_turn(owner, conversation_id, text, context=None):
             approvals.append(approval)
             yield _event("approval", **approval)
     # the model must never claim an action happened: only an approved card does that
-    if CLAIMED_ACTION.search(answer):
+    # only when an action was asked for or proposed this turn: describing past,
+    # real actions from the ledger ("it has been isolated twice") is fine
+    acting = bool(approvals) or bool(ACTION_ASK.search(text or ""))
+    if acting and CLAIMED_ACTION.search(answer):
         # drop the sentences that claim it (the page swaps in this cleaned answer)
         answer = " ".join(x for x in re.split(r"(?<=[.!?])\s+", answer) if not CLAIMED_ACTION.search(x))
         answer += "\n\nNothing has been changed yet — " + ("approve the card below to go ahead." if approvals

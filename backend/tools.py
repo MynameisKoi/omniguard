@@ -149,13 +149,79 @@ def entity_summary(name):
         "users": distinct("user"), "domains": distinct("domain"),
         "engines": distinct("source"), "alerts": rows[:20],
     }
-    article = "an" if kind[0] in "aeiouI" else "a"
+    article = "an" if kind[0].lower() in "aeio" else "a"   # an IP / impersonated brand, a user / host
     summary = (f"{name} is {article} {kind} in {len(rows)} alert(s) "
                f"({', '.join(f'{sev[s]} {s}' for s in SEVERITIES if sev[s])}). "
-               f"First seen {_when(data['first_seen'])}, last seen {_when(data['last_seen'])}. "
-               f"Hosts: {', '.join(f'{h} ({n})' for h, n in hosts.most_common(5)) or 'none'}. "
-               f"Domains: {', '.join(data['domains'][:5]) or 'none'}. Engines: {', '.join(data['engines'])}.")
+               f"First seen {_when(data['first_seen'])}, last seen {_when(data['last_seen'])}. ")
+
+    if field == "host":
+        summary += _host_overview(name, rows, data)
+    else:
+        summary += (f"Hosts: {', '.join(f'{h} ({n})' for h, n in hosts.most_common(8)) or 'none'}. "
+                    f"Domains: {', '.join(data['domains'][:5]) or 'none'}. Engines: {', '.join(data['engines'])}. ")
+        summary += _cross_engine(list(hosts), data)
     return {"summary": summary, "data": data}
+
+
+# what kinds of alert each engine raises, in words the analyst uses
+ENGINE_WORD = {"verifyeye": "phishing", "spectrac2": "C2"}
+
+
+def _cross_engine(hosts, data):
+    """For the hosts tied to a domain / IP / user / brand: which of them ALSO
+    had phishing or C2 alerts anywhere. Answers "which of those hosts also
+    had phishing?" without the model having to plan a second lookup."""
+    if not hosts:
+        return ""
+    engines = {}
+    for a in alerts_collection.find({"host": {"$in": hosts}}, {"host": 1, "source": 1}):
+        engines.setdefault(a["host"], set()).add(a.get("source"))
+    data["host_engines"] = {h: sorted(engines.get(h, ())) for h in hosts}
+    parts = []
+    for engine, word in ENGINE_WORD.items():
+        hit = sorted(h for h in hosts if engine in engines.get(h, ()))
+        parts.append(f"{', '.join(hit)} also had {word} alerts" if hit else f"none of them had {word} alerts")
+    both = sorted(h for h in hosts if {"verifyeye", "spectrac2"} <= engines.get(h, set()))
+    out = "Of these hosts: " + "; ".join(parts) + "."
+    if both:
+        out += f" {', '.join(both)} had BOTH phishing and C2 — likely compromised."
+    return out
+
+
+def _host_overview(host, rows, data):
+    """Everything about one host in one call: what each engine saw, where it
+    went, who used it, what's been done about it, and a short timeline."""
+    by_engine = Counter(a.get("source") for a in rows)
+    phishing = sorted({a["domain"] for a in rows if a.get("source") == "verifyeye" and a.get("domain")})
+    c2 = sorted({a.get("domain") or a.get("dst_ip") for a in rows
+                 if a.get("source") == "spectrac2" and (a.get("domain") or a.get("dst_ip"))})
+    open_count = sum(1 for a in rows if a.get("status") == "new")
+    ledger = get_ledger_for_entity(host)
+    shots = sum(len(list_evidence(url=u, limit=1)) for u in {a["target_url"] for a in rows if a.get("target_url")})
+    timeline = sorted((a for a in rows if isinstance(a.get("timestamp"), datetime)), key=lambda a: a["timestamp"])
+    data.update({"phishing_domains": phishing, "c2_destinations": c2, "open": open_count,
+                 "ledger_actions": len(ledger), "screenshots": shots,
+                 "timeline": [{"time": a["timestamp"], "event": a.get("event_type"), "severity": a.get("severity"),
+                               "detail": a.get("domain") or a.get("dst_ip") or ""} for a in timeline[-8:]]})
+    out = ("Engines: " + ", ".join(f"{n} {ENGINE_WORD.get(e, e)}" for e, n in by_engine.most_common()) + ". ")
+    if phishing:
+        out += f"Phishing pages: {', '.join(phishing[:4])}. "
+    if c2:
+        out += f"C2 beaconing to: {', '.join(c2[:4])}. "
+    if {"verifyeye", "spectrac2"} <= set(by_engine):
+        out += "It had BOTH phishing and C2 — likely compromised. "
+    if data["users"]:
+        out += f"Users: {', '.join(data['users'][:4])}. "
+    out += f"{open_count} alert(s) still untriaged. "
+    out += (f"{len(ledger)} action(s) in the ledger, latest: {ledger[0].get('action_taken')} by {ledger[0].get('analyst_user')}. "
+            if ledger else "No action taken yet. ")
+    if shots:
+        out += f"{shots} agent screenshot(s). "
+    if timeline:
+        out += "Timeline: " + "; ".join(f"{_when(a['timestamp'])} {a.get('event_type')}"
+                                        + (f" ({a.get('domain') or a.get('dst_ip')})" if a.get('domain') or a.get('dst_ip') else "")
+                                        for a in timeline[-5:]) + "."
+    return out
 
 
 def host_graph(hostname):
