@@ -4313,3 +4313,6 @@ mark.hl-match { background: var(--accent-wash); color: var(--accent-text); borde
 }
 .nav-ask-dot.running { animation: nav-ask-pulse 1.2s ease-in-out infinite; }
 @keyframes nav-ask-pulse { 50% { opacity: .35; } }
+
+/* what an Ask AI reply is doing while it's still coming in */
+.ask-working { margin-top: 10px; }

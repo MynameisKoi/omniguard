@@ -632,6 +632,7 @@ def run_turn(owner, conversation_id, text, context=None):
                 calls = [{"function": {"name": n, "arguments": a}} for n, a in plan]
                 plan = None
             else:
+                yield _event("status", text="Checking what that found…" if steps else "Thinking…")
                 cleaner = _Cleaner(acting=bool(ACTION_ASK.search(text or "")))
                 reply = None
                 for ev in model(tools, cleaner):
@@ -714,6 +715,7 @@ def run_turn(owner, conversation_id, text, context=None):
                 acting = bool(approvals) or bool(ACTION_ASK.search(text or ""))
                 cleaner = (_Cleaner(facts="\n".join(lead), reference=reference, convo=convo, acting=acting, limit=2)
                            if lead else _Cleaner(acting=acting))
+                yield _event("status", text="Writing the summary…")
                 for ev in model([], cleaner):
                     if not isinstance(ev, tuple):
                         yield ev

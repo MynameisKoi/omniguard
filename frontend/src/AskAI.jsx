@@ -438,7 +438,10 @@ function Choices({ data, onAsk, disabled }) {
 
 function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views }) {
     if (m.role === "user") return <div className="ask-msg user"><div className="ask-bubble">{m.content}</div></div>
-    const thinking = live && !m.content && !(m.steps || []).length
+    // while the reply is still coming: what it's doing, at the bottom, until it's done
+    // (hidden while a tool's own step line is spinning)
+    const lookingUp = (m.steps || []).some(s => s.status === "running")
+    const working = live && !lookingUp
     return (
         <div className={`ask-msg ai${(m.blocks || []).some(b => WIDE.has(b.render)) ? " wide" : ""}`}>
             <span className="ask-avatar"><Sparkles /></span>
@@ -446,8 +449,13 @@ function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views 
                 {(m.steps || []).length > 0 && <Steps steps={m.steps} live={live} />}
                 {(m.blocks || []).filter(b => b.render !== "choices").map((b, i) => <Block key={i} block={b} onOpenAlert={onOpenAlert} onFilter={onFilter} views={views} />)}
                 {(m.approvals || []).map(a => <ApprovalCard key={a.approval_id} approval={a} onDecide={(ap, ok) => onDecide(m, ap, ok)} />)}
-                {thinking ? <div className="ai-loading"><span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />Thinking…</div>
-                    : m.content ? <AiMarkdown text={m.content} /> : null}
+                {m.content ? <AiMarkdown text={m.content} /> : null}
+                {working && (
+                    <div className="ai-loading ask-working" role="status">
+                        <span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />
+                        {m.status || "Thinking…"}
+                    </div>
+                )}
                 {(m.blocks || []).filter(b => b.render === "choices").map((b, i) => <Choices key={i} data={b.data || {}} onAsk={onAsk} disabled={busy} />)}
             </div>
         </div>
@@ -568,6 +576,7 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
                     else if (e.type === "block") patchLive(id, m => ({ ...m, blocks: [...m.blocks, e] }))
                     else if (e.type === "approval") patchLive(id, m => ({ ...m, approvals: [...m.approvals, e] }))
                     else if (e.type === "token") patchLive(id, m => ({ ...m, content: m.content + e.text }))
+                    else if (e.type === "status") patchLive(id, m => ({ ...m, status: e.text }))
                     else if (e.type === "error") throw new Error(e.message)
                     else if (e.type === "done") {
                         finished = true
