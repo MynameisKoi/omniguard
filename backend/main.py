@@ -27,6 +27,7 @@ from ledger import (
 )
 from agents import MultiAgentInvestigationPipeline
 from ocsf import alert_to_ocsf, export_alerts_to_ocsf
+from ai_transparency import get_transparency_logs, get_transparency_trace
 
 from config import CORS_ORIGINS
 
@@ -540,3 +541,32 @@ async def verify_ledger():
         "records_checked": total,
         "status": "verified" if is_valid else "tamper_detected",
     }
+
+
+# ── AI Transparency & Observability Endpoints ───────────────────────
+
+@app.get("/ai/transparency/logs", dependencies=AUTH)
+async def read_ai_transparency_logs(
+    limit: int = 50,
+    status: str | None = None,
+    caller: str | None = None,
+):
+    """
+    Retrieves chronological AI execution traces including latency, token usage,
+    and failure diagnostics.
+    """
+    traces = await run_in_threadpool(get_transparency_logs, limit, status, caller)
+    return {"traces": traces, "count": len(traces)}
+
+
+@app.get("/ai/transparency/logs/{trace_id}", dependencies=AUTH)
+async def read_ai_transparency_trace(trace_id: str):
+    """
+    Retrieves full un-truncated AI trace including complete prompt context,
+    tool execution records, and formatted exception traceback if failed.
+    """
+    trace = await run_in_threadpool(get_transparency_trace, trace_id)
+    if not trace:
+        raise HTTPException(status_code=404, detail=f"AI trace '{trace_id}' not found")
+    return trace
+
