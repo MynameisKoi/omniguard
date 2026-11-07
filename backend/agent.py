@@ -94,14 +94,37 @@ def _text_tool_call(content):
 # "contain / isolate / quarantine LAPTOP-10", with a host that exists
 CONTAIN = re.compile(r"\b(contain|isolate|quarantine|cut (it|them) off|take (it|them) offline)\b", re.I)
 ACTION_ASK = re.compile(r"\b(contain|isolate|quarantine|block|resolve|close|triage|mark|cut (it|them) off)\b", re.I)
-CLAIMED_ACTION = re.compile(r"\b(has|have) been (isolated|contained|quarantined|resolved|blocked|triaged)\b"
-                            r"|\bis now (isolated|contained|quarantined|offline)\b", re.I)
+# a sentence saying an action already happened: "has been isolated", "is fully
+# contained", "credentials have been revoked", "isolation was applied"...
+CLAIMED_ACTION = re.compile(
+    r"\b(has|have|had) (now )?been (fully |successfully |now )?"
+    r"(isolated|contained|quarantined|resolved|blocked|triaged|revoked|disabled|removed|cut off|taken offline)\b"
+    r"|\b(is|are|was|were) (now |fully |successfully )+(isolated|contained|quarantined|offline|blocked|revoked)\b"
+    r"|\b(isolation|containment|quarantine|revocation) (was|has been) (applied|completed|performed|done|executed)\b"
+    r"|\bI('ve| have) (isolated|contained|quarantined|blocked|revoked|resolved)\b", re.I)
 
 
-def _contain_intent(text):
+def _contain_intent(text, convo=None):
+    """Hosts the analyst asked to contain. "contain it" names none: then it's
+    the host the conversation was last about (a host named in an earlier
+    message, or one an earlier tool looked up)."""
     if not CONTAIN.search(text or ""):
         return []
-    return [v for v, label in mentioned_entities(text) if label == "host"]
+    hosts = [v for v, label in mentioned_entities(text) if label == "host"]
+    if hosts or not convo:
+        return hosts
+    for m in reversed(convo["messages"]):
+        for st in reversed(m.get("steps") or []):
+            h = (st.get("args") or {}).get("hostname")
+            if h:
+                return [h]
+            if st.get("tool") == "entity_summary" and " is a host " in (st.get("summary") or ""):
+                return [st["args"].get("name")]
+        if m["role"] == "user":
+            named = [v for v, label in mentioned_entities(m["content"]) if label == "host"]
+            if named:
+                return named[-1:]
+    return []
 
 
 def _tidy(answer):
@@ -255,7 +278,7 @@ def run_turn(owner, conversation_id, text, context=None):
         yield _event("token", text=note)
 
     # asked to contain a known host but the model didn't propose it: propose it
-    for host in _contain_intent(text):
+    for host in _contain_intent(text, convo):
         if not any(a["tool"] == "isolate_host" and a["args"].get("hostname", "").lower() == host.lower() for a in approvals):
             approval = {"approval_id": str(uuid.uuid4()), "tool": "isolate_host", "args": {"hostname": host},
                         "description": TOOLS["isolate_host"]["description"], "status": "pending"}

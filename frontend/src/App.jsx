@@ -7,6 +7,8 @@ import { timeAgo, exactTime } from './time';
 import { scopeIds } from './graphScope';
 import { label, humanize, MITRE_NAMES } from './labels';
 import { EvidencePanel, EvidenceGallery } from './Evidence';
+import AiMarkdown from './AiMarkdown';
+import AskAI from './AskAI';
 import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
@@ -101,6 +103,7 @@ const NAV = [
         { id: "graph",     icon: Share2,          label: "Network graph" },
     ]},
     { group: "Investigate", items: [
+        { id: "ask",    icon: Sparkles, label: "Ask AI" },
         { id: "assets", icon: Server, label: "Hosts & assets" },
         { id: "users",  icon: Users,  label: "Users" },
         { id: "ledger", icon: Activity, label: "Audit ledger" },
@@ -1513,6 +1516,9 @@ function App({ user, onLogout, onUserChange }) {
                     {/* ── audit ledger ── */}
                     {page === "ledger" && <LedgerPage />}
 
+                    {/* ── the SOC agent: saved chats, tools, approvals ── */}
+                    {page === "ask" && <AskAI onOpenAlert={openAlert} onFilter={filterBy} />}
+
                     {/* ── search results: a full dashboard scoped to the term ── */}
                     {page === "search" && (
                         <>
@@ -1556,13 +1562,16 @@ function App({ user, onLogout, onUserChange }) {
             </div>
 
             {/* rendered once, outside the pages: one chat, on every page,
-                and the conversation survives switching pages */}
-            <AiChat
-                messages={chatMessages}
-                loading={chatLoading}
-                onSend={sendChat}
-                onClear={() => setChatMessages([])}
-            />
+                and the conversation survives switching pages. Not on Ask AI,
+                which is the full version (and its send button sits there) */}
+            {page !== "ask" && (
+                <AiChat
+                    messages={chatMessages}
+                    loading={chatLoading}
+                    onSend={sendChat}
+                    onClear={() => setChatMessages([])}
+                />
+            )}
         </div>
     )
 }
@@ -2340,35 +2349,6 @@ function AiChat({ messages, loading, onSend, onClear }) {
 }
 
 /* tiny markdown renderer for the model output: **bold** headings, lists, paragraphs */
-function AiMarkdown({ text }) {
-    const inline = (s) =>
-        s.split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
-            p.startsWith("**") && p.endsWith("**")
-                ? <strong key={i}>{p.slice(2, -2)}</strong>
-                : <span key={i}>{p}</span>
-        );
-
-    const blocks = [];
-    let list = null;
-    const flush = () => {
-        if (list) { blocks.push(<ul key={`u${blocks.length}`} className="ai-list">{list}</ul>); list = null; }
-    };
-
-    text.split("\n").forEach((raw, i) => {
-        const line = raw.trim();
-        if (!line) { flush(); return; }
-        const headingBold = /^\*\*(.+?)\*\*:?$/.exec(line);
-        if (line.startsWith("#")) { flush(); blocks.push(<h4 key={i} className="ai-h">{inline(line.replace(/^#+\s*/, ""))}</h4>); return; }
-        if (headingBold) { flush(); blocks.push(<h4 key={i} className="ai-h">{headingBold[1]}</h4>); return; }
-        const li = /^(\d+\.|[-*])\s+(.*)$/.exec(line);
-        if (li) { if (!list) list = []; list.push(<li key={i}>{inline(li[2])}</li>); return; }
-        flush();
-        blocks.push(<p key={i} className="ai-p">{inline(line)}</p>);
-    });
-    flush();
-    return <div className="ai-md">{blocks}</div>;
-}
-
 /* summary card: a few rows plus a "view all" into the full page */
 function Card({ icon: Icon, title, action, onAction, children }) {
     return (

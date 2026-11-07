@@ -38,6 +38,11 @@ def test_tidy_drops_tables_and_role_names():
     ("The host is now quarantined.", True),
     ("I've proposed isolating LAPTOP-10 — approve the card to go ahead.", False),
     ("LAPTOP-10 should be isolated.", False),
+    # what llama3.2 actually wrote after "contain it" with no approval
+    ("The host LAPTOP-10 is fully contained after network isolation was applied.", True),
+    ("The compromised user's session credentials have been revoked to limit damage.", True),
+    ("I've isolated the host.", True),
+    ("I recommend isolating LAPTOP-10.", False),
 ])
 def test_claimed_action_detection(answer, claims):
     assert bool(agent.CLAIMED_ACTION.search(answer)) is claims
@@ -48,6 +53,16 @@ def test_contain_intent_needs_a_real_host(monkeypatch):
                         lambda text: [("LAPTOP-10", "host"), ("cdn-telemetry-sync.net", "domain")])
     assert agent._contain_intent("LAPTOP-10 looks compromised, contain it") == ["LAPTOP-10"]
     assert agent._contain_intent("tell me about LAPTOP-10") == []
+
+
+def test_contain_it_means_the_host_we_were_talking_about(monkeypatch):
+    monkeypatch.setattr(agent, "mentioned_entities", lambda text: [("LAPTOP-10", "host")] if "LAPTOP-10" in text else [])
+    convo = {"messages": [
+        {"role": "user", "content": "what happened on LAPTOP-10?"},
+        {"role": "assistant", "content": "...", "steps": [{"tool": "investigate_host", "args": {"hostname": "LAPTOP-10"}}]},
+    ]}
+    assert agent._contain_intent("it looks compromised, contain it", convo) == ["LAPTOP-10"]
+    assert agent._contain_intent("contain it", {"messages": []}) == []
 
 
 def test_get_alert_only_offered_with_a_real_id(monkeypatch):
