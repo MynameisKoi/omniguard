@@ -48,7 +48,7 @@ export function buildGraphStyle() {
     const faint = v("--faint", "#6a727c");
     const surface = v("--surface", "#0e1013");
     const edge = v("--g-edge", "#39414b");
-    const edgeHl = v("--g-edge-hl", "#8b7cf6");
+    const edgeHl = v("--g-edge-hl", "#3cc6db");
     const mono = v("--mono", "monospace");
 
     const perType = NODE_TYPES.map(type => ({
@@ -113,6 +113,13 @@ export function buildGraphStyle() {
         },
 
         /* ---- interaction states ---- */
+
+        // filtered out by the explorer. display:none also hides every edge
+        // touching the node, and keeps it out of layouts and fits
+        {
+            selector: ".gone",
+            style: { "display": "none" },
+        },
 
         // everything outside the selected neighbourhood. Dimmed enough to push
         // it back, not so far that you lose the shape of the wider graph.

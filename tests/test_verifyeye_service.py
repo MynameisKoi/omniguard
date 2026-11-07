@@ -49,7 +49,7 @@ def test_submits_off_domain_helper():
 def test_verifyeye_health():
     res = client.get("/health")
     assert res.status_code == 200
-    assert res.json() == {"status": "ok"}
+    assert res.json()["status"] == "ok"
 
 
 def test_verify_phishing_with_brand():

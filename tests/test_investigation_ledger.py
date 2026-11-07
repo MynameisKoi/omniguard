@@ -90,6 +90,12 @@ def test_api_ledger_endpoints():
         from main import app
         from fastapi.testclient import TestClient
 
+        app.dependency_overrides[backend_main.current_user] = lambda: {
+            "email": "analyst@omniguard.io",
+            "name": "SOC Analyst",
+            "role": "analyst",
+        }
+
         client = TestClient(app)
 
         mock_entries = [

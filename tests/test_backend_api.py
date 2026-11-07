@@ -22,6 +22,13 @@ with patch("neo4j.GraphDatabase.driver") as mock_driver, \
 
 from fastapi.testclient import TestClient
 
+# Override current_user dependency so tests default to authenticated analyst
+app.dependency_overrides[backend_main.current_user] = lambda: {
+    "email": "analyst@omniguard.io",
+    "name": "SOC Analyst",
+    "role": "analyst",
+}
+
 client = TestClient(app)
 
 
@@ -59,7 +66,7 @@ def test_create_and_patch_alert():
     with patch.object(backend_main.alerts_collection, "insert_one") as mock_insert, \
          patch("main.ingest_alert") as mock_ingest, \
          patch.object(backend_main.alerts_collection, "find_one_and_update") as mock_update, \
-         patch("main.update_alert_status") as mock_update_status:
+         patch("main.update_graph_alert_status") as mock_update_status:
 
         mock_update.return_value = {**mock_doc, "status": "triaged"}
 
@@ -103,9 +110,10 @@ def test_patch_alert_not_found():
 
 
 def test_websocket_alerts_feed():
-    with client.websocket_connect("/ws/alerts") as websocket:
-        # Verify connection succeeds and manager registered connection
-        assert len(backend_main.ws_manager.active_connections) >= 1
+    with patch("main.session_user", return_value={"email": "analyst@omniguard.io", "name": "SOC Analyst"}):
+        with client.websocket_connect("/ws/alerts?token=mock_session_token") as websocket:
+            # Verify connection succeeds and manager registered connection
+            assert len(backend_main.ws_manager.active_connections) >= 1
 
 
 def test_get_brands():
@@ -153,7 +161,11 @@ def test_auth_login_success():
     with patch("main.check_login", return_value={"email": "analyst@omniguard.io", "name": "SOC Analyst"}):
         res = client.post("/auth/login", json={"email": "analyst@omniguard.io", "password": "valid_password"})
         assert res.status_code == 200
-        assert res.json() == {"email": "analyst@omniguard.io", "name": "SOC Analyst"}
+        data = res.json()
+        assert data["email"] == "analyst@omniguard.io"
+        assert data["name"] == "SOC Analyst"
+        assert "token" in data
+        assert "expires_at" in data
 
 
 def test_auth_login_invalid_credentials():

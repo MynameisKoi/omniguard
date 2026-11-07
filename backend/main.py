@@ -1,19 +1,23 @@
 from contextlib import asynccontextmanager
+from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from neo4j.exceptions import ServiceUnavailable
+from starlette.concurrency import run_in_threadpool
+from events import manager
+from models import Alert, AlertCreate, AlertStatusUpdate
+from db import database, brands_collection
+from ai import run_triage, answer_question
+from auth import check_login, update_user, create_session, session_user, end_session, seed_default_user
+from status import check_mongo, check_neo4j, check_ollama
 from datetime import datetime, timezone, timedelta
 from typing import Literal
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from starlette.concurrency import run_in_threadpool
-
-from ai import answer_question, run_triage
-from auth import check_login, update_user, seed_default_user
-from config import CORS_ORIGINS
-from db import brands_collection, database
-from events import manager
-from graph import get_host_graph, get_overview_graph, ingest_alert, update_alert_status
-from models import Alert, AlertCreate, AlertStatusUpdate
-from status import check_mongo, check_neo4j, check_ollama
+from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_view, update_alert_status as update_graph_alert_status
+from tools import tool_specs, run_tool
+from conversations import (create_conversation, list_conversations, get_conversation,
+                           rename_conversation, delete_conversation)
+from agent import run_turn, decide_approval
+from evidence import store_evidence, list_evidence, get_evidence, get_image, EvidenceError
 from dedup import compute_alert_simhash, find_matching_alert
 from ledger import (
     append_ledger_entry,
@@ -23,6 +27,10 @@ from ledger import (
 )
 from agents import MultiAgentInvestigationPipeline
 from ocsf import alert_to_ocsf, export_alerts_to_ocsf
+
+from config import CORS_ORIGINS
+
+from fastapi.middleware.cors import CORSMiddleware
 
 ws_manager = manager
 
@@ -41,6 +49,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="OmniGuard SOC API", lifespan=lifespan)
 
+# graph endpoints while Neo4j is down: a clear 503, not a hang or a bare 500
+@app.exception_handler(ServiceUnavailable)
+async def neo4j_unavailable(request, exc):
+    return JSONResponse(status_code=503, content={"detail": "Graph database (Neo4j) is unavailable"})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -49,6 +62,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+# ── who's asking (#18) ──────────────────────────────────────────────
+# the dashboard sends "Authorization: Bearer <session token>" (from
+# /auth/login); machine clients send a service token. Endpoints the detectors
+# use to report (POST /alerts, POST /evidence, GET /brands) stay open for now.
+def bearer_token(request: Request):
+    header = request.headers.get("authorization", "")
+    return header[7:].strip() if header.lower().startswith("bearer ") else None
+
+def current_user(request: Request):
+    user = session_user(bearer_token(request))
+    if not user:
+        raise HTTPException(status_code=401, detail="Not signed in", headers={"WWW-Authenticate": "Bearer"})
+    return user
+
+AUTH = [Depends(current_user)]
 
 @app.get("/health")
 def get_health():
@@ -65,7 +94,14 @@ async def login(payload: LoginRequest):
     user = await run_in_threadpool(check_login, payload.email, payload.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    return user
+    token, expires = await run_in_threadpool(create_session, user)
+    return {**user, "token": token, "expires_at": expires}
+
+@app.post("/auth/logout", status_code=204)
+async def logout(request: Request):
+    token = bearer_token(request)
+    if token:
+        await run_in_threadpool(end_session, token)
 
 class ProfileUpdate(BaseModel):
     email: str
@@ -75,9 +111,12 @@ class ProfileUpdate(BaseModel):
 
 # profile page: change display name and/or password
 @app.post("/auth/profile")
-async def update_profile(payload: ProfileUpdate):
+async def update_profile(payload: ProfileUpdate, request: Request, me: dict = Depends(current_user)):
+    if payload.email.strip().lower() != me["email"]:
+        raise HTTPException(status_code=403, detail="You can only change your own account")
     user = await run_in_threadpool(
-        update_user, payload.email, payload.current_password, payload.name, payload.new_password
+        update_user, payload.email, payload.current_password, payload.name, payload.new_password,
+        bearer_token(request),
     )
     if not user:
         raise HTTPException(status_code=401, detail="Current password is incorrect")
@@ -150,21 +189,21 @@ async def create_alert(payload: AlertCreate) -> Alert:
     return alert
 
 # This is for the frontend 
-@app.get("/alerts", response_model=list[Alert])
+@app.get("/alerts", response_model=list[Alert], dependencies=AUTH)
 def get_alerts() -> list[Alert]:
     alerts: list[Alert] = list(alerts_collection.find({}, {"_id": 0}))
     return alerts
 
 # ── OCSF Export Endpoints (Enterprise SIEM Integration) ─────────────
 
-@app.get("/alerts/export/ocsf")
+@app.get("/alerts/export/ocsf", dependencies=AUTH)
 async def export_ocsf(limit: int = 200):
     """Exports alerts in standardized OCSF v1.2.0 batch envelope for Splunk/AWS Security Lake."""
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
     return export_alerts_to_ocsf(alerts)
 
 
-@app.get("/alerts/{alert_id}/ocsf")
+@app.get("/alerts/{alert_id}/ocsf", dependencies=AUTH)
 async def get_alert_ocsf(alert_id: str):
     """Retrieves an individual alert formatted as an OCSF Class 2001 (Security Finding)."""
     alert = alerts_collection.find_one({"alert_id": alert_id}, {"_id": 0})
@@ -172,6 +211,152 @@ async def get_alert_ocsf(alert_id: str):
         raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found")
     return alert_to_ocsf(alert)
 
+# ── agent evidence (#3) ─────────────────────────────────────────────
+# VerifyEye's sandboxed agent posts a screenshot + its verdict for every page
+# it checks (phishing or cleared). See evidence.py.
+class EvidenceCreate(BaseModel):
+    url: str = Field(max_length=4096)
+    final_url: str | None = Field(default=None, max_length=4096)
+    title: str | None = Field(default=None, max_length=500)
+    phishing: bool
+    confidence: float = Field(ge=0, le=1)
+    brand: str | None = Field(default=None, max_length=200)
+    off_domain: bool = False
+    credential_form: bool = False
+    # the agent hit a bot check and never saw the real page (no verdict)
+    blocked: bool = False
+    blocked_by: str | None = Field(default=None, max_length=100)
+    form_actions: list[str] = Field(default_factory=list, max_length=50)
+    image_type: Literal["image/jpeg", "image/png"] = "image/jpeg"
+    # base64 of the screenshot; the decoded image is capped at 5 MB in evidence.py
+    image_b64: str = Field(max_length=7_000_000)
+
+@app.post("/evidence", status_code=201)
+async def create_evidence(payload: EvidenceCreate):
+    try:
+        return await run_in_threadpool(store_evidence, payload.model_dump())
+    except EvidenceError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+@app.get("/evidence", dependencies=AUTH)
+async def evidence_list(domain: str | None = None, url: str | None = None,
+                        verdict: Literal["phishing", "cleared", "blocked"] | None = None, limit: int = 50):
+    return await run_in_threadpool(list_evidence, domain, url, verdict, max(1, min(limit, 200)))
+
+@app.get("/evidence/{evidence_id}", dependencies=AUTH)
+async def evidence_detail(evidence_id: str):
+    doc = await run_in_threadpool(get_evidence, evidence_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    return doc
+
+@app.get("/evidence/{evidence_id}/image", dependencies=AUTH)
+async def evidence_image(evidence_id: str):
+    doc = await run_in_threadpool(get_image, evidence_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    # captures never change once stored, so the browser can keep them
+    return Response(content=doc["image"], media_type=doc["image_type"], headers={
+        "Cache-Control": "private, max-age=86400, immutable",
+        "ETag": f'"{doc["image_sha256"]}"',
+    })
+
+@app.get("/alerts/{alert_id}/evidence", dependencies=AUTH)
+async def alert_evidence(alert_id: str):
+    """Every capture of the page this alert is about, newest first."""
+    alert = alerts_collection.find_one({"alert_id": alert_id}, {"_id": 0, "target_url": 1})
+    if not alert:
+        raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found")
+    if not alert.get("target_url"):
+        return []
+    return await run_in_threadpool(list_evidence, None, alert["target_url"], None, 20)
+
+# ── SOC tools (tools.py): one registry for the AI agent and the MCP server ──
+@app.get("/agent/tools", dependencies=AUTH)
+async def list_tools():
+    return tool_specs()
+
+class ToolCall(BaseModel):
+    args: dict = Field(default_factory=dict)
+    # action tools only run when approved. An analyst (or a service client
+    # with its own approval step, like an MCP host) sets this deliberately
+    approved: bool = False
+
+@app.post("/agent/tools/{name}")
+async def call_tool(name: str, payload: ToolCall, me: dict = Depends(current_user)):
+    return await run_in_threadpool(run_tool, name, payload.args, me["email"], payload.approved)
+
+# ── saved AI conversations (#1): ChatGPT-style threads, per analyst ──
+class ConversationIn(BaseModel):
+    title: str | None = Field(default=None, max_length=80)
+
+@app.get("/conversations")
+async def conversations_list(me: dict = Depends(current_user)):
+    return await run_in_threadpool(list_conversations, me["email"])
+
+@app.post("/conversations", status_code=201)
+async def conversations_create(payload: ConversationIn, me: dict = Depends(current_user)):
+    return await run_in_threadpool(create_conversation, me["email"], payload.title)
+
+@app.get("/conversations/{conversation_id}")
+async def conversations_get(conversation_id: str, me: dict = Depends(current_user)):
+    convo = await run_in_threadpool(get_conversation, me["email"], conversation_id)
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return convo
+
+@app.patch("/conversations/{conversation_id}")
+async def conversations_rename(conversation_id: str, payload: ConversationIn, me: dict = Depends(current_user)):
+    convo = await run_in_threadpool(rename_conversation, me["email"], conversation_id, payload.title)
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return convo
+
+@app.delete("/conversations/{conversation_id}", status_code=204)
+async def conversations_delete(conversation_id: str, me: dict = Depends(current_user)):
+    if not await run_in_threadpool(delete_conversation, me["email"], conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+# ── the SOC agent: a message in, a live stream of steps / visuals / answer out ──
+class AgentMessage(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+    # what the analyst is looking at, e.g. "alert 60197cfe… on LAPTOP-10" (Triage this alert)
+    context: str | None = Field(default=None, max_length=500)
+
+@app.post("/conversations/{conversation_id}/messages")
+async def agent_message(conversation_id: str, payload: AgentMessage, me: dict = Depends(current_user)):
+    if not await run_in_threadpool(get_conversation, me["email"], conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    # newline-delimited JSON events: step, block, approval, token, done
+    return StreamingResponse(run_turn(me["email"], conversation_id, payload.content, payload.context),
+                             media_type="application/x-ndjson")
+
+class ApprovalDecision(BaseModel):
+    approve: bool
+
+@app.post("/conversations/{conversation_id}/approvals/{approval_id}")
+async def agent_approval(conversation_id: str, approval_id: str, payload: ApprovalDecision,
+                         me: dict = Depends(current_user)):
+    out = await run_in_threadpool(decide_approval, me["email"], conversation_id, approval_id, payload.approve)
+    if not out:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if out["already"]:
+        raise HTTPException(status_code=409, detail=f"Already {out['approval']['status']}")
+    return out["approval"]
+
+class AlertStatus(BaseModel):
+    status: Literal["new", "triaged", "resolved"]
+    note: str | None = Field(default=None, max_length=500)
+
+# mark an alert triaged / resolved from the dashboard (recorded in the ledger)
+@app.post("/alerts/{alert_id}/status")
+async def update_alert_status(alert_id: str, payload: AlertStatus, me: dict = Depends(current_user)):
+    out = await run_in_threadpool(run_tool, "set_alert_status",
+                                  {"alert_id": alert_id, "status": payload.status, "note": payload.note},
+                                  me["email"], True)
+    if not out["ok"]:
+        raise HTTPException(status_code=404 if "no alert" in out["summary"] else 400, detail=out["summary"])
+    return out["data"]
 
 @app.patch("/alerts/{alert_id}", response_model=Alert)
 async def patch_alert_status(alert_id: str, payload: AlertStatusUpdate) -> Alert:
@@ -184,8 +369,10 @@ async def patch_alert_status(alert_id: str, payload: AlertStatusUpdate) -> Alert
     if not res:
         raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found")
 
-    # Sync to Neo4j Alert node
-    update_alert_status(alert_id, payload.status)
+    try:
+        update_graph_alert_status(alert_id, payload.status)
+    except Exception as e:
+        print(f"Graph status update failed: {e}")
 
     res.pop("_id", None)
     alert = Alert(**res)
@@ -194,25 +381,45 @@ async def patch_alert_status(alert_id: str, payload: AlertStatusUpdate) -> Alert
     return alert
 
 # This is for graph to be shown in the frontend 
-@app.get("/graph")
+@app.get("/graph", dependencies=AUTH)
 def get_graph() -> None:
     return get_overview_graph()
 
 # This endpoint is for individual alerts and for its graph 
-@app.get("/graph/host/{hostname}")
+# graph at scale (#13): ask for only what will be drawn.
+#   limit    the N most-connected entities (None = all)
+#   include  entity ids that must be in it anyway ("Host:LAPTOP-10"), e.g. what
+#            "See in network graph" is about to light up
+#   only     exactly these entities, for the filtered views
+class GraphViewRequest(BaseModel):
+    limit: int | None = Field(default=None, ge=1, le=20000)
+    include: list[str] = Field(default_factory=list, max_length=5000)
+    only: list[str] | None = Field(default=None, max_length=5000)
+
+@app.post("/graph/view", dependencies=AUTH)
+async def graph_view(payload: GraphViewRequest):
+    return await run_in_threadpool(get_graph_view, payload.limit, payload.include, payload.only)
+
+@app.get("/graph/host/{hostname}", dependencies=AUTH)
 def get_host_graph_route(hostname: str):
     return get_host_graph(hostname)
 
 
 # making the websocket connection for live alert in the frontend 
 @app.websocket("/ws/alerts")
-async def get_live_alerts(websocket: WebSocket) -> None: 
+async def get_live_alerts(websocket: WebSocket) -> None:
+    # browsers can't set headers on a websocket, so the token rides in the query
+    user = await run_in_threadpool(session_user, websocket.query_params.get("token"))
+    if not user:
+        await websocket.close(code=1008, reason="Not signed in")
+        return
     await manager.connect(websocket)
-    try:
-        while True: 
+    while True:
+        try:
             await websocket.receive_text()
-    except (WebSocketDisconnect, Exception):
-        manager.disconnect(websocket)
+        except WebSocketDisconnect:
+            manager.disconnect(websocket)
+            break
 
 # new endpoint for getting the brands
 @app.get("/brands")
@@ -220,7 +427,7 @@ def get_brands():
     return list(brands_collection.find({}, {"_id": 0}))
 
 # endpoint for ai summary for all the alerts
-@app.get("/ai/summary")
+@app.get("/ai/summary", dependencies=AUTH)
 async def ai_summary():
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(50))
     try:
@@ -233,7 +440,7 @@ async def ai_summary():
 # block (they talk to mongo/neo4j/ollama over the network) so we run them off the
 # event loop. "ingestion" means the pipeline can actually store alerts — mongo is
 # up and at least one alert has landed.
-@app.get("/status")
+@app.get("/status", dependencies=AUTH)
 async def get_status():
     def gather():
         mongo = check_mongo()
@@ -254,7 +461,7 @@ class ChatRequest(BaseModel):
     question: str
     history: list[ChatTurn] = Field(default_factory=list, max_length=10)
 
-@app.post("/ai/chat")
+@app.post("/ai/chat", dependencies=AUTH)
 async def ai_chat(payload: ChatRequest):
     # newest first; counts use all of them, the prompt only lists the newest 50
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(2000))
@@ -282,7 +489,7 @@ class PipelineInvestigationRequest(BaseModel):
     hostname: str
 
 
-@app.post("/ai/investigate/pipeline")
+@app.post("/ai/investigate/pipeline", dependencies=AUTH)
 async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
     """
     Runs multi-agent investigation workflow on a target host:
@@ -295,53 +502,32 @@ async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
 
 
 @app.post("/hosts/{hostname}/isolate", status_code=202)
-async def isolate_host(hostname: str):
-    """
-    Host containment (DEMO STUB).
-    Records the containment decision to the immutable ledger and returns what the
-    dashboard would show. It does NOT yet perform real network isolation or update
-    the attack graph — real EDR enforcement + Neo4j graph isolation are planned.
-    """
-    msg = f"Containment requested for '{hostname}'. Simulated for now — no real network action is taken yet."
-    try:
-        await run_in_threadpool(
-            append_ledger_entry,
-            entity_type="HOST",
-            entity_id=hostname,
-            stage="EDR_CONTAINMENT",
-            action_taken="NETWORK_ISOLATION_SIMULATED",
-            reasoning_output=msg,
-            analyst_user="analyst@omniguard.io",
-        )
-    except Exception as e:
-        print(f"Ledger write notice: {e}")
-
-    return {
-        "status": "isolation_requested",
-        "simulated": True,
-        "host": hostname,
-        "action": "network_isolation",
-        "message": msg,
-    }
+async def isolate_host(hostname: str, me: dict = Depends(current_user)):
+    """Host containment (DEMO STUB): recorded in the ledger, no real network
+    action yet. Same code the AI agent's approved isolate_host runs (tools.py)."""
+    out = await run_in_threadpool(run_tool, "isolate_host", {"hostname": hostname}, me["email"], True)
+    if not out["ok"]:
+        raise HTTPException(status_code=400, detail=out["summary"])
+    return {**out["data"], "action": "network_isolation"}
 
 
 # ── Decision Ledger Audit Endpoints ─────────────────────────────────
 
-@app.get("/investigations/ledger")
+@app.get("/investigations/ledger", dependencies=AUTH)
 async def read_ledger(limit: int = 50):
     """Retrieves newest entries from the replayable investigation decision ledger."""
     records = await run_in_threadpool(get_recent_ledger, limit)
     return {"records": records, "count": len(records)}
 
 
-@app.get("/investigations/ledger/host/{hostname}")
+@app.get("/investigations/ledger/host/{hostname}", dependencies=AUTH)
 async def read_host_ledger(hostname: str):
     """Retrieves all decision ledger records associated with a specific host."""
     records = await run_in_threadpool(get_ledger_for_entity, hostname)
     return {"host": hostname, "records": records, "count": len(records)}
 
 
-@app.get("/investigations/ledger/verify")
+@app.get("/investigations/ledger/verify", dependencies=AUTH)
 async def verify_ledger():
     """
     Cryptographic verification endpoint:

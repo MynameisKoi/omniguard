@@ -4,7 +4,9 @@ from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 from models import Alert
 
 auth = (NEO4J_USER, NEO4J_PASSWORD)
-driver = GraphDatabase.driver(NEO4J_URI, auth=auth)
+# fail fast when Neo4j is down: the defaults retry for 30s+, which stalls every
+# alert write and leaves the dashboard graph spinning
+driver = GraphDatabase.driver(NEO4J_URI, auth=auth, connection_timeout=3, max_transaction_retry_time=5)
 
 
 # this key value dictionary is to make sure that we can label the nodes
@@ -88,7 +90,20 @@ def ensure_schema():
         for rule in rules:
             session.run(rule)
 
-ensure_schema() # making sure that the rules are made before it does any alerts
+# make sure the rules exist before any alerts are written. if Neo4j is down at
+# startup, don't take the whole backend with it: alerts, evidence and the
+# dashboard still work, and the schema is retried on the next graph write
+_schema_ready = False
+
+def _try_schema():
+    global _schema_ready
+    try:
+        ensure_schema()
+        _schema_ready = True
+    except Exception as e:
+        print(f"Neo4j unreachable — graph unavailable until it's back ({e})")
+
+_try_schema()
 
 
 # the actual writes, all inside the transaction tx
@@ -271,6 +286,8 @@ def _write_alert(tx, alert: Alert):
 # what main.py calls. Opens one transaction so an alert is written
 # completely or not at all.
 def ingest_alert(alert: Alert):
+    if not _schema_ready:
+        _try_schema()
     with driver.session() as session:
         session.execute_write(_write_alert, alert)
 
@@ -327,3 +344,77 @@ def update_alert_status(alert_id: str, status: str) -> None:
 
 
 
+
+
+# ── graph at scale (#13) ────────────────────────────────────────────
+# the full graph is fine at a few hundred entities, but the browser layout
+# slows down fast past that. get_graph_view lets the dashboard ask for just
+# what it will draw: the most-connected entities, plus anything it must
+# include, or only a given set (the filtered views).
+
+# the standing-fact relationships the overview shows (same set as _read_overview)
+ENTITY_RELS = "HAS_IP|LOGGED_INTO|CONNECTED_TO_DOMAIN|ACCESSED_URL|SPAWNED_PROCESS|BELONGS_TO|INITIATED_FLOW|HOSTS_DOMAIN"
+
+
+def _resolve_ids(tx, ids):
+    # "Host:LAPTOP-10" -> the node's elementId. keys can contain ":" themselves
+    # (URLs, process ids like host:pid), so split on the first one only
+    groups = {}
+    for node_id in ids:
+        label, _, key = node_id.partition(":")
+        if label in NODE_KEY and key:
+            groups.setdefault(label, []).append(key)
+    found = []
+    for label, keys in groups.items():
+        # label/property come from NODE_KEY, never from the request
+        rows = tx.run(
+            f"MATCH (n:{label}) WHERE n.{NODE_KEY[label]} IN $keys RETURN elementId(n) AS eid",
+            keys=keys,
+        )
+        found.extend(r["eid"] for r in rows)
+    return found
+
+
+def _read_view(tx, limit=None, include=(), only=None):
+    total = tx.run(
+        f"MATCH (n)-[:{ENTITY_RELS}]-() RETURN count(DISTINCT n) AS c"
+    ).single()["c"]
+
+    if only is not None:
+        keep = _resolve_ids(tx, only)
+    else:
+        top_q = (
+            f"MATCH (n)-[:{ENTITY_RELS}]-() WITH n, count(*) AS deg "
+            "ORDER BY deg DESC " + ("LIMIT $limit " if limit else "")
+            + "RETURN elementId(n) AS eid"
+        )
+        keep = [r["eid"] for r in tx.run(top_q, limit=limit)]
+        keep = list(dict.fromkeys(keep + _resolve_ids(tx, include)))
+
+    # every kept node (so a lone entity still shows) and the links between them
+    nodes = tx.run(
+        "MATCH (n) WHERE elementId(n) IN $keep RETURN n", keep=keep
+    )
+    payloads = dict(_get_node_payload(r["n"]) for r in nodes)
+    edges = tx.run(
+        f"MATCH (a)-[r:{ENTITY_RELS}]->(b) "
+        "WHERE elementId(a) IN $keep AND elementId(b) IN $keep RETURN a, r, b",
+        keep=keep,
+    )
+    graph = _build_graph(edges)
+    # keep entities with no links in this view too (a filter that hits one
+    # host should still show it) — except techniques, which only ever link to
+    # alerts, so in the entity graph they'd always float alone
+    linked = {n["id"] for n in graph["nodes"]}
+    for node_id, payload in payloads.items():
+        if node_id not in linked and payload["type"] != "Technique":
+            graph["nodes"].append(payload)
+
+    graph["total"] = total
+    graph["truncated"] = only is None and limit is not None and total > limit
+    return graph
+
+
+def get_graph_view(limit=None, include=(), only=None):
+    with driver.session() as session:
+        return session.execute_read(_read_view, limit, list(include), only)

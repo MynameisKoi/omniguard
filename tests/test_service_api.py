@@ -7,8 +7,13 @@ from fastapi.testclient import TestClient
 
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 engine_root = os.path.join(repo_root, "spectrac2-engine")
-if engine_root not in sys.path:
-    sys.path.insert(0, engine_root)
+if engine_root in sys.path:
+    sys.path.remove(engine_root)
+sys.path.insert(0, engine_root)
+
+# If 'service' was cached or shadowed by verifyeye-ingress/service.py, clear it
+if "service" in sys.modules and not hasattr(sys.modules["service"], "__path__"):
+    del sys.modules["service"]
 
 from service.main import app
 

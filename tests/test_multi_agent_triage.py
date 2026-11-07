@@ -120,6 +120,12 @@ def test_api_pipeline_endpoint():
         from main import app
         from fastapi.testclient import TestClient
 
+        app.dependency_overrides[backend_main.current_user] = lambda: {
+            "email": "analyst@omniguard.io",
+            "name": "SOC Analyst",
+            "role": "analyst",
+        }
+
         client = TestClient(app)
 
         with patch.object(backend_main.alerts_collection, "find") as mock_find:

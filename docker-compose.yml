@@ -37,6 +37,9 @@ services:
     build: ./verifyeye-ingress
     ports:
       - "8100:8100"
+    environment:
+      # where the agent sends its evidence screenshots
+      CORE_API_URL: http://backend:8000
     # lets the sandboxed agent reach the host (and host.docker.internal URLs)
     extra_hosts:
       - "host.docker.internal:host-gateway"
