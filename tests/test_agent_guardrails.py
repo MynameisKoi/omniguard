@@ -4,6 +4,7 @@ stripped, and the agent can never claim an action happened on its own.
 """
 
 import os
+import re
 import sys
 
 import pytest
@@ -137,3 +138,80 @@ def test_internal_action_names_become_words():
 def test_sentences_from_earlier_replies_are_not_repeated():
     convo = {"messages": [{"role": "assistant", "content": "Facts. This means it's compromised. Isolate it."}]}
     assert agent._not_repeated("This means it's compromised. Check the ledger next.", convo) == "Check the ledger next."
+
+
+KNOWN = {"LAPTOP-10": "host", "maharjan": "user", "BUILD-SRV-02": "host", "DEV-BOX-11": "host",
+         "cdn-telemetry-sync.net": "domain", "spectrac2": "detection engine"}
+
+
+@pytest.fixture
+def known_names(monkeypatch):
+    monkeypatch.setattr(agent, "mentioned_entities", lambda text, limit=5: [
+        (k, v) for k, v in KNOWN.items() if re.search(rf"(?<![\w.-]){re.escape(k.lower())}(?![\w-])", (text or "").lower())])
+
+
+@pytest.mark.parametrize("text, plan", [
+    ("what about the user maharjan", [("entity_summary", {"name": "maharjan"})]),
+    ("maharjan", [("entity_summary", {"name": "maharjan"})]),
+    ("show me everything about phishing this week", [("show_dashboard", {"since_hours": 168, "engine": "verifyeye"})]),
+    ("show me critical alerts on LAPTOP-10", [("show_dashboard", {"severity": "critical", "host": "LAPTOP-10"})]),
+    ("compare BUILD-SRV-02 and DEV-BOX-11", [("compare_entities", {"names": "BUILD-SRV-02, DEV-BOX-11"})]),
+    ("show me the graph for cdn-telemetry-sync.net", [("show_graph", {"entity": "cdn-telemetry-sync.net"})]),
+    ("what needs attention?", [("attention_findings", {})]),
+    ("investigate LAPTOP-10", [("investigate_host", {"hostname": "LAPTOP-10"})]),
+    ("isolate LAPTOP-10", None),              # actions: model + approval card
+    ("what is a C2 beacon?", None),           # general knowledge
+    ("what is spectrac2?", None),             # an engine, not something to look up
+    ("show me powershell alerts", None),      # filters the router can't read
+])
+def test_plain_requests_are_routed_with_exact_names(known_names, text, plan):
+    assert agent._route(text) == plan
+
+
+def test_it_means_what_the_conversation_is_about(known_names):
+    convo = {"messages": [
+        {"role": "user", "content": "tell me about maharjan"},
+        {"role": "assistant", "content": "...", "steps": [{"tool": "entity_summary", "args": {"name": "maharjan"}}]},
+    ]}
+    assert agent._focus(convo) == ("maharjan", "user")
+    assert agent._route("how bad is it?", convo) == [("entity_summary", {"name": "maharjan"})]
+    assert agent._route("show me its graph", convo) == [("show_graph", {"entity": "maharjan"})]
+    assert agent._route("what does it mean?", convo) is None    # about the last answer, not a lookup
+
+
+def test_contain_it_skips_to_the_last_host(known_names):
+    convo = {"messages": [
+        {"role": "user", "content": "what happened on LAPTOP-10?"},
+        {"role": "user", "content": "and the user maharjan?"},
+    ]}
+    assert agent._contain_intent("contain it", convo) == ["LAPTOP-10"]
+
+
+def test_nothing_found_is_said_plainly():
+    out = agent._not_found([{"args": {"name": "zzz"}, "summary":
+                             "'zzz' is not a host, user, domain, IP, brand or technique in the alerts. If it's a general term..."}])
+    assert out.startswith("'zzz' is not a host") and "general term" not in out and "spelling" in out
+
+
+def test_misspelt_name_in_the_message_is_still_routed(known_names, monkeypatch):
+    monkeypatch.setattr(agent, "closest_entity", lambda w: "maharjan" if w.lower() in ("mahirjan", "maharjan") else None)
+    # the typed name goes through; run_tool corrects it and notes the correction
+    assert agent._route("what about the user mahirjan") == [("entity_summary", {"name": "mahirjan"})]
+    assert agent._route("mahirjan") == [("entity_summary", {"name": "mahirjan"})]
+    assert agent._route("what about the weather") is None
+
+
+def test_tool_talk_is_dropped():
+    assert agent._plain("Isolate LAPTOP-10 (call the isolation tool).") == "Isolate LAPTOP-10."
+
+
+@pytest.mark.parametrize("text, general", [
+    ("what is a C2 beacon?", True),
+    ("explain credential phishing", True),
+    ("what is LAPTOP-10?", False),
+    ("what happened today?", False),
+    ("what are our riskiest hosts?", False),
+    ("what does it mean?", False),
+])
+def test_general_questions_skip_the_tools(known_names, text, general):
+    assert agent._general(text) is general

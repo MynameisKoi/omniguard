@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from difflib import get_close_matches
 from datetime import datetime, timedelta, timezone
 
 from db import database
@@ -88,10 +89,57 @@ def mentioned_entities(text, limit=5):
     for field, label in ENTITY_FIELDS:
         for value in alerts_collection.distinct(field):
             v = str(value or "")
-            if len(v) >= 3 and re.search(r"(?<![\w.-])" + re.escape(v.lower()) + r"(?![\w-])", low):
+            if len(v) >= 3 and _given(v) and re.search(r"(?<![\w.-])" + re.escape(v.lower()) + r"(?![\w-])", low):
                 if v not in [f[0] for f in found]:
                     found.append((v, label))
     return found[:limit]
+
+
+def _entity_values():
+    """Every name in the alerts (hosts, users, domains, IPs, brands...)."""
+    return {str(v) for f, _ in ENTITY_FIELDS for v in alerts_collection.distinct(f) if _given(v) and len(str(v)) >= 3}
+
+
+def closest_entity(name):
+    """The name in the alerts this one means: itself if it exists, else a close
+    spelling ("mahirjan" -> "maharjan"), else None. A 3B model retypes names
+    and gets a letter wrong, then reports that nothing exists."""
+    name = str(name or "").strip()
+    if not name:
+        return None
+    by_low = {v.lower(): v for v in _entity_values()}
+    if name.lower() in by_low:
+        return by_low[name.lower()]
+    if "." in name:
+        return None   # domains / IPs: one letter off is a different (maybe lookalike) site
+    close = get_close_matches(name.lower(), [v for v in by_low if "." not in v], n=1, cutoff=0.8)
+    return by_low[close[0]] if close else None
+
+
+# arguments that hold one name, per tool
+NAME_ARGS = ("name", "hostname", "entity", "host", "domain")
+
+
+def _correct_names(name, args):
+    """Fix misspelt names in a tool's arguments. Returns (args, [(typed, meant)])."""
+    fixed = []
+    def fix(v):
+        meant = closest_entity(v)
+        if meant and meant != str(v).strip() and meant.lower() != str(v).strip().lower():
+            fixed.append((str(v).strip(), meant))
+            return meant
+        return v
+    for k in NAME_ARGS:
+        if _given(args.get(k)):
+            args[k] = fix(args[k])
+    if name == "compare_entities" and _given(args.get("names")):
+        parts = re.split(r"\s*(?:,|\band\b|\bvs\.?\b|\bversus\b)\s*", str(args["names"]))
+        args["names"] = ", ".join(fix(p) for p in parts if p.strip())
+    if name == "search_alerts" and _given(args.get("query")) and " " not in str(args["query"]).strip():
+        # one word that matches nothing as typed but is one letter off a real name
+        if not alerts_collection.count_documents(_alert_query(query=args["query"])):
+            args["query"] = fix(args["query"])
+    return args, fixed
 
 
 # ── read tools ────────────────────────────────────────────────────────────
@@ -171,7 +219,8 @@ def entity_summary(name):
             break
     if not field:
         raise ToolError(f"'{name}' is not a host, user, domain, IP, brand or technique in the alerts. "
-                        "If it's a general security term, answer from your own knowledge.")
+                        "If it's a general security term, answer from your own knowledge; otherwise say plainly "
+                        "it isn't in the alerts and don't guess what it is or whether it's safe.")
     fields = [f for f, label in ENTITY_FIELDS if label == kind]   # IPs: src and dst
     rx = {"$regex": f"^{re.escape(name)}$", "$options": "i"}
     rows = list(alerts_collection.find({"$or": [{f: rx} for f in fields]}, ALERT_FIELDS).sort("timestamp", -1))
@@ -452,7 +501,15 @@ def show_dashboard(query=None, severity=None, engine=None, host=None, status=Non
     rows = list(alerts_collection.find(q, ALERT_FIELDS).sort("timestamp", -1).limit(500))
     label = _view_label(query, severity, engine, host, status, since_hours)
     if not rows:
-        raise ToolError(f"No alerts match {label}. Try search_alerts with fewer filters, or tell the analyst.")
+        older = ""
+        if _given(since_hours):
+            wider = alerts_collection.find_one(_alert_query(query, severity, engine, host, status), ALERT_FIELDS,
+                                               sort=[("timestamp", -1)])
+            if wider:
+                older = (f"No alerts match {label}, but there are older ones: the newest is from "
+                         f"{_when(wider.get('timestamp'))}. Ask without the time limit to see them. ")
+        raise ToolError(older or f"No alerts match {label}. "
+                        "Try search_alerts with fewer filters, or tell the analyst.")
     sev = Counter(a.get("severity") for a in rows)
     times = [a["timestamp"] for a in rows if isinstance(a.get("timestamp"), datetime)]
     summary = (f"Dashboard of {label} drawn for the analyst: {len(rows)} alert(s) "
@@ -678,6 +735,7 @@ def run_tool(name, args=None, analyst="unknown", approved=False):
     missing = [r for r in t["required"] if r not in args]
     if missing:
         return {"ok": False, "summary": f"{name} needs {', '.join(missing)}.", "render": "text", "data": None}
+    args, fixed = _correct_names(name, args)
     if t["kind"] == "action":
         if not approved:
             return {"ok": False, "needs_approval": True, "render": "approval", "data": {"tool": name, "args": args},
@@ -685,7 +743,13 @@ def run_tool(name, args=None, analyst="unknown", approved=False):
         args["analyst"] = analyst
     try:
         out = t["fn"](**args)
-        return {"ok": True, "render": t["render"], **out}
+        if fixed:
+            note = "; ".join(f"no '{a}' in the alerts, so this is {b}" for a, b in fixed)
+            out["summary"] = f"({note}) " + out.get("summary", "")
+            if out.get("facts"):
+                out["facts"] = "_" + "; ".join(f"Showing **{b}** (closest match to “{a}”)" for a, b in fixed) + "._\n\n" + out["facts"]
+        args.pop("analyst", None)
+        return {"ok": True, "render": t["render"], "args": args, **out}
     except ToolError as e:
         return {"ok": False, "summary": str(e), "render": "text", "data": None}
     except Exception as e:   # neo4j down etc.: tell the model, don't crash the chat

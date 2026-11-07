@@ -17,6 +17,8 @@ if backend_dir not in sys.path:
 
 import tools  # noqa: E402
 
+REAL_CORRECT_NAMES = tools._correct_names   # before the fixture stubs it
+
 CALLS = []
 
 
@@ -54,11 +56,13 @@ def stub_registry(monkeypatch):
         "broken": dict(fn=broken_stub, kind="read", render="text", description="d", parameters={}, required=[]),
         "offline": dict(fn=offline_stub, kind="read", render="graph", description="d", parameters={}, required=[]),
     })
+    monkeypatch.setattr(tools, "_correct_names", lambda name, args: (args, []))   # no database
 
 
 def test_read_tool_runs_and_reports_how_to_draw_it():
     r = tools.run_tool("lookup", {"name": "LAPTOP-10"})
-    assert r == {"ok": True, "render": "entity", "summary": "found LAPTOP-10", "data": {"name": "LAPTOP-10"}}
+    assert r == {"ok": True, "render": "entity", "args": {"name": "LAPTOP-10"},
+                 "summary": "found LAPTOP-10", "data": {"name": "LAPTOP-10"}}
 
 
 def test_action_never_runs_without_approval():
@@ -137,3 +141,13 @@ def test_screenshots_read_a_verdict_word_as_the_verdict(monkeypatch):
     monkeypatch.setattr(tools, "list_evidence", fake_list)
     r = tools.show_screenshots(query="phishing")
     assert seen["verdict"] == "phishing" and "1 phishing" in r["reply"].replace("*", "")
+
+
+def test_misspelt_names_are_corrected(monkeypatch):
+    monkeypatch.setattr(tools, "_entity_values", lambda: {"maharjan", "LAPTOP-10", "cdn-telemetry-sync.net"})
+    assert tools.closest_entity("mahirjan") == "maharjan"
+    assert tools.closest_entity("laptop-10") == "LAPTOP-10"
+    assert tools.closest_entity("cdn-telemetry-sync.com") is None   # a different (lookalike) domain
+    assert tools.closest_entity("phishing") is None
+    args, fixed = REAL_CORRECT_NAMES("entity_summary", {"name": "mahirjan"})
+    assert args == {"name": "maharjan"} and fixed == [("mahirjan", "maharjan")]

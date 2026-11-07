@@ -22,7 +22,7 @@ import httpx
 
 from config import OLLAMA_URL, OLLAMA_MODEL
 from conversations import append_message, get_conversation, update_message
-from tools import TOOLS, mentioned_entities, run_tool, tool_specs
+from tools import TOOLS, closest_entity, mentioned_entities, run_tool, tool_specs
 
 MAX_ROUNDS = 5        # tool rounds per message, so a small model can't loop forever
 HISTORY = 12          # past messages the model sees (older ones still show on the page)
@@ -119,6 +119,166 @@ def _from_history(text, history):
     return any(m.get("role") == "tool" and m.get("content") for m in history[-6:])
 
 
+# ── the router: obvious requests skip the model's tool choice ──────────────
+# A 3B model picks the wrong tool, retypes names with a letter wrong, or adds
+# filters that don't fit. When the request is plain ("tell me about maharjan",
+# "show the graph for LAPTOP-10", "what needs attention?"), the backend makes the
+# call itself with the exact names, and the model only explains the result.
+
+# "it", "this host", "the user": the thing the conversation is about
+REFERS = re.compile(r"\b(it|its|it's|this (host|user|domain|machine|account|one|ip|brand)"
+                    r"|that (host|user|domain|machine|account|one|ip|brand)|the (host|user|domain|machine|account))\b", re.I)
+# a question about one thing ("how bad is it?"), when the name comes from the focus
+ABOUT = re.compile(r"tell me|what happened|how bad|compromised|\bsafe\b|risk|status of|details|summar|who is"
+                   r"|what about|anything (on|about)|look into|\bcheck\b|info", re.I)
+INVESTIGATE = re.compile(r"\binvestigate\b|verdict|is (it|\S+) (compromised|infected|hacked)", re.I)
+STATUS = re.compile(r"(system|service)s? (status|health|up|online)|is (everything|the system|ollama|neo4j|mongo)\b.*\b(up|online|running|working)", re.I)
+
+SINCE = [(re.compile(r"\btoday\b|last 24 ?h|past day|last day", re.I), 24),
+         (re.compile(r"this week|last 7 days|past week|last week", re.I), 168),
+         (re.compile(r"this month|last 30 days|past month", re.I), 720)]
+LAST_N = re.compile(r"(?:last|past) (\d+) ?(hours?|h|days?|d)\b", re.I)
+ENGINE = [(re.compile(r"phish", re.I), "verifyeye"), (re.compile(r"\bc2\b|beacon|command.and.control", re.I), "spectrac2")]
+STATUS_WORD = [(re.compile(r"untriaged|\bnew\b|\bopen\b", re.I), "new"),
+               (re.compile(r"\bresolved\b|\bclosed\b", re.I), "resolved"), (re.compile(r"\btriaged\b", re.I), "triaged")]
+SEVERITY_WORD = re.compile(r"\b(critical|high|medium|low)\b", re.I)
+WHOLE_VIEW = re.compile(r"dashboard|overview|everything|all (the )?alerts|break ?down", re.I)
+
+
+def _focus(convo, kind=None):
+    """The host / user / domain the conversation was last about, as (name, kind):
+    the newest name a tool looked up, or the newest one the analyst typed.
+    kind="host" skips past users and domains to the last host."""
+    fits = lambda e: e[1] != "detection engine" and (kind is None or e[1] == kind)
+    for m in reversed((convo or {}).get("messages") or []):
+        for st in reversed(m.get("steps") or []):
+            args = st.get("args") or {}
+            for k in ("hostname", "name", "entity", "host", "domain"):
+                if args.get(k):
+                    hit = [e for e in mentioned_entities(str(args[k])) if fits(e)]
+                    if hit:
+                        return hit[0]
+        if m["role"] == "user":
+            named = [e for e in mentioned_entities(m["content"]) if fits(e)]
+            if named:
+                return named[-1]
+    return None
+
+
+def _filters(text):
+    """Dashboard filters written in plain words ("critical phishing this week")."""
+    f = {}
+    for rx, hours in SINCE:
+        if rx.search(text):
+            f["since_hours"] = hours
+    m = LAST_N.search(text)
+    if m:
+        f["since_hours"] = int(m.group(1)) * (24 if m.group(2).lower().startswith("d") else 1)
+    for rx, engine in ENGINE:
+        if rx.search(text):
+            f["engine"] = engine
+    for rx, status in STATUS_WORD:
+        if rx.search(text):
+            f["status"] = status
+            break
+    m = SEVERITY_WORD.search(text)
+    if m:
+        f["severity"] = m.group(1).lower()
+    return f
+
+
+NAMED_AFTER = re.compile(r"\b(?:user|host|machine|account|domain|laptop|server)\s+([\w.@-]{3,})", re.I)
+
+
+def _misspelt(text):
+    """A name typed with a letter wrong ("the user mahirjan"): the word after
+    "user"/"host", or a message that is just the name."""
+    words = re.findall(r"[\w.@-]{3,}", text)
+    candidates = NAMED_AFTER.findall(text) or (words if 0 < len(words) <= 2 else [])
+    out = []
+    for w in candidates:
+        meant = closest_entity(w)
+        if meant:
+            # keep what was typed: run_tool corrects it and says so in the reply
+            out += [(w, k) for v, k in mentioned_entities(meant) if v == meant and k != "detection engine"][:1]
+    return out
+
+
+# "what is a C2 beacon?": general knowledge, nothing to look up
+KNOWLEDGE = re.compile(r"^\s*(what('s| is| are| does)|explain|define|how (does|do)|why (does|do|is)|what do you mean)\b", re.I)
+OUR_DATA = re.compile(r"\b(our|we|any|alerts?|hosts?|users?|today|this week|seen|detected|attention|happened|ledger|screenshots?)\b", re.I)
+
+
+def _general(text, convo=None):
+    """A general security question that names nothing in the alerts."""
+    return bool(KNOWLEDGE.search(text or "") and not OUR_DATA.search(text or "")
+                and not mentioned_entities(text) and not REFERS.search(text or ""))
+
+
+GENERAL = ("This is a general security question: answer it from your own knowledge in 2-4 short sentences. "
+           "Don't describe this organisation's alerts, hosts or engines.")
+
+
+def _route(text, convo=None):
+    """The tool calls a plain request obviously needs, as [(tool, args)], or None
+    to let the model choose (actions, open questions, general knowledge)."""
+    text = text or ""
+    if ACTION_ASK.search(text):
+        return None          # actions go through the model + the approval card
+    named = [(v, k) for v, k in mentioned_entities(text, limit=6) if k != "detection engine"]
+    if not named:
+        named = _misspelt(text)
+    from_focus = False
+    if not named and REFERS.search(text):
+        focus = _focus(convo)
+        if focus:
+            named, from_focus = [focus], True
+    names = [v for v, _ in named]
+    views = _views(text)
+    view = views[0] if views else None
+
+    if view == "compare_entities":
+        return [("compare_entities", {"names": ", ".join(names[:4])})] if len(names) >= 2 else None
+    if view == "show_graph":
+        return [("show_graph", {"entity": names[0]})] if names else None
+    if view == "show_ledger":
+        return [("show_ledger", {"entity": names[0]} if names else {})]
+    if view == "show_screenshots":
+        args = {}
+        for v, kind in named:
+            if kind == "domain":
+                args.setdefault("domain", v)
+            elif kind == "impersonated brand":
+                args.setdefault("query", v)
+        verdict = next((w for w in ("phishing", "cleared", "blocked") if re.search(w[:5], text, re.I)), None)
+        verdict = verdict or next((VERDICT[w] for w in VERDICT if re.search(rf"\b{w}\b", text, re.I)), None)
+        if verdict:
+            args["verdict"] = verdict
+        return [("show_screenshots", args)]
+    if view == "show_dashboard":
+        args = _filters(text)
+        for v, kind in named[:1]:
+            args["host" if kind == "host" else "query"] = v
+        if args or WHOLE_VIEW.search(text):
+            return [("show_dashboard", args)]
+        return None          # "show me powershell alerts": the model picks the filters
+    if PRIORITY.search(text):
+        return [("attention_findings", {})]
+    if STATUS.search(text):
+        return [("system_status", {})]
+    if names and (not from_focus or ABOUT.search(text) or INVESTIGATE.search(text)):
+        hosts = [v for v, k in named if k == "host"]
+        if INVESTIGATE.search(text) and hosts:
+            return [("investigate_host", {"hostname": hosts[0]})]
+        return [("entity_summary", {"name": v}) for v in names[:3]]
+    return None
+
+
+# words for a screenshot verdict, as the analyst says them
+VERDICT = {"fake": "phishing", "malicious": "phishing", "safe": "cleared", "genuine": "cleared",
+           "legit": "cleared", "captcha": "blocked", "bot check": "blocked"}
+
+
 def _text_tool_call(content):
     """llama3.2 sometimes writes a tool call as text ({"name": ..., "parameters": ...})
     instead of calling it. Recover it as a real call, or None."""
@@ -158,18 +318,8 @@ def _contain_intent(text, convo=None):
     hosts = [v for v, label in mentioned_entities(text) if label == "host"]
     if hosts or not convo:
         return hosts
-    for m in reversed(convo["messages"]):
-        for st in reversed(m.get("steps") or []):
-            h = (st.get("args") or {}).get("hostname")
-            if h:
-                return [h]
-            if st.get("tool") == "entity_summary" and " is a host " in (st.get("summary") or ""):
-                return [st["args"].get("name")]
-        if m["role"] == "user":
-            named = [v for v, label in mentioned_entities(m["content"]) if label == "host"]
-            if named:
-                return named[-1:]
-    return []
+    focus = _focus(convo, kind="host")
+    return [focus[0]] if focus else []
 
 
 def _grounded(answer, reference):
@@ -208,7 +358,9 @@ def _not_repeated(answer, convo):
 
 
 def _plain(text):
-    """NETWORK_ISOLATION -> network isolation: the model echoes internal names."""
+    """NETWORK_ISOLATION -> network isolation: the model echoes internal names.
+    "(call the isolation tool)": the analyst doesn't call tools."""
+    text = re.sub(r"\s*\((call|use|using|via) [^)]*\btool\b[^)]*\)", "", text, flags=re.I)
     return re.sub(r"\*{0,2}\b([A-Z]{2,}(?:_[A-Z]{2,})+)\b\*{0,2}", lambda m: m.group(1).replace("_", " ").lower(), text)
 
 
@@ -299,6 +451,19 @@ def _event(kind, **data):
     return json.dumps({"type": kind, **data}, default=str) + "\n"
 
 
+def _not_found(failed):
+    """What to say when the backend's own lookups found nothing: plainly, with no
+    guess at what it is or whether it's safe (the model guesses)."""
+    lines = []
+    for st in failed:
+        said = re.split(r"(?<=[.!?])\s+", st["summary"].strip())
+        n = 3 if "older ones" in st["summary"] else 1     # keep "the newest is from ..."
+        first = " ".join(said[:n])
+        lines.append(first[0].upper() + first[1:] if first else "Nothing came back.")
+    named = any(k in (st.get("args") or {}) for st in failed for k in ("name", "entity", "hostname", "names"))
+    return " ".join(lines) + (" Check the spelling, or ask me to search for part of the name." if named else "")
+
+
 def run_turn(owner, conversation_id, text, context=None):
     """One analyst message -> a stream of newline-delimited JSON events."""
     convo = get_conversation(owner, conversation_id)
@@ -308,30 +473,43 @@ def run_turn(owner, conversation_id, text, context=None):
     append_message(owner, conversation_id, "user", text)
 
     history = _history(convo)
-    messages = [{"role": "system", "content": SYSTEM + _hints(text, history)
+    general = _general(text)
+    answer_only = general or _from_history(text, history)
+    plan = None if answer_only else _route(text, convo)
+    focus = _focus(convo)
+    about = (f"\n\nThe conversation so far is about {focus[0]} (a {focus[1]}): \"it\" or \"this\" means {focus[0]}."
+             if focus and not mentioned_entities(text) else "")
+    messages = [{"role": "system", "content": SYSTEM + ("\n\n" + GENERAL if general else "" if plan else _hints(text, history)) + about
                  + (f"\n\nThe analyst is looking at: {context}" if context else "")}]
     messages += history
     messages.append({"role": "user", "content": text})
-    tools = [] if _from_history(text, history) else _ollama_tools(text, context)
+    tools = [] if answer_only else _ollama_tools(text, context)
 
     steps, blocks, approvals, answer = [], [], [], ""
     lead = []          # facts written from the data, shown first
     reference = text   # everything this turn's results say, for the grounding check
     try:
         for _ in range(MAX_ROUNDS):
-            reply = None
-            for kind, payload in _chat(messages, tools):
-                if kind == "token":
-                    answer += payload
-                    yield _event("token", text=payload)
-                else:
-                    reply = payload
-            if not reply["tool_calls"]:
-                break
+            routed = bool(plan)
+            if plan:
+                # the backend chose: same as if the model had called them
+                calls = [{"function": {"name": n, "arguments": a}} for n, a in plan]
+                plan = None
+            else:
+                reply = None
+                for kind, payload in _chat(messages, tools):
+                    if kind == "token":
+                        answer += payload
+                        yield _event("token", text=payload)
+                    else:
+                        reply = payload
+                if not reply["tool_calls"]:
+                    break
+                calls = reply["tool_calls"]
+            messages.append({"role": "assistant", "content": "" if routed else reply["content"], "tool_calls": calls})
 
-            messages.append({"role": "assistant", "content": reply["content"], "tool_calls": reply["tool_calls"]})
             proposed, written = False, []
-            for call in reply["tool_calls"]:
+            for call in calls:
                 name = call["function"]["name"]
                 args = call["function"].get("arguments") or {}
                 if isinstance(args, str):
@@ -341,7 +519,7 @@ def run_turn(owner, conversation_id, text, context=None):
                         args = {}
                 yield _event("step", tool=name, args=args, status="running")
                 result = run_tool(name, args, analyst=owner)
-                step = {"tool": name, "args": args, "ok": result["ok"], "summary": result["summary"]}
+                step = {"tool": name, "args": result.get("args", args), "ok": result["ok"], "summary": result["summary"]}
                 steps.append(step)
                 yield _event("step", **step, status="done")
 
@@ -365,20 +543,27 @@ def run_turn(owner, conversation_id, text, context=None):
                     yield _event("token", text=result["facts"] + "\n\n")
             # tools that write their own reply (screenshots: the model can't see them
             # and would invent what they show): that IS the answer, no model call
-            if written and len(written) == len(reply["tool_calls"]):
+            if written and len(written) == len(calls):
                 text_out = "\n\n".join(written)
                 answer += text_out
                 yield _event("token", text=text_out)
                 break
+            failed = [st for st in steps[-len(calls):] if not st["ok"] and "approval" not in st["summary"]]
+            if routed and failed and len(failed) == len(calls):
+                # the backend looked up exactly what was asked and it isn't there:
+                # say so, don't let the model guess (or search again for a typo)
+                text_out = _not_found(failed)
+                answer += text_out
+                yield _event("token", text=text_out)
+                break
             # all good: answer now. something failed: let it try another tool first
-            failed = [st for st in steps[-len(reply["tool_calls"]):] if not st["ok"] and "approval" not in st["summary"]]
-            if lead and not failed:
+            if lead and (not failed or routed):
                 messages[-1]["content"] += "\n\n" + INTERPRET.format(facts="\n".join(lead))
             else:
                 viewed = any(b["render"] in VIEW_RENDERS for b in blocks)
                 messages[-1]["content"] += "\n\n" + (RETRY if failed else AFTER_VIEW if viewed else AFTER_TOOLS)
 
-            if proposed or (lead and not failed):
+            if proposed or (lead and not failed) or routed:
                 # facts are out (or an action waits on the analyst): one last call for
                 # the meaning, with no tools so it can't wander off
                 for kind, payload in _chat(messages, []):
