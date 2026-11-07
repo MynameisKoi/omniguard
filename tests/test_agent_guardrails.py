@@ -107,3 +107,33 @@ def test_follow_up_on_results_answers_without_tools(monkeypatch):
     assert not agent._from_history("show me the graph for those", history)                   # a new view
     assert not agent._from_history("tell me about LAPTOP-10 and those users", history)       # a new name
     assert not agent._from_history("isolate those hosts", history)                           # an action
+
+
+def test_sentences_naming_things_the_results_never_mention_are_dropped(monkeypatch):
+    known = {"LAPTOP-10": "host", "maharjan": "user", "FINANCE-PC-07": "host"}
+    monkeypatch.setattr(agent, "mentioned_entities",
+                        lambda text, limit=5: [(k, v) for k, v in known.items() if k.lower() in text.lower()])
+    reference = "Everything linked to LAPTOP-10 is lit up. Users: maharjan."
+    answer = "LAPTOP-10 looks compromised. FINANCE-PC-07 was also hit. Isolate it next."
+    assert agent._grounded(answer, reference) == "LAPTOP-10 looks compromised. Isolate it next."
+
+
+def test_interpretation_is_kept_short():
+    assert agent._first_sentences("One. Two. Three. Four.", 3) == "One. Two. Three."
+
+
+def test_restated_facts_are_dropped_and_the_rest_kept():
+    facts = "**LAPTOP-10** is a host in **10 alerts** (9 critical, 1 high). It has both phishing and C2 alerts."
+    answer = ("LAPTOP-10 is a host in 10 alerts (9 critical, 1 high). "
+              "Treat it as compromised and isolate it before checking maharjan's other logins.")
+    assert agent._new_only(answer, facts) == "Treat it as compromised and isolate it before checking maharjan's other logins."
+
+
+def test_internal_action_names_become_words():
+    assert agent._plain("Next, propose **NETWORK_ISOLATION** now.") == "Next, propose network isolation now."
+    assert agent._plain("LAPTOP-10 and T1566 stay as they are.") == "LAPTOP-10 and T1566 stay as they are."
+
+
+def test_sentences_from_earlier_replies_are_not_repeated():
+    convo = {"messages": [{"role": "assistant", "content": "Facts. This means it's compromised. Isolate it."}]}
+    assert agent._not_repeated("This means it's compromised. Check the ledger next.", convo) == "Check the ledger next."

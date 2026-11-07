@@ -49,6 +49,12 @@ AFTER_VIEW = ("The view is drawn above your reply and the analyst is looking at 
               "point out what stands out in it and the next step. Only state facts that appear in the tool "
               "result above: don't guess at causes, compromises or actions that it doesn't mention.")
 
+# the facts are already written (from the data) and shown: the model only adds
+# meaning. A 3B model gets counts and names wrong when it restates them
+INTERPRET = ("The analyst already sees this, written from the data:\n{facts}\n\n"
+             "Add ONE or TWO short sentences after it: what it means and the next step. Don't repeat its "
+             "numbers or names, don't add new facts, no lists.")
+
 RETRY = ("A tool above failed. If another tool (usually search_alerts) can answer the question, call it now; "
          "otherwise tell the analyst plainly what you couldn't find.")
 
@@ -166,6 +172,51 @@ def _contain_intent(text, convo=None):
     return []
 
 
+def _grounded(answer, reference):
+    """Drop sentences naming a host / user / domain / IP that none of this turn's
+    results mention: the model made that link up."""
+    ref = (reference or "").lower()
+    keep = []
+    for sentence in re.split(r"(?<=[.!?])\s+", answer.strip()):
+        names = [v for v, _ in mentioned_entities(sentence, limit=20)]
+        if all(v.lower() in ref for v in names):
+            keep.append(sentence)
+    return " ".join(keep)
+
+
+def _words(text):
+    return set(re.findall(r"[a-z0-9][a-z0-9.\-]*[a-z0-9]|[a-z0-9]", (text or "").lower()))
+
+
+def _new_only(answer, facts):
+    """Drop the model's sentences that just restate the facts (it's told not to,
+    and does anyway): keep only what it adds."""
+    known = _words(facts)
+    keep = []
+    for sentence in re.split(r"(?<=[.!?])\s+", answer.strip()):
+        w = _words(sentence)
+        if w and len(w & known) / len(w) < 0.6:
+            keep.append(sentence)
+    return " ".join(keep)
+
+
+def _not_repeated(answer, convo):
+    """Drop sentences the agent already said in its last few replies (a small
+    model copies its previous answer when the new results look similar)."""
+    said = " ".join(m.get("content") or "" for m in (convo or {}).get("messages", [])[-6:] if m["role"] == "assistant")
+    return " ".join(x for x in re.split(r"(?<=[.!?])\s+", answer.strip()) if x.strip() and x.strip() not in said)
+
+
+def _plain(text):
+    """NETWORK_ISOLATION -> network isolation: the model echoes internal names."""
+    return re.sub(r"\*{0,2}\b([A-Z]{2,}(?:_[A-Z]{2,})+)\b\*{0,2}", lambda m: m.group(1).replace("_", " ").lower(), text)
+
+
+def _first_sentences(text, n=3):
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return " ".join(parts[:n])
+
+
 def _tidy(answer):
     """Drop any markdown table the model wrote anyway (the real data is drawn)."""
     lines = [l for l in answer.splitlines()
@@ -264,6 +315,8 @@ def run_turn(owner, conversation_id, text, context=None):
     tools = [] if _from_history(text, history) else _ollama_tools(text, context)
 
     steps, blocks, approvals, answer = [], [], [], ""
+    lead = []          # facts written from the data, shown first
+    reference = text   # everything this turn's results say, for the grounding check
     try:
         for _ in range(MAX_ROUNDS):
             reply = None
@@ -305,6 +358,11 @@ def run_turn(owner, conversation_id, text, context=None):
                     if result.get("reply"):
                         written.append(result["reply"])
                 messages.append({"role": "tool", "content": result["summary"], "tool_name": name})
+                reference += "\n" + result["summary"]
+                if result["ok"] and result.get("facts") and not result.get("reply"):
+                    lead.append(result["facts"])
+                    reference += "\n" + result["facts"]
+                    yield _event("token", text=result["facts"] + "\n\n")
             # tools that write their own reply (screenshots: the model can't see them
             # and would invent what they show): that IS the answer, no model call
             if written and len(written) == len(reply["tool_calls"]):
@@ -314,11 +372,15 @@ def run_turn(owner, conversation_id, text, context=None):
                 break
             # all good: answer now. something failed: let it try another tool first
             failed = [st for st in steps[-len(reply["tool_calls"]):] if not st["ok"] and "approval" not in st["summary"]]
-            viewed = any(b["render"] in VIEW_RENDERS for b in blocks)
-            messages[-1]["content"] += "\n\n" + (RETRY if failed else AFTER_VIEW if viewed else AFTER_TOOLS)
+            if lead and not failed:
+                messages[-1]["content"] += "\n\n" + INTERPRET.format(facts="\n".join(lead))
+            else:
+                viewed = any(b["render"] in VIEW_RENDERS for b in blocks)
+                messages[-1]["content"] += "\n\n" + (RETRY if failed else AFTER_VIEW if viewed else AFTER_TOOLS)
 
-            if proposed:
-                # an action waits for the analyst: let the model say so, without more tools
+            if proposed or (lead and not failed):
+                # facts are out (or an action waits on the analyst): one last call for
+                # the meaning, with no tools so it can't wander off
                 for kind, payload in _chat(messages, []):
                     if kind == "token":
                         answer += payload
@@ -343,6 +405,10 @@ def run_turn(owner, conversation_id, text, context=None):
     # the model must never claim an action happened: only an approved card does that
     # only when an action was asked for or proposed this turn: describing past,
     # real actions from the ledger ("it has been isolated twice") is fine
+    if lead:
+        # the model's part: short, and only about things the results mention
+        answer = _first_sentences(_not_repeated(_grounded(_new_only(_tidy(answer), "\n".join(lead)), reference), convo))
+    answer = _plain(answer)
     acting = bool(approvals) or bool(ACTION_ASK.search(text or ""))
     if acting and CLAIMED_ACTION.search(answer):
         # drop the sentences that claim it (the page swaps in this cleaned answer)
@@ -350,7 +416,7 @@ def run_turn(owner, conversation_id, text, context=None):
         answer += "\n\nNothing has been changed yet — " + ("approve the card below to go ahead." if approvals
                                                             else "I can only act through an approval card.")
 
-    answer = _tidy(answer)
+    answer = _tidy("\n\n".join(lead + [answer]) if lead else answer)
     message = append_message(owner, conversation_id, "assistant", answer,
                              steps=steps, blocks=blocks, approvals=approvals)
     yield _event("done", message_id=message["message_id"] if message else None, content=answer)

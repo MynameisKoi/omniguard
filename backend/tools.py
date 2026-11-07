@@ -67,6 +67,20 @@ def _alert_line(a):
     return " | ".join(bits)
 
 
+def _sev_text(counter):
+    return ", ".join(f"{counter[x]} {x}" for x in SEVERITIES if counter[x])
+
+
+def _list(items, n=5):
+    items = [str(i) for i in items if i]
+    return ", ".join(items[:n]) + (f" and {len(items) - n} more" if len(items) > n else "")
+
+
+def _ranked(rows, field, n=5):
+    c = Counter(a.get(field) for a in rows if a.get(field))
+    return _list([f"{v} ({k})" for v, k in c.most_common()], n)
+
+
 def mentioned_entities(text, limit=5):
     """Names from the alerts that appear in a message, e.g. [("cdn-telemetry-sync.net",
     "domain")]. Tells a small model which tool fits before it guesses."""
@@ -108,13 +122,26 @@ def search_alerts(query=None, severity=None, engine=None, host=None, status=None
     q = _alert_query(query, severity, engine, host, status, since_hours)
     limit = max(1, min(int(limit or 20), 100))
     total = alerts_collection.count_documents(q)
+    relaxed = ""
+    if not total and _given(query) and len(q) > 1:
+        # a small model adds filters that don't fit ("engine: verifyeye" for a C2
+        # domain): the name alone is what the analyst asked about
+        q, relaxed = _alert_query(query), f" for {query} (with the other filters there were none)"
+        total = alerts_collection.count_documents(q)
+    if not total:
+        raise ToolError(f"No alerts match{' ' + repr(str(query)) if _given(query) else ' those filters'}. "
+                        "Say plainly that nothing was found; don't guess what it is or whether it's safe.")
     rows = list(alerts_collection.find(q, ALERT_FIELDS).sort("timestamp", -1).limit(limit))
     sev = Counter(a.get("severity") for a in rows)
-    summary = f"{total} alert(s) match" + (f", showing {len(rows)}" if total > len(rows) else "")
+    summary = f"{total} alert(s) match{relaxed}" + (f", showing {len(rows)}" if total > len(rows) else "")
     if rows:
         summary += " (" + ", ".join(f"{sev[s]} {s}" for s in SEVERITIES if sev[s]) + "):\n"
         summary += "\n".join(f"- {_alert_line(a)}" for a in rows[:8])
-    return {"summary": summary, "data": {"alerts": rows, "total": total}}
+    every = list(alerts_collection.find(q, {"_id": 0, "severity": 1, "host": 1})) if total > len(rows) else rows
+    facts = (f"**{total} alert{'s' if total != 1 else ''}** match{relaxed.split(' (')[0]} "
+             f"({_sev_text(Counter(a.get('severity') for a in every))}). Hosts: {_ranked(every, 'host')}."
+             + (" The other filters matched nothing, so only the name was used." if relaxed else ""))
+    return {"summary": summary, "facts": facts, "data": {"alerts": rows, "total": total}}
 
 
 def get_alert(alert_id):
@@ -124,8 +151,12 @@ def get_alert(alert_id):
                         "Use search_alerts with a host, domain or keyword instead.")
     shots = list_evidence(url=a["target_url"], limit=1) if a.get("target_url") else []
     extra = f"\nAgent screenshot: {'phishing' if shots[0]['phishing'] else 'cleared'}" if shots else ""
+    facts = (f"**{a.get('severity', '?').capitalize()} {a.get('event_type', 'alert')}** on {a.get('host')}"
+             + (f" (user {a['user']})" if a.get("user") else "") + (f", {a['domain']}" if a.get("domain") else "")
+             + f", {_when(a.get('timestamp'))}, status {a.get('status', 'new')}."
+             + (f" The agent's screenshot says **{'phishing' if shots[0]['phishing'] else 'cleared'}**." if shots else ""))
     return {"summary": _alert_line(a) + (f"\n{a['description']}" if a.get("description") else "") + extra,
-            "data": {"alert": a, "evidence": shots[:1]}}
+            "facts": facts, "data": {"alert": a, "evidence": shots[:1]}}
 
 
 def entity_summary(name):
@@ -167,7 +198,36 @@ def entity_summary(name):
         summary += (f"Hosts: {', '.join(f'{h} ({n})' for h, n in hosts.most_common(8)) or 'none'}. "
                     f"Domains: {', '.join(data['domains'][:5]) or 'none'}. Engines: {', '.join(data['engines'])}. ")
         summary += _cross_engine(list(hosts), data)
-    return {"summary": summary, "data": data}
+    return {"summary": summary, "facts": _entity_facts(data), "data": data}
+
+
+def _entity_facts(d):
+    """One entity in plain words, straight from its data."""
+    sev = Counter({k: v for k, v in (d.get("severity") or {}).items() if v})
+    out = (f"**{d['name']}** is {'an' if d['kind'][0].lower() in 'aeio' else 'a'} {d['kind']} in "
+           f"**{d['alert_count']} alert{'s' if d['alert_count'] != 1 else ''}** ({_sev_text(sev)}), "
+           f"last seen {_when(d.get('last_seen'))}.")
+    if d["kind"] == "host":
+        eng = d.get("engines") or []
+        if {"verifyeye", "spectrac2"} <= set(eng):
+            out += " It has **both phishing and C2** alerts, which usually means a real compromise."
+        if d.get("phishing_domains"):
+            out += f" Phishing pages: {_list(d['phishing_domains'], 3)}."
+        if d.get("c2_destinations"):
+            out += f" C2 traffic to: {_list(d['c2_destinations'], 3)}."
+        if d.get("users"):
+            out += f" Users: {_list(d['users'], 4)}."
+        out += f" {d.get('open', 0)} still untriaged."
+        last = d.get("ledger_latest")
+        out += (f" Last action: {last['action']} by {last['by']} ({last['when']})." if last else " No action taken yet.")
+    else:
+        hosts = [h["host"] for h in d.get("hosts") or []]
+        out += f" Hosts: {_list(hosts, 6) or 'none'}."
+        he = d.get("host_engines") or {}
+        both = [h for h in hosts if {"verifyeye", "spectrac2"} <= set(he.get(h, []))]
+        if both:
+            out += f" **{_list(both, 4)}** had both phishing and C2 alerts."
+    return out
 
 
 # what kinds of alert each engine raises, in words the analyst uses
@@ -206,6 +266,9 @@ def _host_overview(host, rows, data):
     ledger = get_ledger_for_entity(host)
     shots = sum(len(list_evidence(url=u, limit=1)) for u in {a["target_url"] for a in rows if a.get("target_url")})
     timeline = sorted((a for a in rows if isinstance(a.get("timestamp"), datetime)), key=lambda a: a["timestamp"])
+    if ledger:
+        data["ledger_latest"] = {"action": _action_words(ledger[0]), "by": ledger[0].get("analyst_user"),
+                                 "when": _ledger_when(ledger[0].get("timestamp"))}
     data.update({"phishing_domains": phishing, "c2_destinations": c2, "open": open_count,
                  "ledger_actions": len(ledger), "screenshots": shots,
                  "timeline": [{"time": a["timestamp"], "event": a.get("event_type"), "severity": a.get("severity"),
@@ -231,6 +294,21 @@ def _host_overview(host, rows, data):
     return out
 
 
+def _ledger_when(ts):
+    # the ledger stores ISO strings (they're part of each entry's hash)
+    try:
+        return _when(datetime.fromisoformat(str(ts).replace("Z", "+00:00")))
+    except ValueError:
+        return str(ts or "")
+
+
+def _action_words(r):
+    a = r.get("action_taken") or ""
+    if a.startswith("NETWORK_ISOLATION"):
+        return "isolation" + (" (simulated)" if "SIMULATED" in a else "")
+    return a.replace("_", " ").lower()
+
+
 def host_graph(hostname):
     graph = get_host_graph(hostname)   # neo4j down -> ServiceUnavailable, handled in run_tool
     if not graph["nodes"]:
@@ -238,7 +316,8 @@ def host_graph(hostname):
     kinds = Counter(n["type"] for n in graph["nodes"])
     summary = (f"The graph around {hostname} has {len(graph['nodes'])} entities and {len(graph['edges'])} links: "
                + ", ".join(f"{n} {t}" for t, n in kinds.most_common()) + ". It is drawn for the analyst.")
-    return {"summary": summary, "data": {"host": hostname, **graph}}
+    return {"summary": summary, "facts": f"The graph around **{hostname}**: {len(graph['nodes'])} entities "
+            f"({', '.join(f'{n} {t.lower()}' for t, n in kinds.most_common(5))}).", "data": {"host": hostname, **graph}}
 
 
 def get_evidence(alert_id=None, url=None, domain=None):
@@ -301,12 +380,19 @@ def attention_findings():
 
     if not findings:
         findings.append({"tone": "good", "entities": [], "text": "All clear — nothing urgent."})
-    return {"summary": "\n".join(f"- {f['text']}" for f in findings), "data": {"findings": findings}}
+    bad = [f for f in findings if f["tone"] == "bad"]
+    facts = (f"**{len(bad)} thing{'s' if len(bad) != 1 else ''} need{'s' if len(bad) == 1 else ''} attention.** Most urgent: {bad[0]['text']}"
+             if bad else findings[0]["text"])
+    return {"summary": "\n".join(f"- {f['text']}" for f in findings), "facts": facts, "data": {"findings": findings}}
 
 
 def system_status():
     s = {"mongo": check_mongo(), "neo4j": check_neo4j(), "ollama": check_ollama()}
-    return {"summary": ", ".join(f"{k} {'online' if v else 'OFFLINE'}" for k, v in s.items()), "data": {"status": s}}
+    names = {"mongo": "MongoDB", "neo4j": "Neo4j", "ollama": "the local AI model"}
+    down = [names[k] for k, v in s.items() if not v]
+    reply = ("Everything is online: MongoDB, Neo4j and the local AI model." if not down
+             else f"**{_list(down)} {'is' if len(down) == 1 else 'are'} offline.** The rest is running.")
+    return {"summary": ", ".join(f"{k} {'online' if v else 'OFFLINE'}" for k, v in s.items()), "reply": reply, "data": {"status": s}}
 
 
 def ledger_lookup(entity=None, limit=10):
@@ -316,7 +402,10 @@ def ledger_lookup(entity=None, limit=10):
         return {"summary": "No ledger entries" + (f" for {entity}" if _given(entity) else "") + ".", "data": {"records": []}}
     summary = "\n".join(f"- {r.get('timestamp', '')[:16]} {r.get('stage')} {r.get('action_taken')} on "
                         f"{r.get('entity_id')} by {r.get('analyst_user')}" for r in rows[:8])
-    return {"summary": summary, "data": {"records": rows}}
+    facts = (f"**{len(rows)} ledger entr{'y' if len(rows) == 1 else 'ies'}**" + (f" for {entity}" if _given(entity) else "")
+             + f". Latest: {_action_words(rows[0])} on {rows[0].get('entity_id')} by {rows[0].get('analyst_user')} "
+             f"({_ledger_when(rows[0].get('timestamp'))}).")
+    return {"summary": summary, "facts": facts, "data": {"records": rows}}
 
 
 def investigate_host(hostname):
@@ -328,7 +417,10 @@ def investigate_host(hostname):
     summary = (f"Verdict: {t.get('classification')} (risk {t.get('risk_score')}/100, confidence "
                f"{t.get('confidence')}). Recommended: "
                + "; ".join(f"{a.get('urgency')}: {a.get('action')}" for a in c.get("recommended_actions", [])))
-    return {"summary": summary, "data": {"investigation": result}}
+    acts = c.get("recommended_actions", [])
+    facts = (f"Verdict on **{hostname}**: **{str(t.get('classification', 'unknown')).replace('_', ' ').lower()}**, risk {t.get('risk_score')}/100."
+             + (f" Recommended first: {acts[0].get('action', '').replace('_', ' ').lower()}." if acts else ""))
+    return {"summary": summary, "facts": facts, "data": {"investigation": result}}
 
 
 # ── view tools: draw a whole dashboard view inside the reply ─────────────
@@ -370,7 +462,11 @@ def show_dashboard(query=None, severity=None, engine=None, host=None, status=Non
                f"Engines: {_top(rows, 'source')}. Hosts: {_top(rows, 'host', 8)}. "
                f"Users: {_top(rows, 'user')}. Domains: {_top(rows, 'domain')}. "
                f"Brands impersonated: {_top(rows, 'brand_target')}. Techniques: {_top(rows, 'mitre_technique')}.")
-    return {"summary": summary, "data": {"label": label, "term": str(query) if _given(query) else label,
+    facts = (f"**{len(rows)} alert{'s' if len(rows) != 1 else ''}** for {label} ({_sev_text(sev)}), "
+             f"{sum(1 for a in rows if a.get('status') == 'new')} untriaged. Hosts: {_ranked(rows, 'host')}."
+             + (f" Users: {_ranked(rows, 'user')}." if any(a.get('user') for a in rows) else "")
+             + (f" Brands impersonated: {_ranked(rows, 'brand_target', 4)}." if any(a.get('brand_target') for a in rows) else ""))
+    return {"summary": summary, "facts": facts, "data": {"label": label, "term": str(query) if _given(query) else label,
                                           "alert_ids": [a["alert_id"] for a in rows]}}
 
 
@@ -396,7 +492,10 @@ def show_graph(entity):
                f"Users: {', '.join(distinct('user')[:6]) or 'none'}. "
                f"Domains: {', '.join(distinct('domain')[:6]) or 'none'}. IPs: {', '.join(ips[:6]) or 'none'}. "
                f"Techniques: {', '.join(distinct('mitre_technique')[:4]) or 'none'}.")
-    return {"summary": summary, "data": {"entity": name, "alert_ids": [a["alert_id"] for a in rows]}}
+    linked = [("Hosts", distinct("host")), ("Users", distinct("user")), ("Domains", distinct("domain")), ("IPs", ips)]
+    facts = (f"Everything linked to **{name}** is lit up ({len(rows)} alert{'s' if len(rows) != 1 else ''}). "
+             + "; ".join(f"{k}: {_list(v, 4)}" for k, v in linked if v) + ".")
+    return {"summary": summary, "facts": facts, "data": {"entity": name, "alert_ids": [a["alert_id"] for a in rows]}}
 
 
 # what a small model puts in `query` when it means the verdict
@@ -452,7 +551,11 @@ def show_ledger(entity=None):
     summary = head + f"{len(rows)} entr{'y' if len(rows) == 1 else 'ies'}" + (f" for {entity}" if _given(entity) else "") + ", newest first:\n" + \
         "\n".join(f"- {str(r.get('timestamp', ''))[:16]} {r.get('action_taken')} on {r.get('entity_id')} "
                   f"by {r.get('analyst_user')}" for r in rows[:10])
-    return {"summary": summary, "data": {"records": rows, "chain": chain, "entity": entity if _given(entity) else None}}
+    facts = (("The chain verifies: nothing has been altered. " if valid else f"**The chain is broken at entry {failing}.** ")
+             + f"**{len(rows)} entr{'y' if len(rows) == 1 else 'ies'}**" + (f" for {entity}" if _given(entity) else "")
+             + f"; latest: {_action_words(rows[0])} on {rows[0].get('entity_id')} by {rows[0].get('analyst_user')} "
+             f"({_ledger_when(rows[0].get('timestamp'))}).")
+    return {"summary": summary, "facts": facts, "data": {"records": rows, "chain": chain, "entity": entity if _given(entity) else None}}
 
 
 def compare_entities(names):
@@ -470,7 +573,8 @@ def compare_entities(names):
             lines.append(f"{n}: {e}")
     if not out:
         raise ToolError("none of those names are in the alerts")
-    return {"summary": "Shown side by side.\n" + "\n".join(lines), "data": {"entities": out}}
+    facts = "\n".join(f"- {_entity_facts(d)}" for d in out)
+    return {"summary": "Shown side by side.\n" + "\n".join(lines), "facts": facts, "data": {"entities": out}}
 
 
 # ── action tools: only run after an analyst approves ─────────────────────
