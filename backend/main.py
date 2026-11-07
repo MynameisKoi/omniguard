@@ -1,5 +1,5 @@
 from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from neo4j.exceptions import ServiceUnavailable
 from starlette.concurrency import run_in_threadpool
 from events import manager
@@ -15,6 +15,7 @@ from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_vi
 from tools import tool_specs, run_tool
 from conversations import (create_conversation, list_conversations, get_conversation,
                            rename_conversation, delete_conversation)
+from agent import run_turn, decide_approval
 from evidence import store_evidence, list_evidence, get_evidence, get_image, EvidenceError
 from dedup import compute_alert_simhash, find_matching_alert
 from ledger import (
@@ -303,6 +304,33 @@ async def conversations_rename(conversation_id: str, payload: ConversationIn, me
 async def conversations_delete(conversation_id: str, me: dict = Depends(current_user)):
     if not await run_in_threadpool(delete_conversation, me["email"], conversation_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+# ── the SOC agent: a message in, a live stream of steps / visuals / answer out ──
+class AgentMessage(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+    # what the analyst is looking at, e.g. "alert 60197cfe… on LAPTOP-10" (Triage this alert)
+    context: str | None = Field(default=None, max_length=500)
+
+@app.post("/conversations/{conversation_id}/messages")
+async def agent_message(conversation_id: str, payload: AgentMessage, me: dict = Depends(current_user)):
+    if not await run_in_threadpool(get_conversation, me["email"], conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    # newline-delimited JSON events: step, block, approval, token, done
+    return StreamingResponse(run_turn(me["email"], conversation_id, payload.content, payload.context),
+                             media_type="application/x-ndjson")
+
+class ApprovalDecision(BaseModel):
+    approve: bool
+
+@app.post("/conversations/{conversation_id}/approvals/{approval_id}")
+async def agent_approval(conversation_id: str, approval_id: str, payload: ApprovalDecision,
+                         me: dict = Depends(current_user)):
+    out = await run_in_threadpool(decide_approval, me["email"], conversation_id, approval_id, payload.approve)
+    if not out:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if out["already"]:
+        raise HTTPException(status_code=409, detail=f"Already {out['approval']['status']}")
+    return out["approval"]
 
 class AlertStatus(BaseModel):
     status: Literal["new", "triaged", "resolved"]

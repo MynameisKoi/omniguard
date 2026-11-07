@@ -45,7 +45,9 @@ class ToolError(Exception):
 
 
 def _given(v):
-    # small models fill unused arguments with "" or "null"
+    # small models fill unused arguments with "", "null" or 0 ("the last 0 hours")
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return v > 0
     return v not in (None, "", "null", "None", [])
 
 
@@ -65,6 +67,19 @@ def _alert_line(a):
     return " | ".join(bits)
 
 
+def mentioned_entities(text, limit=5):
+    """Names from the alerts that appear in a message, e.g. [("cdn-telemetry-sync.net",
+    "domain")]. Tells a small model which tool fits before it guesses."""
+    found, low = [], (text or "").lower()
+    for field, label in ENTITY_FIELDS:
+        for value in alerts_collection.distinct(field):
+            v = str(value or "")
+            if len(v) >= 3 and re.search(r"(?<![\w.-])" + re.escape(v.lower()) + r"(?![\w-])", low):
+                if v not in [f[0] for f in found]:
+                    found.append((v, label))
+    return found[:limit]
+
+
 # ── read tools ────────────────────────────────────────────────────────────
 
 def search_alerts(query=None, severity=None, engine=None, host=None, status=None, since_hours=None, limit=20):
@@ -73,7 +88,7 @@ def search_alerts(query=None, severity=None, engine=None, host=None, status=None
         if severity not in SEVERITIES:
             raise ToolError(f"severity must be one of {SEVERITIES}")
         q["severity"] = severity
-    if _given(engine):
+    if _given(engine) and str(engine).lower() in ("verifyeye", "spectrac2"):   # ignore "all", "any"...
         q["source"] = str(engine).lower()
     if _given(host):
         q["host"] = {"$regex": f"^{re.escape(str(host))}$", "$options": "i"}
@@ -98,7 +113,8 @@ def search_alerts(query=None, severity=None, engine=None, host=None, status=None
 def get_alert(alert_id):
     a = alerts_collection.find_one({"alert_id": alert_id}, ALERT_FIELDS)
     if not a:
-        raise ToolError(f"no alert with id {alert_id}")
+        raise ToolError(f"there is no alert with id {alert_id} (don't make ids up). "
+                        "Use search_alerts with a host, domain or keyword instead.")
     shots = list_evidence(url=a["target_url"], limit=1) if a.get("target_url") else []
     extra = f"\nAgent screenshot: {'phishing' if shots[0]['phishing'] else 'cleared'}" if shots else ""
     return {"summary": _alert_line(a) + (f"\n{a['description']}" if a.get("description") else "") + extra,
@@ -273,11 +289,11 @@ S, N = {"type": "string"}, {"type": "number"}
 
 TOOLS = {
     "search_alerts": dict(fn=search_alerts, kind="read", render="alerts",
-        description="Find alerts. Filter by free text (host, user, domain, IP, URL, brand...), severity, engine, host, status or recent hours.",
+        description="The default way to look things up. Find alerts by free text (any host, user, domain, IP, URL, brand), severity, engine, host, status or recent hours.",
         parameters={"query": S, "severity": {"type": "string", "enum": SEVERITIES}, "engine": {"type": "string", "enum": ["verifyeye", "spectrac2"]},
                     "host": S, "status": {"type": "string", "enum": STATUSES}, "since_hours": N, "limit": N}, required=[]),
     "get_alert": dict(fn=get_alert, kind="read", render="alert",
-        description="Full details of one alert by its alert_id, with the agent's screenshot if there is one.",
+        description="Full details of one alert. Only use with an exact alert_id (a long id like 60197cfe-ca50-...), never with a name.",
         parameters={"alert_id": S}, required=["alert_id"]),
     "entity_summary": dict(fn=entity_summary, kind="read", render="entity",
         description="Summarise one host, user, domain, IP, impersonated brand or MITRE technique: when it was seen, how many alerts, which hosts it touched.",
