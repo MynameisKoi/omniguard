@@ -225,3 +225,24 @@ def test_did_you_mean_offers_the_question_with_each_name():
                                         "show the graph for finance-pc-1")
     assert text.endswith("Closest matches: **FINANCE-PC-11**, **FINANCE-PC-07**. Did you mean one of these?")
     assert [o["ask"] for o in options] == ["show the graph for FINANCE-PC-11", "show the graph for FINANCE-PC-07"]
+
+
+def test_cleaner_shows_only_finished_clean_sentences(known_names):
+    facts = "**LAPTOP-10** is a host in **10 alerts** (9 critical, 1 high)."
+    c = agent._Cleaner(facts=facts, reference=facts, convo={"messages": []}, acting=True, limit=2)
+    out = ""
+    for tok in ["LAPTOP-10 is a host in 10 ", "alerts (9 critical, 1 high). Treat it ",
+                "as compromised. BUILD-SRV-02 was hit too. ", "It has been isolated. Propose ",
+                "NETWORK_ISOLATION next. Never shown."]:
+        out += c.feed(tok)
+    out += c.finish()
+    # restated fact, unknown host and the claimed action are never shown; stops after 2
+    assert out.strip() == "Treat it as compromised. Propose network isolation next."
+    assert c.claimed and c.done
+
+
+def test_cleaner_holds_a_sentence_until_it_ends():
+    c = agent._Cleaner()
+    assert c.feed("C2 means command ") == ""
+    assert c.feed("and control. It") == "C2 means command and control. "
+    assert c.finish() == "It"

@@ -369,6 +369,61 @@ def _first_sentences(text, n=3):
     return " ".join(parts[:n])
 
 
+class _Cleaner:
+    """The model's text, cleaned one sentence at a time BEFORE it's shown, so
+    the reply never changes under the analyst's eyes. Drops table rows,
+    sentences restating the facts, naming things the results don't mention,
+    repeating an earlier reply, or claiming an action happened; turns internal
+    names into words; stops after `limit` sentences."""
+    END = re.compile(r"(?<=[.!?])\s+|\n+")
+
+    def __init__(self, facts="", reference=None, convo=None, acting=False, limit=None):
+        self.facts, self.reference, self.convo = facts, reference, convo
+        self.acting, self.limit = acting, limit
+        self.buf, self.count, self.done, self.claimed = "", 0, False, False
+
+    def keep(self, s):
+        if not s or re.match(r"^\|.*\|$", s) or s.lower() in ("assistant", "assistant:"):
+            return False
+        if re.match(r"^[|\-: ]+$", s):
+            return False
+        if self.facts and not _new_only(s, self.facts):
+            return False
+        if self.reference is not None and not _grounded(s, self.reference):
+            return False
+        if self.convo is not None and not _not_repeated(s, self.convo):
+            return False
+        if self.acting and CLAIMED_ACTION.search(s):
+            self.claimed = True
+            return False
+        return True
+
+    def _emit(self, s, sep):
+        s = s.strip()
+        if self.done or not self.keep(s):
+            return ""
+        self.count += 1
+        if self.limit and self.count >= self.limit:
+            self.done = True
+        return _plain(s) + sep
+
+    def feed(self, token):
+        self.buf += token
+        out = ""
+        while not self.done:
+            m = self.END.search(self.buf)
+            if not m:
+                break
+            sentence, sep = self.buf[:m.start()], m.group(0)
+            self.buf = self.buf[m.end():]
+            out += self._emit(sentence, "\n\n" if "\n" in sep else " ")
+        return out
+
+    def finish(self):
+        out, self.buf = self._emit(self.buf, ""), ""
+        return out
+
+
 def _tidy(answer):
     """Drop any markdown table the model wrote anyway (the real data is drawn)."""
     lines = [l for l in answer.splitlines()
@@ -503,10 +558,38 @@ def run_turn(owner, conversation_id, text, context=None):
     messages.append({"role": "user", "content": text})
     tools = [] if answer_only else _ollama_tools(text, context)
 
-    steps, blocks, approvals, answer = [], [], [], ""
+    steps, blocks, approvals = [], [], []
+    shown = []         # exactly what the analyst has seen, in order: saved as the reply
     asked = False      # a name wasn't found: we asked which one was meant
+    claimed = False    # the model claimed an action happened (that sentence was dropped)
     lead = []          # facts written from the data, shown first
     reference = text   # everything this turn's results say, for the grounding check
+
+    def say(piece):
+        if piece:
+            shown.append(piece)
+            return _event("token", text=piece)
+
+    def model(tools_now, cleaner):
+        """One model call, its text cleaned sentence by sentence before it's
+        shown. Yields events, then ("reply", message) last."""
+        gen = _chat(messages, tools_now)
+        reply = {"role": "assistant", "content": "", "tool_calls": []}
+        for kind, payload in gen:
+            if kind == "token":
+                ev = say(cleaner.feed(payload))
+                if ev:
+                    yield ev
+                if cleaner.done:          # enough said: stop the model (saves seconds)
+                    gen.close()
+                    break
+            else:
+                reply = payload
+        ev = say(cleaner.finish())
+        if ev:
+            yield ev
+        yield ("reply", reply)
+
     try:
         for _ in range(MAX_ROUNDS):
             routed = bool(plan)
@@ -515,13 +598,14 @@ def run_turn(owner, conversation_id, text, context=None):
                 calls = [{"function": {"name": n, "arguments": a}} for n, a in plan]
                 plan = None
             else:
+                cleaner = _Cleaner(acting=bool(ACTION_ASK.search(text or "")))
                 reply = None
-                for kind, payload in _chat(messages, tools):
-                    if kind == "token":
-                        answer += payload
-                        yield _event("token", text=payload)
+                for ev in model(tools, cleaner):
+                    if isinstance(ev, tuple):
+                        reply = ev[1]
                     else:
-                        reply = payload
+                        yield ev
+                claimed = claimed or cleaner.claimed
                 if not reply["tool_calls"]:
                     break
                 calls = reply["tool_calls"]
@@ -561,30 +645,26 @@ def run_turn(owner, conversation_id, text, context=None):
                 if result["ok"] and result.get("facts") and not result.get("reply"):
                     lead.append(result["facts"])
                     reference += "\n" + result["facts"]
-                    yield _event("token", text=result["facts"] + "\n\n")
+                    yield say(result["facts"] + "\n\n")
             # a name that isn't in the alerts but is spelt like one: ask, don't pick
             if misses:
                 text_out, options = _did_you_mean(misses, text)
                 block = {"render": "choices", "tool": "did_you_mean", "data": {"options": options}}
                 blocks.append(block)
                 yield _event("block", **block)
-                lead, answer, asked = [], text_out, True
-                yield _event("token", text=text_out)
+                asked = True
+                yield say(text_out)
                 break
             # tools that write their own reply (screenshots: the model can't see them
             # and would invent what they show): that IS the answer, no model call
             if written and len(written) == len(calls):
-                text_out = "\n\n".join(written)
-                answer += text_out
-                yield _event("token", text=text_out)
+                yield say("\n\n".join(written))
                 break
             failed = [st for st in steps[-len(calls):] if not st["ok"] and "approval" not in st["summary"]]
             if routed and failed and len(failed) == len(calls):
                 # the backend looked up exactly what was asked and it isn't there:
                 # say so, don't let the model guess (or search again for a typo)
-                text_out = _not_found(failed)
-                answer += text_out
-                yield _event("token", text=text_out)
+                yield say(_not_found(failed))
                 break
             # all good: answer now. something failed: let it try another tool first
             if lead and (not failed or routed):
@@ -595,20 +675,20 @@ def run_turn(owner, conversation_id, text, context=None):
 
             if proposed or (lead and not failed) or routed:
                 # facts are out (or an action waits on the analyst): one last call for
-                # the meaning, with no tools so it can't wander off
-                for kind, payload in _chat(messages, []):
-                    if kind == "token":
-                        answer += payload
-                        yield _event("token", text=payload)
+                # the meaning, with no tools so it can't wander off. Only what's new
+                # and grounded in the results gets shown, at most 3 sentences
+                acting = bool(approvals) or bool(ACTION_ASK.search(text or ""))
+                cleaner = (_Cleaner(facts="\n".join(lead), reference=reference, convo=convo, acting=acting, limit=3)
+                           if lead else _Cleaner(acting=acting))
+                for ev in model([], cleaner):
+                    if not isinstance(ev, tuple):
+                        yield ev
+                claimed = claimed or cleaner.claimed
                 break
         else:
-            note = "\n\n(I stopped after several steps — ask me to continue if you need more.)"
-            answer += note
-            yield _event("token", text=note)
+            yield say("\n\n(I stopped after several steps — ask me to continue if you need more.)")
     except httpx.HTTPError as e:
-        note = f"I couldn't reach the local AI model ({type(e).__name__}). Is Ollama running?"
-        answer = (answer + "\n\n" + note).strip()
-        yield _event("token", text=note)
+        yield say(f"\n\nI couldn't reach the local AI model ({type(e).__name__}). Is Ollama running?")
 
     # asked to contain a known host but the model didn't propose it: propose it
     for host in ([] if asked else _contain_intent(text, convo)):
@@ -617,21 +697,14 @@ def run_turn(owner, conversation_id, text, context=None):
                         "description": TOOLS["isolate_host"]["description"], "status": "pending"}
             approvals.append(approval)
             yield _event("approval", **approval)
-    # the model must never claim an action happened: only an approved card does that
-    # only when an action was asked for or proposed this turn: describing past,
-    # real actions from the ledger ("it has been isolated twice") is fine
-    if lead:
-        # the model's part: short, and only about things the results mention
-        answer = _first_sentences(_not_repeated(_grounded(_new_only(_tidy(answer), "\n".join(lead)), reference), convo))
-    answer = _plain(answer)
-    acting = bool(approvals) or bool(ACTION_ASK.search(text or ""))
-    if acting and CLAIMED_ACTION.search(answer):
-        # drop the sentences that claim it (the page swaps in this cleaned answer)
-        answer = " ".join(x for x in re.split(r"(?<=[.!?])\s+", answer) if not CLAIMED_ACTION.search(x))
-        answer += "\n\nNothing has been changed yet — " + ("approve the card below to go ahead." if approvals
-                                                            else "I can only act through an approval card.")
+    # the model claimed an action happened (that sentence was never shown): only
+    # an approved card does that
+    if claimed:
+        yield say("\n\nNothing has been changed yet — " + ("approve the card below to go ahead." if approvals
+                                                             else "I can only act through an approval card."))
 
-    answer = _tidy("\n\n".join(lead + [answer]) if lead else answer)
+    # the saved reply is exactly what streamed: nothing changes when it finishes
+    answer = re.sub(r"\n{3,}", "\n\n", "".join(shown)).strip()
     message = append_message(owner, conversation_id, "assistant", answer,
                              steps=steps, blocks=blocks, approvals=approvals)
     yield _event("done", message_id=message["message_id"] if message else None, content=answer)
