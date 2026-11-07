@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Literal
 from pydantic import BaseModel, Field
 from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_view
+from tools import tool_specs, run_tool
 from evidence import store_evidence, list_evidence, get_evidence, get_image, EvidenceError
 from dedup import compute_alert_simhash, find_matching_alert
 from ledger import (
@@ -255,6 +256,35 @@ async def alert_evidence(alert_id: str):
         return []
     return await run_in_threadpool(list_evidence, None, alert["target_url"], None, 20)
 
+# ── SOC tools (tools.py): one registry for the AI agent and the MCP server ──
+@app.get("/agent/tools", dependencies=AUTH)
+async def list_tools():
+    return tool_specs()
+
+class ToolCall(BaseModel):
+    args: dict = Field(default_factory=dict)
+    # action tools only run when approved. An analyst (or a service client
+    # with its own approval step, like an MCP host) sets this deliberately
+    approved: bool = False
+
+@app.post("/agent/tools/{name}")
+async def call_tool(name: str, payload: ToolCall, me: dict = Depends(current_user)):
+    return await run_in_threadpool(run_tool, name, payload.args, me["email"], payload.approved)
+
+class AlertStatus(BaseModel):
+    status: Literal["new", "triaged", "resolved"]
+    note: str | None = Field(default=None, max_length=500)
+
+# mark an alert triaged / resolved from the dashboard (recorded in the ledger)
+@app.post("/alerts/{alert_id}/status")
+async def update_alert_status(alert_id: str, payload: AlertStatus, me: dict = Depends(current_user)):
+    out = await run_in_threadpool(run_tool, "set_alert_status",
+                                  {"alert_id": alert_id, "status": payload.status, "note": payload.note},
+                                  me["email"], True)
+    if not out["ok"]:
+        raise HTTPException(status_code=404 if "no alert" in out["summary"] else 400, detail=out["summary"])
+    return out["data"]
+
 # This is for graph to be shown in the frontend 
 @app.get("/graph", dependencies=AUTH)
 def get_graph() -> None:
@@ -375,33 +405,12 @@ async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
 
 @app.post("/hosts/{hostname}/isolate", status_code=202)
 async def isolate_host(hostname: str, me: dict = Depends(current_user)):
-    """
-    Host containment (DEMO STUB).
-    Records the containment decision to the immutable ledger and returns what the
-    dashboard would show. It does NOT yet perform real network isolation or update
-    the attack graph — real EDR enforcement + Neo4j graph isolation are planned.
-    """
-    msg = f"Containment requested for '{hostname}'. Simulated for now — no real network action is taken yet."
-    try:
-        await run_in_threadpool(
-            append_ledger_entry,
-            entity_type="HOST",
-            entity_id=hostname,
-            stage="EDR_CONTAINMENT",
-            action_taken="NETWORK_ISOLATION_SIMULATED",
-            reasoning_output=msg,
-            analyst_user=me["email"],   # who actually pressed it
-        )
-    except Exception as e:
-        print(f"Ledger write notice: {e}")
-
-    return {
-        "status": "isolation_requested",
-        "simulated": True,
-        "host": hostname,
-        "action": "network_isolation",
-        "message": msg,
-    }
+    """Host containment (DEMO STUB): recorded in the ledger, no real network
+    action yet. Same code the AI agent's approved isolate_host runs (tools.py)."""
+    out = await run_in_threadpool(run_tool, "isolate_host", {"hostname": hostname}, me["email"], True)
+    if not out["ok"]:
+        raise HTTPException(status_code=400, detail=out["summary"])
+    return {**out["data"], "action": "network_isolation"}
 
 
 # ── Decision Ledger Audit Endpoints ─────────────────────────────────
