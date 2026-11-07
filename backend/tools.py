@@ -100,20 +100,25 @@ def _entity_values():
     return {str(v) for f, _ in ENTITY_FIELDS for v in alerts_collection.distinct(f) if _given(v) and len(str(v)) >= 3}
 
 
-def closest_entity(name):
-    """The name in the alerts this one means: itself if it exists, else a close
-    spelling ("mahirjan" -> "maharjan"), else None. A 3B model retypes names
-    and gets a letter wrong, then reports that nothing exists."""
+def close_entities(name, n=3, cutoff=0.8):
+    """Names in the alerts spelt like this one, best first: [itself] if it
+    exists, else close spellings ("mahirjan" -> ["maharjan"]), else []."""
     name = str(name or "").strip()
     if not name:
-        return None
+        return []
     by_low = {v.lower(): v for v in _entity_values()}
     if name.lower() in by_low:
-        return by_low[name.lower()]
+        return [by_low[name.lower()]]
     if "." in name:
-        return None   # domains / IPs: one letter off is a different (maybe lookalike) site
-    close = get_close_matches(name.lower(), [v for v in by_low if "." not in v], n=1, cutoff=0.8)
-    return by_low[close[0]] if close else None
+        return []     # domains / IPs: one letter off is a different (maybe lookalike) site
+    return [by_low[c] for c in get_close_matches(name.lower(), [v for v in by_low if "." not in v], n=n, cutoff=cutoff)]
+
+
+def closest_entity(name):
+    """The name in the alerts this one means, or None. A 3B model retypes names
+    and gets a letter wrong, then reports that nothing exists."""
+    found = close_entities(name, n=1)
+    return found[0] if found else None
 
 
 # arguments that hold one name, per tool
@@ -121,13 +126,14 @@ NAME_ARGS = ("name", "hostname", "entity", "host", "domain")
 
 
 def _correct_names(name, args):
-    """Fix misspelt names in a tool's arguments. Returns (args, [(typed, meant)])."""
+    """Fix misspelt names in a tool's arguments. Returns (args, [(typed, meant, other close names)])."""
     fixed = []
     def fix(v):
-        meant = closest_entity(v)
-        if meant and meant != str(v).strip() and meant.lower() != str(v).strip().lower():
-            fixed.append((str(v).strip(), meant))
-            return meant
+        typed = str(v).strip()
+        found = close_entities(typed, n=4, cutoff=0.7)
+        if found and found[0].lower() != typed.lower() and closest_entity(typed) == found[0]:
+            fixed.append((typed, found[0], found[1:]))
+            return found[0]
         return v
     for k in NAME_ARGS:
         if _given(args.get(k)):
@@ -744,10 +750,15 @@ def run_tool(name, args=None, analyst="unknown", approved=False):
     try:
         out = t["fn"](**args)
         if fixed:
-            note = "; ".join(f"no '{a}' in the alerts, so this is {b}" for a, b in fixed)
+            note = "; ".join(f"no '{a}' in the alerts, so this is {b}" for a, b, _ in fixed)
             out["summary"] = f"({note}) " + out.get("summary", "")
-            if out.get("facts"):
-                out["facts"] = "_" + "; ".join(f"Showing **{b}** (closest match to “{a}”)" for a, b in fixed) + "._\n\n" + out["facts"]
+            said = " ".join(f"There's no **{a}** in the alerts. The closest match is **{b}**, shown below."
+                            + (f" Other close matches: {', '.join(others)}." if others else "")
+                            for a, b, others in fixed)
+            if out.get("reply"):
+                out["reply"] = said + "\n\n" + out["reply"]
+            else:
+                out["facts"] = said + ("\n\n" + out["facts"] if out.get("facts") else "")
         args.pop("analyst", None)
         return {"ok": True, "render": t["render"], "args": args, **out}
     except ToolError as e:

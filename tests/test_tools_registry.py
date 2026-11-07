@@ -150,4 +150,4 @@ def test_misspelt_names_are_corrected(monkeypatch):
     assert tools.closest_entity("cdn-telemetry-sync.com") is None   # a different (lookalike) domain
     assert tools.closest_entity("phishing") is None
     args, fixed = REAL_CORRECT_NAMES("entity_summary", {"name": "mahirjan"})
-    assert args == {"name": "maharjan"} and fixed == [("mahirjan", "maharjan")]
+    assert args == {"name": "maharjan"} and fixed == [("mahirjan", "maharjan", [])]
