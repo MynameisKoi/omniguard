@@ -338,11 +338,13 @@ def bulk(fn, alert_ids, *args, **kwargs):
     return done, problems
 
 
-def triage_candidates(host=None, limit=8):
-    """Untriaged alerts with no proposal yet, worst and newest first."""
+def triage_candidates(host=None, user=None, limit=8):
+    """Untriaged alerts with no proposal yet (for a host or a user), worst and newest first."""
     q = {"status": "new", "triage_proposal": {"$exists": False}}
     if host:
         q["host"] = {"$regex": f"^{re.escape(host)}$", "$options": "i"}
+    if user:
+        q["user"] = {"$regex": f"^{re.escape(user)}$", "$options": "i"}
     rows = list(alerts_collection.find(q, {"_id": 0, "alert_id": 1, "severity": 1, "timestamp": 1}))
     rows.sort(key=lambda a: (SEVERITIES.index(a.get("severity")) if a.get("severity") in SEVERITIES else 9,
                              -(a.get("timestamp") or datetime.min.replace(tzinfo=timezone.utc)).timestamp()))

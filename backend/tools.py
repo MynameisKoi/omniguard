@@ -768,19 +768,20 @@ def compare_entities(names):
     return {"summary": "Shown side by side.\n" + "\n".join(lines), "facts": facts, "data": {"entities": out}}
 
 
-def triage_alerts(alert_id=None, host=None, analyst="unknown"):
+def triage_alerts(alert_id=None, host=None, user=None, analyst="unknown"):
     """AI triage proposals from the chat. Only PROPOSES (stored on each alert, same
     as "Triage with AI" on the alert page): nothing changes until the analyst
     approves each one, in the chat or on the alert page."""
     from triage import propose_triage, triage_candidates, VERDICTS, TriageError
     if _given(alert_id):
         ids = [str(alert_id)]
-    elif _given(host):
-        ids = triage_candidates(host=str(host))
+    elif _given(host) or _given(user):
+        who = str(host if _given(host) else user)
+        ids = triage_candidates(host=str(host) if _given(host) else None, user=str(user) if _given(user) else None)
         if not ids:
-            raise ToolError(f"{host} has no untriaged alerts without a proposal. Say so plainly.")
+            raise ToolError(f"There's nothing left to triage for {who}: every alert is already triaged or has an AI proposal waiting for your approval.")
     else:
-        raise ToolError("say which alert (open it from its page) or which host's alerts to triage")
+        raise ToolError("say which alert (open it from its page), or which host's or user's alerts to triage")
     out = []
     for aid in ids:
         try:
@@ -790,7 +791,7 @@ def triage_alerts(alert_id=None, host=None, analyst="unknown"):
     verdicts = Counter(VERDICTS.get(a["triage_proposal"]["verdict"], "?") for a in out)
     one = len(out) == 1
     reply = ((f"I've proposed a triage for this alert: **{next(iter(verdicts))}**." if one else
-              f"I've proposed a triage for **{len(out)} alerts**" + (f" on {host}" if _given(host) else "") + ": "
+              f"I've proposed a triage for **{len(out)} alerts**" + (f" on {host}" if _given(host) else f" for {user}" if _given(user) else "") + ": "
               + ", ".join(f"{n} {v.lower()}" for v, n in verdicts.most_common()) + ".")
              + " Nothing changes until you approve " + ("it" if one else "them") + " below"
              + ("" if one else ", one by one or all at once") + ".")
@@ -874,8 +875,8 @@ TOOLS = {
         description="Compare two to four hosts, users, domains or IPs side by side. names is comma separated, e.g. 'BUILD-SRV-02, DEV-BOX-11'.",
         parameters={"names": S}, required=["names"]),
     "triage_alerts": dict(fn=triage_alerts, kind="read", render="triage", needs_analyst=True,
-        description="Have the AI triage an alert (by alert_id) or a host's untriaged alerts (by host). It only proposes a verdict and actions; the analyst approves each.",
-        parameters={"alert_id": S, "host": S}, required=[]),
+        description="Have the AI triage an alert (by alert_id), or a host's or user's untriaged alerts (by host / user). It only proposes a verdict and actions; the analyst approves each.",
+        parameters={"alert_id": S, "host": S, "user": S}, required=[]),
     "isolate_host": dict(fn=isolate_host, kind="action", render="action",
         description="Isolate a compromised host from the network. Needs the analyst's approval before it runs.",
         parameters={"hostname": S, "reason": S}, required=["hostname"]),
