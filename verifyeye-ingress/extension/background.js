@@ -3,6 +3,12 @@
 // lock: even if the page skips the form and fires a raw fetch() to the attacker,
 // the request dies here. the content script's submit block is the first lock, this
 // is the backstop.
+// Where the SOC backend lives. On your own machine this is localhost. To run the
+// extension against another laptop (the analyst's machine on the LAN), change
+// these two to that laptop's IP, e.g. "http://192.168.1.50:8000".
+const CORE = "http://localhost:8000";       // alerts + brands
+const VERIFY = "http://localhost:8100";      // visual verify agent
+
 function blockHost(url) {
     if (!url) return;
     try {
@@ -32,7 +38,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // lock down the harvester host before anything else
         blockHost(msg.alert.action_endpoint);
 
-        fetch("http://localhost:8000/alerts", {
+        fetch(`${CORE}/alerts`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify(msg.alert),
@@ -44,7 +50,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     if (msg.type == "verify") {
-        fetch("http://localhost:8100/verify", {
+        fetch(`${VERIFY}/verify`, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({url: msg.url}),
@@ -58,7 +64,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // we are going to fetch the list of brands that we have right now 
 function cacheBrands() {
-    fetch("http://localhost:8000/brands")
+    fetch(`${CORE}/brands`)
     .then(r => r.json())
     .then(brands => chrome.storage.local.set({brands}))
     .catch(() => {}) // keep whatever is in the cached
