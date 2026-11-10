@@ -74,3 +74,4 @@ def test_api_badge_login_endpoint():
             res_fail = client.post("/auth/badge-login", json={"badge_uid": "UNKNOWN-CARD"})
             assert res_fail.status_code == 401
             assert "Unrecognized RFID/NFC badge UID" in res_fail.json()["detail"]
+

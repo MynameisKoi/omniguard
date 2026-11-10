@@ -29,6 +29,14 @@ def build_prompt(alerts):
         "2. Next steps — a short prioritized list."
     )
 
+def _base_options(extra=None):
+    opts = {"temperature": 0.2, "num_ctx": 8192, "num_predict": 400}
+    if OLLAMA_NUM_GPU is not None:
+        opts["num_gpu"] = OLLAMA_NUM_GPU
+    if extra:
+        opts.update(extra)
+    return opts
+
 def run_triage(alerts, analyst="system"):
     # posting to our ai with transparency tracing and traceback capture
     prompt = build_prompt(alerts)
@@ -45,7 +53,7 @@ def run_triage(alerts, analyst="system"):
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
-                "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 400, "num_gpu": OLLAMA_NUM_GPU},
+                "options": _base_options(),
             },
             timeout=120.0,
         )
@@ -164,7 +172,7 @@ def answer_question(question, alerts, history=(), analyst="system"):
                 # START of a longer prompt, which is where the rules and counts are.
                 # num_predict caps the reply (~300 words): small models can loop and
                 # write forever, which looks like a hang. repeat_penalty discourages that loop.
-                "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 400, "repeat_penalty": 1.15, "num_gpu": OLLAMA_NUM_GPU},
+                "options": _base_options({"repeat_penalty": 1.15}),
             },
             timeout=120.0,
         )

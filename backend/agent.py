@@ -420,9 +420,12 @@ def _chat(messages, tools):
     text, which gets recovered as a real call instead of shown to the analyst."""
     content, calls, held = "", [], None
     metrics = {"prompt": 0, "completion": 0, "duration_ms": 0.0}
+    options = {"temperature": 0.2, "num_ctx": 8192, "num_predict": 500, "repeat_penalty": 1.15}
+    if OLLAMA_NUM_GPU is not None:
+        options["num_gpu"] = OLLAMA_NUM_GPU
     with httpx.stream("POST", f"{OLLAMA_URL}/api/chat", timeout=120.0, json={
         "model": OLLAMA_MODEL, "messages": messages, "tools": tools, "stream": True, "keep_alive": "30m",
-        "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 500, "repeat_penalty": 1.15, "num_gpu": OLLAMA_NUM_GPU},
+        "options": options,
     }) as r:
         r.raise_for_status()
         for line in r.iter_lines():
