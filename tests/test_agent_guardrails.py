@@ -262,14 +262,68 @@ def test_alert_set_questions_are_routed(known_names, text, plan):
 
 def test_model_counts_are_never_shown():
     c = agent._Cleaner(facts="**21 alerts** match.", limit=3)
-    out = c.feed("LAPTOP-10 had 9 phishing alerts. Reset the password for maharjan. ") + c.finish()
-    assert out.strip() == "Reset the password for maharjan."
+    out = c.feed("LAPTOP-10 had 9 phishing alerts. Phishing like this targets passwords. ") + c.finish()
+    assert out.strip() == "Phishing like this targets passwords."
 
 
 def test_isolation_advice_needs_the_data_to_say_compromise():
     phishing_only = agent._Cleaner(facts="**BUILD-SRV-02** is a host in **4 alerts**. Phishing pages: github-sso-verify.com.")
-    out = phishing_only.feed("Isolate BUILD-SRV-02 now. Reset the ci-runner password. ") + phishing_only.finish()
-    assert out.strip() == "Reset the ci-runner password."
+    out = phishing_only.feed("It looks compromised. The ci-runner account was the target. ") + phishing_only.finish()
+    assert out.strip() == "The ci-runner account was the target."
     both = agent._Cleaner(facts="It has **both phishing and C2** alerts, which usually means a real compromise.")
-    out = both.feed("Isolate LAPTOP-10 using the **isolation tool**. ") + both.finish()
-    assert out.strip() == "Isolate LAPTOP-10."
+    out = both.feed("It is compromised, so isolating it using the **isolation tool** matters. ") + both.finish()
+    assert out.strip() == "It is compromised, so isolating it matters."
+
+
+@pytest.mark.parametrize("text, chat", [
+    ("damn", True), ("lol", True), ("thanks!", True), ("that's wild", True), ("ok cool", True),
+    ("maharjan", False), ("what is a C2 beacon?", False), ("contain it", False), ("show me its graph", False),
+])
+def test_reactions_are_small_talk(known_names, monkeypatch, text, chat):
+    monkeypatch.setattr(agent, "closest_entity", lambda w: None)
+    assert agent._small_talk(text) is chat
+
+
+def test_follow_up_doesnt_redraw_the_same_card(known_names):
+    convo = {"messages": [
+        {"role": "user", "content": "tell me about LAPTOP-10"},
+        {"role": "assistant", "content": "...", "steps": [{"tool": "entity_summary", "args": {"name": "LAPTOP-10"}, "ok": True}]},
+    ]}
+    plan = agent._route("how bad is it?", convo)
+    # a host: the verdict is new information
+    assert agent._not_again(plan, "how bad is it?", convo) == ([("investigate_host", {"hostname": "LAPTOP-10"})], False)
+    # asking again about the same thing: answer from what's on screen
+    assert agent._not_again(plan, "tell me more about it", convo) == (None, True)
+    # views are redrawn when asked for
+    graph = [("show_graph", {"entity": "LAPTOP-10"})]
+    assert agent._not_again(graph, "show it again", {"messages": convo["messages"] + [
+        {"role": "assistant", "steps": [{"tool": "show_graph", "args": {"entity": "LAPTOP-10"}, "ok": True}]}]}) == (graph, False)
+
+
+def test_isolation_status_comes_only_from_the_data():
+    c = agent._Cleaner(facts="Most urgent: DEV-BOX-11 had both phishing and C2, which usually means a real compromise.")
+    out = c.feed("These hosts are already isolated. They are likely compromised. ") + c.finish()
+    assert out.strip() == "They are likely compromised."
+
+
+def test_next_steps_and_screen_talk_stay_out_of_the_explanation():
+    c = agent._Cleaner(facts="LAPTOP-10 had both phishing and C2, which usually means a real compromise.")
+    out = c.feed("The analyst already sees this. Malware on it is taking orders. Next step: isolate it. "
+                 "Reset the password for maharjan. ") + c.finish()
+    assert out.strip() == "Malware on it is taking orders."
+
+
+@pytest.mark.parametrize("sentence, wrong", [
+    ("BUILD-SRV-02 was likely used to send fake login pages to users.", True),
+    ("The attackers used these hosts to send fake login pages (phishing).", True),
+    ("LAPTOP-10 was sending phishing emails.", True),
+    ("A user on BUILD-SRV-02 opened a fake GitHub login page.", False),
+    ("The host sent beacons to cdn-telemetry-sync.net.", False),
+])
+def test_phishing_direction(sentence, wrong):
+    assert bool(agent.WRONG_WAY.search(sentence)) is wrong
+
+
+def test_tool_calls_written_as_text_are_never_shown():
+    c = agent._Cleaner()
+    assert (c.feed('{"name": "c2_investigation", "parameters": {"hostname":"LAPTOP-10"}}\n') + c.finish()).strip() == ""

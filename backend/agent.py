@@ -52,11 +52,15 @@ AFTER_VIEW = ("The view is drawn above your reply and the analyst is looking at 
 # the facts are already written (from the data) and shown: the model only adds
 # meaning. A 3B model gets counts and names wrong when it restates them
 INTERPRET = ("The analyst already sees this, written from the data:\n{facts}\n\n"
-             "Add ONE or TWO short sentences after it: what it means and the single most useful next step.\n"
-             "Rules: no numbers or counts, don't repeat the names or facts above, don't add new facts. "
-             "Only call something compromised if the text above says so (both phishing and C2, or a compromise verdict). "
-             "Only suggest isolating a host the text above calls compromised; for phishing alone, suggest checking "
-             "whether the user entered their password and resetting it.")
+             "What the words mean: 'phishing pages' are fake login pages that a user ON this host opened (the host "
+             "was the victim, it didn't send them). 'C2 traffic' is this host calling out to an attacker's server, "
+             "meaning malware on it is taking orders. 'Isolation (simulated)' means it was recorded, not really done.\n"
+             "In TWO to FOUR short sentences after it, explain what it means and why it matters: the story the "
+             "alerts tell (how the attack likely went), and how serious it is.\n"
+             "Rules: no numbers or counts, don't repeat the facts above, don't add new names or facts. Don't list "
+             "next steps or actions: they're shown separately. Only call something compromised if the text above "
+             "says so (both phishing and C2, or a compromise verdict). Don't say whether anything is isolated or "
+             "blocked unless the text above says so.")
 
 RETRY = ("A tool above failed. If another tool (usually search_alerts) can answer the question, call it now; "
          "otherwise tell the analyst plainly what you couldn't find.")
@@ -225,8 +229,72 @@ def _general(text, convo=None):
                 and not mentioned_entities(text) and not REFERS.search(text or ""))
 
 
+# "damn", "lol", "thanks", "that's wild": the analyst reacting, not asking
+CHATTY = re.compile(r"^\W*(ok(ay)?|k|kk|thanks?( you| a lot)?|thx|ty|cool|nice|great|awesome|sweet|perfect|wow|whoa|damn+|dang|oof|yikes"
+                    r"|lol+|lmao|haha+|hehe+|hmm+|ugh+|nope|yep|yeah|yes|no|sure|got it|alright|good|bad|omg|wtf|bruh|bro"
+                    r"|holy \w+|that'?s (crazy|wild|bad|good|great|scary|insane|nuts|rough|messed up)|no way|seriously)\W*$", re.I)
+
+
+def _small_talk(text, convo=None):
+    """A reaction or a bit of chat, not a request: answered with a short human
+    reply, no lookups."""
+    t = (text or "").strip()
+    if CHATTY.search(t):
+        return True
+    words = re.findall(r"[\w'@.-]+", t)
+    return (0 < len(words) <= 3 and "?" not in t and not mentioned_entities(t) and not _misspelt(t)
+            and not _views(t) and not ACTION_ASK.search(t) and not KNOWLEDGE.search(t)
+            and not FOLLOW_UP.search(t) and not _route(t, convo))
+
+
+CHAT = ("The analyst is reacting or chatting, not asking for anything. Reply in ONE or TWO short sentences that match "
+        "their tone: if they're casual or joking, be casual and a little playful back, with light humour where it fits. "
+        "Never swear, be rude, mean or inappropriate, even if they are. If it fits, offer one thing "
+        "you could help with, as a question (\"want me to…?\"). Never state facts about hosts, users, malware or "
+        "alerts in this reply. No lists.")
+
+
 GENERAL = ("This is a general security question: answer it from your own knowledge in 2-4 short sentences. "
            "Don't describe this organisation's alerts, hosts or engines.")
+
+
+HOW_BAD = re.compile(r"how bad|how serious|how risky|is (it|this|that) (bad|serious|compromised|safe)|should i (worry|be worried)|risk", re.I)
+REPEAT = ("The analyst is following up on results already shown above. Answer from them in 2-4 short sentences; "
+          "don't repeat the numbers, add what they mean.")
+
+
+def _recent_calls(convo, turns=2):
+    """(tool, args) the last few replies already ran."""
+    seen, n = set(), 0
+    for m in reversed((convo or {}).get("messages") or []):
+        if m["role"] == "assistant" and m.get("steps"):   # replies that looked something up ("damn" doesn't count)
+            n += 1
+            for st in m.get("steps") or []:
+                if st.get("ok"):
+                    seen.add((st["tool"], json.dumps(st.get("args") or {}, sort_keys=True)))
+            if n >= turns:
+                break
+    return seen
+
+
+def _not_again(plan, text, convo):
+    """A follow-up that would redraw the same card ("how bad is it?" right after
+    "tell me about LAPTOP-10"). For a host, "how bad" gets the investigation
+    verdict instead (something new); otherwise the answer comes from what's
+    already on screen. Views are redrawn when asked for. Returns (plan, repeat)."""
+    if not plan:
+        return plan, False
+    recent = _recent_calls(convo)
+    if not all((n, json.dumps(a, sort_keys=True)) in recent for n, a in plan) or any(n in VIEW_TOOLS for n, _ in plan):
+        return plan, False
+    hosts = [a.get("name") for n, a in plan if n == "entity_summary"
+             and any(k == "host" for _, k in mentioned_entities(a.get("name") or ""))]
+    if hosts and HOW_BAD.search(text or "") and ("investigate_host", json.dumps({"hostname": hosts[0]})) not in recent:
+        return [("investigate_host", {"hostname": hosts[0]})], False
+    return None, True
+
+
+VIEW_TOOLS = {"show_dashboard", "show_graph", "show_screenshots", "show_ledger", "compare_entities"}
 
 
 def _route(text, convo=None):
@@ -395,6 +463,14 @@ def _first_sentences(text, n=3):
 COUNT = re.compile(r"(?<![\w.\-])\d+(?![\w.\-])")
 
 
+# phishing pages were OPENED on a host; a 3B model keeps saying the host sent them
+WRONG_WAY = re.compile(r"\b(send|sends|sending|sent|serve[sd]?|serving|host(ed|ing)|distribut\w+|deliver\w*)\b[^.]{0,40}"
+                       r"\b(phishing|fake|malicious|spoofed?)\b[^.]{0,20}\b(login |sign-in )?(pages?|sites?|emails?|links?)\b"
+                       r"|\bused (it|them|this host|these hosts|\S+) to (send|serve|host)\b", re.I)
+META = re.compile(r"\bthe analyst\b|already sees?|shown (above|below|separately)|\bthe (card|view|facts|text) above\b", re.I)
+STEPLIKE = re.compile(r"next steps?|action required|\bi recommend|\byou should\b|^\W*(confirm|check|isolate|block|reset|revoke"
+                      r"|investigate|triage|review|monitor|contain|escalate|verify|ensure|consider|start (with|by))\b", re.I)
+ALREADY = re.compile(r"\b(already|been|are|is|were|was) (now )?(isolated|contained|quarantined|blocked|cut off|offline)\b", re.I)
 # advice only the data can justify: isolation, or calling something compromised
 DRASTIC = re.compile(r"\b(isolat\w*|quarantin\w*|contain(ed|ment)?|compromis\w*|cut (it|them) off|take (it|them) offline)\b", re.I)
 
@@ -430,6 +506,14 @@ class _Cleaner:
         if self.acting and CLAIMED_ACTION.search(s):
             self.claimed = True
             return False
+        if s.lstrip().startswith("{") or re.search(r'"(name|parameters|arguments)"\s*:', s):
+            return False      # a tool call written as text
+        if WRONG_WAY.search(s):
+            return False      # "the host sent phishing pages": the host was the victim
+        if self.facts and (META.search(s) or STEPLIKE.search(s)):
+            return False      # talk about the analyst/screen, or next steps (those are listed separately)
+        if ALREADY.search(s) and not ALREADY.search(self.facts or ""):
+            return False      # "the hosts are already isolated": only the ledger can say that
         return True
 
     def _emit(self, s, sep):
@@ -546,8 +630,9 @@ def _not_found(failed):
     lines = []
     for st in failed:
         said = re.split(r"(?<=[.!?])\s+", st["summary"].strip())
-        n = 3 if "older ones" in st["summary"] else 1     # keep "the newest is from ..."
-        first = " ".join(said[:n])
+        # what was found, not the instructions meant for the model
+        first = " ".join(x for x in said if not re.search(r"say (so )?plainly|don't guess|try search_alerts|tell the analyst"
+                                                          r"|answer from your own knowledge|general (security )?term", x, re.I))
         lines.append(first[0].upper() + first[1:] if first else "Nothing came back.")
     named = any(k in (st.get("args") or {}) for st in failed for k in ("name", "entity", "hostname", "names"))
     return " ".join(lines) + (" Check the spelling, or ask me to search for part of the name." if named else "")
@@ -581,14 +666,22 @@ def run_turn(owner, conversation_id, text, context=None):
 
     history = _history(convo)
     general = _general(text)
-    answer_only = general or _from_history(text, history)
+    chat = not general and _small_talk(text, convo)
+    answer_only = general or chat or _from_history(text, history)
     plan = None if answer_only else _route(text, convo)
+    plan, repeat = _not_again(plan, text, convo)
+    answer_only = answer_only or repeat
     focus = _focus(convo)
     about = (f"\n\nThe conversation so far is about {focus[0]} (a {focus[1]}): \"it\" or \"this\" means {focus[0]}."
              if focus and not mentioned_entities(text) else "")
-    messages = [{"role": "system", "content": SYSTEM + ("\n\n" + GENERAL if general else "" if plan else _hints(text, history)) + about
-                 + (f"\n\nThe analyst is looking at: {context}" if context else "")}]
-    messages += history
+    guide = ("\n\n" + GENERAL if general else "\n\n" + CHAT if chat else
+             "\n\n" + REPEAT if repeat else "" if plan else _hints(text, history))
+    messages = [{"role": "system", "content": SYSTEM + guide + ("" if general else about)
+                 + (f"\n\nThe analyst is looking at: {context}" if context and not general else "")}]
+    # a general question ("what is a C2 beacon?") is answered on its own: with the
+    # chat in view, the model ties the definition to whatever host came up earlier
+    if not general:
+        messages += [m for m in history if m["role"] in ("user", "assistant") and m.get("content")][-4:] if chat else history
     messages.append({"role": "user", "content": text})
     tools = [] if answer_only else _ollama_tools(text, context)
 
@@ -597,6 +690,7 @@ def run_turn(owner, conversation_id, text, context=None):
     asked = False      # a name wasn't found: we asked which one was meant
     claimed = False    # the model claimed an action happened (that sentence was dropped)
     lead = []          # facts written from the data, shown first
+    nexts = []         # next steps written from the data, shown last
     reference = text   # everything this turn's results say, for the grounding check
 
     def say(piece):
@@ -633,7 +727,7 @@ def run_turn(owner, conversation_id, text, context=None):
                 plan = None
             else:
                 yield _event("status", text="Checking what that found…" if steps else "Thinking…")
-                cleaner = _Cleaner(acting=bool(ACTION_ASK.search(text or "")))
+                cleaner = _Cleaner(acting=bool(ACTION_ASK.search(text or "")), limit=2 if chat else None)
                 reply = None
                 for ev in model(tools, cleaner):
                     if isinstance(ev, tuple):
@@ -677,6 +771,9 @@ def run_turn(owner, conversation_id, text, context=None):
                         written.append(result["reply"])
                 messages.append({"role": "tool", "content": result["summary"], "tool_name": name})
                 reference += "\n" + result["summary"]
+                for step_text in result.get("next") or [] if result["ok"] else []:
+                    if step_text not in nexts:
+                        nexts.append(step_text)
                 if result["ok"] and result.get("facts") and not result.get("reply"):
                     lead.append(result["facts"])
                     reference += "\n" + result["facts"]
@@ -713,7 +810,7 @@ def run_turn(owner, conversation_id, text, context=None):
                 # the meaning, with no tools so it can't wander off. Only what's new
                 # and grounded in the results gets shown, at most 3 sentences
                 acting = bool(approvals) or bool(ACTION_ASK.search(text or ""))
-                cleaner = (_Cleaner(facts="\n".join(lead), reference=reference, convo=convo, acting=acting, limit=2)
+                cleaner = (_Cleaner(facts="\n".join(lead), reference=reference, convo=convo, acting=acting, limit=4)
                            if lead else _Cleaner(acting=acting))
                 yield _event("status", text="Writing the summary…")
                 for ev in model([], cleaner):
@@ -725,6 +822,15 @@ def run_turn(owner, conversation_id, text, context=None):
             yield say("\n\n(I stopped after several steps — ask me to continue if you need more.)")
     except httpx.HTTPError as e:
         yield say(f"\n\nI couldn't reach the local AI model ({type(e).__name__}). Is Ollama running?")
+
+    if not "".join(shown).strip():
+        # the model's whole reply was filtered out (or it said nothing): be useful anyway
+        f = _focus(convo)
+        yield say(f"That's everything I have on **{f[0]}** so far. Ask me to investigate it for a verdict, show its "
+                  "graph, or show its audit trail." if f else
+                  "I don't have anything more on that. Try naming a host, user or domain, or ask what needs attention.")
+    if nexts and not asked:
+        yield say("\n\n**Next steps**\n" + "\n".join(f"- {x}" for x in nexts[:4]))
 
     # asked to contain a known host but the model didn't propose it: propose it
     for host in ([] if asked else _contain_intent(text, convo)):
