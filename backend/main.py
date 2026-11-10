@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_view
 from tools import tool_specs, run_tool
+from triage import apply_triage, propose_triage, approve_proposal, reject_proposal, TriageError
 from conversations import (create_conversation, list_conversations, get_conversation,
                            rename_conversation, delete_conversation)
 from agent import decide_approval
@@ -361,6 +362,57 @@ async def update_alert_status(alert_id: str, payload: AlertStatus, me: dict = De
     if not out["ok"]:
         raise HTTPException(status_code=404 if "no alert" in out["summary"] else 400, detail=out["summary"])
     return out["data"]
+
+# ── triage: by hand, or proposed by the AI and approved by an analyst ──
+class TriageIn(BaseModel):
+    verdict: Literal["true_positive", "false_positive", "benign", "escalate"]
+    severity: Literal["critical", "high", "medium", "low"]
+    status: Literal["triaged", "resolved"] = "triaged"
+    notes: str = Field(default="", max_length=2000)
+    actions: list[Literal["isolate_host", "reset_password", "block_domain"]] = Field(default_factory=list)
+
+class TriageEdits(BaseModel):
+    verdict: Literal["true_positive", "false_positive", "benign", "escalate"] | None = None
+    severity: Literal["critical", "high", "medium", "low"] | None = None
+    status: Literal["triaged", "resolved"] | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+    actions: list[Literal["isolate_host", "reset_password", "block_domain"]] | None = None
+
+class TriageReject(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+async def _triage_call(fn, *args, **kwargs):
+    """Run a triage step, map its errors to HTTP, and push the changed alert to
+    every open dashboard."""
+    try:
+        alert = await run_in_threadpool(fn, *args, **kwargs)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except TriageError as e:
+        raise HTTPException(status_code=409 if "proposal" in str(e) else 400, detail=str(e))
+    out = Alert(**alert).model_dump(mode="json")
+    await manager.broadcast({"type": "alert_updated", "alert": out})
+    return out
+
+@app.post("/alerts/{alert_id}/triage")
+async def triage_manual(alert_id: str, payload: TriageIn, me: dict = Depends(current_user)):
+    """The analyst's own triage."""
+    return await _triage_call(apply_triage, alert_id, payload.verdict, payload.severity, payload.notes,
+                              payload.actions, payload.status, me["email"])
+
+@app.post("/alerts/{alert_id}/triage/ai")
+async def triage_ai_propose(alert_id: str, me: dict = Depends(current_user)):
+    """The AI triages the alert as a proposal. Nothing is applied until approved."""
+    return await _triage_call(propose_triage, alert_id, me["email"])
+
+@app.post("/alerts/{alert_id}/triage/ai/approve")
+async def triage_ai_approve(alert_id: str, payload: TriageEdits, me: dict = Depends(current_user)):
+    """Apply the AI's proposal, with any edits."""
+    return await _triage_call(approve_proposal, alert_id, me["email"], **payload.model_dump())
+
+@app.post("/alerts/{alert_id}/triage/ai/reject")
+async def triage_ai_reject(alert_id: str, payload: TriageReject, me: dict = Depends(current_user)):
+    return await _triage_call(reject_proposal, alert_id, me["email"], payload.reason)
 
 # This is for graph to be shown in the frontend 
 @app.get("/graph", dependencies=AUTH)

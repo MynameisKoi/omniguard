@@ -4316,3 +4316,49 @@ mark.hl-match { background: var(--accent-wash); color: var(--accent-text); borde
 
 /* what an Ask AI reply is doing while it's still coming in */
 .ask-working { margin-top: 10px; }
+
+/* ─── triage panel (alert page) ─────────────────── */
+.btn.primary { color: #fff; background: var(--accent-deep); border-color: transparent; }
+.btn.primary:hover { background: var(--accent); color: #04141a; }
+.btn:disabled { opacity: .55; cursor: default; transform: none; }
+.btn svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
+.panel.triage { margin-bottom: 16px; }
+.panel.triage .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.panel.triage .panel-title svg { width: 15px; height: 15px; vertical-align: -2px; margin-right: 6px; }
+.triage-start { display: flex; gap: 8px; flex-wrap: wrap; }
+.triage-body { padding: 14px 16px 16px; display: grid; gap: 12px; }
+.triage-muted { color: var(--dim); font-size: var(--t-sm); }
+.triage-muted svg { width: 13px; height: 13px; vertical-align: -2px; }
+.triage-working { color: var(--dim); font-size: var(--t-sm); }
+.triage-proposal-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.triage-proposal-head svg { width: 16px; height: 16px; color: var(--accent); }
+.triage-summary { margin: 0; line-height: 1.55; }
+.triage-reasons { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--t-sm); }
+.triage-form { display: grid; gap: 12px; padding-top: 4px; border-top: 1px solid var(--line); }
+.triage-field { display: grid; gap: 6px; }
+.triage-label { font-size: var(--t-xs, 12px); text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+.triage-label em { text-transform: none; letter-spacing: 0; font-style: normal; opacity: .8; }
+.triage-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.triage-form select, .triage-form textarea {
+  font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: 7px 9px; width: 100%; box-sizing: border-box;
+}
+.triage-form textarea { resize: vertical; line-height: 1.5; }
+.triage-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.triage-chip {
+  font: inherit; font-size: var(--t-sm); padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--raised); color: var(--text);
+}
+.triage-chip.on.bad  { background: var(--critical-wash); border-color: var(--critical); color: var(--critical); }
+.triage-chip.on.good { background: var(--good-wash); border-color: var(--good); color: var(--good); }
+.triage-chip.on.warn { background: var(--accent-wash); border-color: var(--accent-line); color: var(--accent-text); }
+span.triage-chip { cursor: default; }
+.triage-check { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); cursor: pointer; }
+.triage-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.triage-done { display: grid; gap: 8px; }
+.triage-done-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.triage-actions { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: var(--t-sm); }
+.triage-actions svg { width: 13px; height: 13px; color: var(--good); vertical-align: -2px; }
+.triage-actions em { color: var(--dim); font-style: normal; }
+.triage-notes { margin: 0; white-space: pre-wrap; line-height: 1.5; font-size: var(--t-sm); }
+@media (max-width: 640px) { .triage-row { grid-template-columns: 1fr; } }

@@ -9,6 +9,7 @@ import { label, humanize, MITRE_NAMES } from './labels';
 import { EvidencePanel, EvidenceGallery } from './Evidence';
 import AiMarkdown from './AiMarkdown';
 import AskAI from './AskAI';
+import TriagePanel from './Triage';
 import { useAskActivity } from './askActivity'
 import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
@@ -258,6 +259,9 @@ function App({ user, onLogout, onUserChange }) {
                 if (msg.type === "alert_fused") {
                     const fused = msg.alert
                     setAlerts(prev => [fused, ...prev.filter(a => a.alert_id !== fused.alert_id)])
+                } else if (msg.type === "alert_updated") {
+                    // triaged (or an AI proposal added) here or on another analyst's screen
+                    setAlerts(prev => prev.map(a => a.alert_id === msg.alert.alert_id ? msg.alert : a))
                 } else {
                     setAlerts(prev => [msg, ...prev])
                 }
@@ -967,6 +971,9 @@ function App({ user, onLogout, onUserChange }) {
                             <div className="split">
                                 <div>
                                     {selected.description && <p className="note">{selected.description}</p>}
+
+                                    <TriagePanel alert={selected}
+                                        onUpdated={updated => setAlerts(prev => prev.map(a => a.alert_id === updated.alert_id ? updated : a))} />
 
                                     {/* what VerifyEye's agent saw at this page (#3) */}
                                     {selected.target_url && <EvidencePanel alert={selected} />}
