@@ -1,7 +1,7 @@
 from collections import Counter
 
 import httpx
-from config import OLLAMA_URL, OLLAMA_MODEL
+from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_NUM_GPU
 from ai_transparency import AITraceContext
 
 # writing the alert lines 
@@ -41,7 +41,12 @@ def run_triage(alerts, analyst="system"):
     ) as trace:
         resp = httpx.post(
             f"{OLLAMA_URL}/api/generate",
-            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            json={
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 400, "num_gpu": OLLAMA_NUM_GPU},
+            },
             timeout=120.0,
         )
         resp.raise_for_status()
@@ -159,7 +164,7 @@ def answer_question(question, alerts, history=(), analyst="system"):
                 # START of a longer prompt, which is where the rules and counts are.
                 # num_predict caps the reply (~300 words): small models can loop and
                 # write forever, which looks like a hang. repeat_penalty discourages that loop.
-                "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 400, "repeat_penalty": 1.15},
+                "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 400, "repeat_penalty": 1.15, "num_gpu": OLLAMA_NUM_GPU},
             },
             timeout=120.0,
         )

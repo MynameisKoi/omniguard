@@ -20,7 +20,7 @@ import uuid
 
 import httpx
 
-from config import OLLAMA_URL, OLLAMA_MODEL
+from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_NUM_GPU
 from ai_transparency import AITraceContext
 from conversations import append_message, get_conversation, update_message
 from tools import TOOLS, closest_entity, mentioned_entities, run_tool, tool_specs
@@ -422,7 +422,7 @@ def _chat(messages, tools):
     metrics = {"prompt": 0, "completion": 0, "duration_ms": 0.0}
     with httpx.stream("POST", f"{OLLAMA_URL}/api/chat", timeout=120.0, json={
         "model": OLLAMA_MODEL, "messages": messages, "tools": tools, "stream": True, "keep_alive": "30m",
-        "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 500, "repeat_penalty": 1.15},
+        "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 500, "repeat_penalty": 1.15, "num_gpu": OLLAMA_NUM_GPU},
     }) as r:
         r.raise_for_status()
         for line in r.iter_lines():
