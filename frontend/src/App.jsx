@@ -178,6 +178,10 @@ function App({ user, onLogout, onUserChange }) {
     const [searchFrom, setSearchFrom] = useState("overview")
     // the Alerts page's own search box: filters that list as you type
     const [alertQuery, setAlertQuery] = useState("")
+    // Alerts page: where each alert is in triage, its verdict, and the order
+    const [statusFilter, setStatusFilter] = useState(null)    // null | "new" | "proposal" | "triaged" | "resolved"
+    const [verdictFilter, setVerdictFilter] = useState(null)  // null | a verdict id | "none"
+    const [sortBy, setSortBy] = useState("newest")            // "newest" | "oldest" | "severity"
     const [searchKind, setSearchKind] = useState(() => { try { return localStorage.getItem("og_searchKind") || "search" } catch { return "search" } }) // "search" (typed) | "filter" (chart click)
     const [recentSearches, setRecentSearches] = useState(() => {
         try { return JSON.parse(localStorage.getItem("og_recent_searches") || "[]") } catch { return [] }
@@ -400,7 +404,20 @@ function App({ user, onLogout, onUserChange }) {
         }
         return true;
     };
-    const visible = [...scoped].filter(inDateRange).filter(a => matchesTerm(a, alertQuery)).sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
+    // everything but the triage filters: what the status tabs and cards count
+    const triageBase = scoped.filter(inDateRange).filter(a => matchesTerm(a, alertQuery))
+    const triageState = (a) => a.triage_proposal ? "proposal" : a.status
+    const statusCount = (st) => triageBase.filter(a => triageState(a) === st).length
+    const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 }
+    const visible = triageBase
+        .filter(a => !statusFilter || triageState(a) === statusFilter)
+        .filter(a => !verdictFilter || (verdictFilter === "none" ? !a.triage : a.triage?.verdict === verdictFilter))
+        .sort((x, y) => sortBy === "severity"
+            ? (SEV_RANK[x.severity] - SEV_RANK[y.severity]) || (new Date(y.timestamp) - new Date(x.timestamp))
+            : (new Date(y.timestamp) - new Date(x.timestamp)) * (sortBy === "oldest" ? -1 : 1));
+    const anyAlertFilter = !!(filter || srcFilter || dateFilter || statusFilter || verdictFilter || alertQuery.trim())
+    const clearAlertFilters = () => { setFilter(null); setSrcFilter(null); setDateFilter(null); setDateFrom(""); setDateTo("");
+                                      setStatusFilter(null); setVerdictFilter(null); setAlertQuery("") }
     const selected = alerts.find(a => a.alert_id === selectedId);
     const maxCount = Math.max(1, ...SEVERITIES.map(countOf));
     const engineCounts = countBy("source");
@@ -826,7 +843,7 @@ function App({ user, onLogout, onUserChange }) {
                     // enter animation (.content > *) plays; live alerts don't change it
                     <Fragment key={page}>
 
-                    {(filter || srcFilter) && (page === "overview" || page === "alerts") && (
+                    {(filter || srcFilter) && page === "overview" && (
                         <div className="active-filters">
                             <span className="af-label">Filtered by</span>
                             {filter && (
@@ -856,18 +873,39 @@ function App({ user, onLogout, onUserChange }) {
                     {page === "alerts" && (
                         <>
                             <div className="stats">
-                                <Stat label="Total" value={alerts.length} />
-                                <Stat label="Critical" value={countOf("critical")} tone="critical" />
-                                <Stat label="High" value={countOf("high")} tone="high" />
-                                <Stat label="Untriaged" value={alerts.filter(a => a.status === "new").length} />
-                                <Stat label="Engines" value="2" tone="good" />
+                                <Stat icon={Inbox} label="Needs triage" value={statusCount("new")} tone="critical"
+                                    foot="not looked at yet" onClick={() => setStatusFilter(statusFilter === "new" ? null : "new")} active={statusFilter === "new"} />
+                                <Stat icon={Bot} label="AI proposals" value={statusCount("proposal")} tone="accent"
+                                    foot="waiting for your approval" onClick={() => setStatusFilter(statusFilter === "proposal" ? null : "proposal")} active={statusFilter === "proposal"} />
+                                <Stat icon={UserCheck} label="Triaged" value={statusCount("triaged")} tone="high"
+                                    foot="decided, still being worked" onClick={() => setStatusFilter(statusFilter === "triaged" ? null : "triaged")} active={statusFilter === "triaged"} />
+                                <Stat icon={ShieldCheck} label="Resolved" value={statusCount("resolved")} tone="good"
+                                    foot="done" onClick={() => setStatusFilter(statusFilter === "resolved" ? null : "resolved")} active={statusFilter === "resolved"} />
+                                <Stat icon={Target} label="True positives" value={triageBase.filter(a => a.triage?.verdict === "true_positive").length} tone="critical"
+                                    foot="confirmed real" onClick={() => setVerdictFilter(verdictFilter === "true_positive" ? null : "true_positive")} active={verdictFilter === "true_positive"} />
                             </div>
 
-                            <Panel
-                                title="Alerts"
-                                note={alertQuery.trim() ? `${visible.length} match “${alertQuery.trim()}”` : `${visible.length} shown`}
-                                flush
-                            >
+                            <div className="panel alerts-panel">
+                                <div className="alerts-tabs" role="tablist" aria-label="Triage status">
+                                    {[[null, "All", triageBase.length], ["new", "Untriaged", statusCount("new")],
+                                      ["proposal", "AI proposal", statusCount("proposal")], ["triaged", "Triaged", statusCount("triaged")],
+                                      ["resolved", "Resolved", statusCount("resolved")]].map(([id, text, n]) => (
+                                        <button key={text} role="tab" aria-selected={statusFilter === id}
+                                            className={`alerts-tab ${statusFilter === id ? "on" : ""}`} onClick={() => setStatusFilter(id)}>
+                                            {id === "proposal" && <Bot />}{text} <span className="alerts-tab-n">{n}</span>
+                                        </button>
+                                    ))}
+                                    <span className="alerts-tabs-fill" />
+                                    <label className="alerts-sort">
+                                        Sort
+                                        <select value={sortBy} onChange={e => setSortBy(e.target.value)}>
+                                            <option value="newest">Newest first</option>
+                                            <option value="oldest">Oldest first</option>
+                                            <option value="severity">Most severe first</option>
+                                        </select>
+                                    </label>
+                                </div>
+
                                 <div className="alerts-search">
                                     <Search />
                                     <input
@@ -881,14 +919,31 @@ function App({ user, onLogout, onUserChange }) {
                                         <button className="search-clear" onClick={() => setAlertQuery("")} aria-label="Clear alert search"><X /></button>
                                     )}
                                 </div>
-                                <div className="filterbar">
+
+                                <div className="filterbar alerts-filters">
                                     <span className="label">Severity</span>
-                                    <button className={`chip ${filter === null ? "on" : ""}`} onClick={() => setFilter(null)}>all</button>
                                     {SEVERITIES.map(sev => (
-                                        <button key={sev} className={`chip ${filter === sev ? "on" : ""}`} onClick={() => setFilter(sev)}>
-                                            {sev}
+                                        <button key={sev} className={`chip sev-chip ${filter === sev ? "on" : ""}`} onClick={() => setFilter(filter === sev ? null : sev)}>
+                                            <span className={`dot sev-${sev}`} />{sev}<span className="chip-n">{sevCount(sev)}</span>
                                         </button>
                                     ))}
+                                    <span className="filterbar-sep" />
+                                    <span className="label">Engine</span>
+                                    {Object.entries(countBy("source")).sort((a, b) => b[1] - a[1]).map(([src]) => (
+                                        <button key={src} className={`chip ${srcFilter === src ? "on" : ""}`} onClick={() => setSrcFilter(srcFilter === src ? null : src)}>
+                                            {ENGINE_NAME[src] || src}
+                                        </button>
+                                    ))}
+                                    <span className="filterbar-sep" />
+                                    <span className="label">Verdict</span>
+                                    <select className="chip-select" value={verdictFilter || ""} onChange={e => setVerdictFilter(e.target.value || null)}>
+                                        <option value="">Any</option>
+                                        <option value="true_positive">True positive</option>
+                                        <option value="false_positive">False positive</option>
+                                        <option value="benign">Benign / expected</option>
+                                        <option value="escalate">Needs escalation</option>
+                                        <option value="none">No verdict yet</option>
+                                    </select>
                                     <span className="filterbar-sep" />
                                     <span className="label">When</span>
                                     <DateRangePicker
@@ -898,39 +953,42 @@ function App({ user, onLogout, onUserChange }) {
                                         onPreset={(k) => { setDateFilter(k); setDateFrom(""); setDateTo(""); }}
                                         onCustom={(f, t) => { setDateFrom(f); setDateTo(t); setDateFilter("custom"); }}
                                     />
+                                    {anyAlertFilter && <button className="link alerts-clear" onClick={clearAlertFilters}>Clear filters</button>}
+                                </div>
+
+                                <div className="alerts-count">
+                                    {visible.length === triageBase.length && !statusFilter && !verdictFilter
+                                        ? `${visible.length} alert${visible.length === 1 ? "" : "s"}`
+                                        : `${visible.length} of ${alerts.length} alerts`}
+                                    {alertQuery.trim() && <> matching “{alertQuery.trim()}”</>}
                                 </div>
 
                                 {visible.length === 0 ? (
-                                    alertQuery.trim() ? (
-                                        <div className="empty">
-                                            No alerts match “{alertQuery.trim()}”{(filter || dateFilter) ? " with the current filters" : ""}.{" "}
-                                            <button className="link" onClick={() => setAlertQuery("")}>Clear search</button>
-                                        </div>
-                                    ) : (
-                                        <div className="empty">
-                                            No alerts. Post one at <code>localhost:8000/docs</code>.
-                                        </div>
-                                    )
+                                    <div className="empty">
+                                        {alerts.length === 0
+                                            ? <>No alerts yet. Post one at <code>localhost:8000/docs</code>.</>
+                                            : <>No alerts match these filters. <button className="link" onClick={clearAlertFilters}>Clear filters</button></>}
+                                    </div>
                                 ) : (
-                                    <table className="table">
+                                    <table className="table alerts-table">
                                         <thead>
                                             <tr>
                                                 <th>Alert</th>
                                                 <th>Severity</th>
                                                 <th>Host</th>
                                                 <th className="td-wide">Domain</th>
-                                                <th>Source</th>
-                                                <th>Status</th>
+                                                <th>Engine</th>
+                                                <th>Triage</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {visible.map(a => (
-                                                <tr key={a.alert_id} onClick={() => openAlert(a.alert_id)}>
+                                                <tr key={a.alert_id} onClick={() => openAlert(a.alert_id)} className={a.status === "resolved" ? "row-done" : ""}>
                                                     <td>
                                                         <span className="cell">
                                                             <span className={`cell-mark ${a.severity}`} />
                                                             <span className="cell-main">
-                                                                <span className="cell-top"><Hl text={a.event_type} q={alertQuery} /></span>
+                                                                <span className="cell-top"><Hl text={humanize(a.event_type)} q={alertQuery} /></span>
                                                                 <span className="cell-sub">{timeAgo(a.timestamp)} · {exactTime(a.timestamp)}</span>
                                                             </span>
                                                         </span>
@@ -943,14 +1001,14 @@ function App({ user, onLogout, onUserChange }) {
                                                         </span>
                                                     </td>
                                                     <td className={`td-mono td-wide ${a.domain ? "td-dim" : "td-faint"}`}>{a.domain ? <Hl text={a.domain} q={alertQuery} /> : "—"}</td>
-                                                    <td><span className="tag"><Hl text={a.source} q={alertQuery} /></span></td>
-                                                    <td className="td-dim">{a.status}</td>
+                                                    <td><span className={`engine-tag ${a.source}`}>{ENGINE_NAME[a.source] || a.source}</span></td>
+                                                    <td><TriageCell a={a} /></td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
                                 )}
-                            </Panel>
+                            </div>
                         </>
                     )}
 
@@ -2930,6 +2988,26 @@ function RankList({ data }) {
 }
 
 // highlight where the search text appears in a value
+const ENGINE_NAME = { verifyeye: "VerifyEye", spectrac2: "SpectraC2", manual: "Manual" }
+const VERDICT_SHORT = { true_positive: "True positive", false_positive: "False positive", benign: "Benign", escalate: "Escalate" }
+
+// where an alert is in triage, for the Alerts table
+function TriageCell({ a }) {
+    if (a.triage_proposal) return (
+        <span className="triage-pill proposal" title="The AI proposed a triage: open the alert to approve or reject it">
+            <Bot /> AI proposal
+        </span>
+    )
+    if (a.status === "new" || !a.status) return <span className="triage-pill new"><span className="dot" />Untriaged</span>
+    const v = a.triage?.verdict
+    return (
+        <span className="cell-main">
+            <span className={`triage-pill ${a.status}`}><Check />{a.status === "resolved" ? "Resolved" : "Triaged"}</span>
+            {v && <span className={`cell-sub verdict-${v}`}>{VERDICT_SHORT[v] || v}{a.triage?.via === "ai" ? " · AI" : ""}</span>}
+        </span>
+    )
+}
+
 function Hl({ text, q }) {
     const t = (q || "").trim();
     const str = String(text ?? "");
