@@ -220,3 +220,4 @@ def test_api_transparency_endpoints():
         # GET /ai/transparency/logs/non-existent
         res4 = client.get("/ai/transparency/logs/does-not-exist")
         assert res4.status_code == 404
+

@@ -244,3 +244,4 @@ def clear_transparency_logs() -> int:
     """Clears transparency log collection (useful for test fixtures)."""
     res = ai_logs_collection.delete_many({})
     return res.deleted_count
+

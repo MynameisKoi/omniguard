@@ -7,7 +7,7 @@ from events import manager
 from models import Alert, AlertCreate, AlertStatusUpdate
 from db import database, brands_collection
 from ai import run_triage, answer_question
-from auth import check_login, update_user, create_session, session_user, end_session, seed_default_user
+from auth import check_login, check_badge_login, update_user, create_session, session_user, end_session, seed_default_user
 from status import check_mongo, check_neo4j, check_ollama
 from datetime import datetime, timezone, timedelta
 from typing import Literal
@@ -96,6 +96,37 @@ async def login(payload: LoginRequest):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token, expires = await run_in_threadpool(create_session, user)
+    return {**user, "token": token, "expires_at": expires}
+
+class BadgeLoginRequest(BaseModel):
+    badge_uid: str = Field(min_length=1, max_length=100)
+
+@app.post("/auth/badge-login")
+async def badge_login(payload: BadgeLoginRequest):
+    """
+    Physical authentication endpoint for Flipper Zero or RFID/NFC smart badges.
+    Signs the analyst in and commits an immutable entry to the investigation ledger.
+    """
+    user = await run_in_threadpool(check_badge_login, payload.badge_uid)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unrecognized RFID/NFC badge UID or Flipper Zero key")
+    token, expires = await run_in_threadpool(create_session, user)
+
+    # Immutably record physical hardware authentication to the decision ledger
+    try:
+        await run_in_threadpool(
+            append_ledger_entry,
+            entity_type="ANALYST_BADGE",
+            entity_id=user["email"],
+            stage="PHYSICAL_AUTHENTICATION",
+            action_taken="BADGE_TAP_LOGIN",
+            reasoning_output=f"Analyst authenticated via Flipper Zero hardware key / badge tap (UID: {payload.badge_uid})",
+            analyst_user=user["email"],
+            input_context={"badge_uid": payload.badge_uid},
+        )
+    except Exception as e:
+        print(f"[ledger] Badge login audit notice: {e}")
+
     return {**user, "token": token, "expires_at": expires}
 
 @app.post("/auth/logout", status_code=204)

@@ -2493,6 +2493,100 @@ button { font: inherit; color: inherit; }
 .login-btn:hover:not(:disabled) { filter: brightness(1.1); }
 .login-btn:disabled { opacity: 0.6; cursor: default; }
 
+/* ─── flipper zero & badge login ─────────────────── */
+.login-modes {
+  display: flex;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 3px;
+  gap: 3px;
+}
+.login-mode-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 500;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+.login-mode-btn:hover { color: var(--text); }
+.login-mode-btn.active {
+  background: var(--surface);
+  color: var(--accent-text);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  font-weight: 600;
+}
+.flipper-tap-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 16px 12px;
+  border: 2px dashed var(--accent-wash);
+  background: rgba(34, 211, 238, 0.03);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease);
+}
+.flipper-tap-zone:hover { border-color: var(--accent); }
+.flipper-icon-glow {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--accent-wash);
+  color: var(--accent-text);
+  margin-bottom: 8px;
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.25);
+}
+.flipper-icon-glow.pulsing {
+  animation: flipper-pulse 1.2s infinite alternate;
+}
+@keyframes flipper-pulse {
+  from { box-shadow: 0 0 8px rgba(34, 211, 238, 0.3); transform: scale(0.96); }
+  to { box-shadow: 0 0 24px rgba(34, 211, 238, 0.7); transform: scale(1.04); }
+}
+.flipper-tap-title { font-weight: 600; font-size: var(--t-md); color: var(--text); }
+.flipper-tap-sub { font-size: var(--t-xs); color: var(--dim); margin-top: 4px; line-height: 1.4; }
+.flipper-actions { display: flex; flex-direction: column; gap: 8px; }
+.flipper-demo-btn {
+  border: 1px dashed var(--line);
+  background: var(--raised);
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--t-xs);
+  padding: 7px 10px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+.flipper-demo-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-wash);
+}
+.login-welcome-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-xs);
+  color: var(--accent-text);
+  background: var(--accent-wash);
+  padding: 3px 10px;
+  border-radius: var(--r-full);
+}
+
 /* ─── profile ────────────────────────────────────── */
 .profile-form { display: flex; flex-direction: column; gap: 14px; max-width: 380px; }
 .login-field em { font-style: normal; color: var(--faint); }

@@ -1,0 +1,10 @@
+REM ========================================================
+REM OmniGuard SOC — Flipper Zero Hardware Fast-Login Key
+REM Target: OmniGuard Dashboard Login Screen
+REM Action: Types analyst NFC badge key into the focused field
+REM         and presses Enter to sign the analyst in instantly.
+REM ========================================================
+
+DELAY 400
+STRING FLIPPER-SOC-7A39B1
+ENTER
