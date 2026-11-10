@@ -9,6 +9,7 @@ import { label, humanize, MITRE_NAMES } from './labels';
 import { EvidencePanel, EvidenceGallery } from './Evidence';
 import AiMarkdown from './AiMarkdown';
 import AskAI from './AskAI';
+import { useAskActivity } from './askActivity'
 import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
     Sun, Moon, ChevronDown, ArrowRight, ExternalLink, AlertTriangle,
@@ -121,6 +122,9 @@ function App({ user, onLogout, onUserChange }) {
 
     // adding the state for alerts
     const [alerts, setAlerts] = useState([])
+
+    // Ask AI replies running in the background / finished while you were elsewhere
+    const askActivity = useAskActivity({ poll: true })
 
     // adding the state for ai
     const [aiText, setAiText] = useState("")
@@ -600,7 +604,12 @@ function App({ user, onLogout, onUserChange }) {
                                     onClick={() => { setPage(item.id); setSelectedId(null); setGraphFocus(null); if (window.innerWidth <= 820) setNavOpen(false); }}
                                     title={item.label}
                                 >
-                                    <span className="nav-icon"><Icon /></span>
+                                    <span className="nav-icon"><Icon />
+                                        {item.id === "ask" && (askActivity.running.size > 0 || askActivity.unread.size > 0) && (
+                                            <span className={`nav-ask-dot ${askActivity.running.size ? "running" : ""}`}
+                                                title={askActivity.running.size ? "Ask AI is working on a reply" : "Ask AI has a new reply"} />
+                                        )}
+                                    </span>
                                     {navOpen && <span>{item.label}</span>}
                                     {navOpen && item.counted && <span className="nav-count">{alerts.length}</span>}
                                 </button>

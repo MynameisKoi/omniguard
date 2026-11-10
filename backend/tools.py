@@ -189,7 +189,17 @@ def search_alerts(query=None, severity=None, engine=None, host=None, status=None
         q, relaxed = _alert_query(query), f" for {query} (with the other filters there were none)"
         total = alerts_collection.count_documents(q)
     if not total:
-        raise ToolError(f"No alerts match{' ' + repr(str(query)) if _given(query) else ' those filters'}. "
+        label = " ".join(x for x in (
+            "untriaged" if status == "new" else status if _given(status) else "", severity if _given(severity) else "",
+            ENGINE_WORD.get(engine, "") if _given(engine) else "", "alerts",
+            f"on {host}" if _given(host) else "", f"in the last {_hours(since_hours)}" if _given(since_hours) else "") if x)
+        if _given(since_hours):
+            wider = alerts_collection.find_one(_alert_query(query, severity, engine, host, status), ALERT_FIELDS,
+                                               sort=[("timestamp", -1)])
+            if wider:
+                raise ToolError(f"No {label}. The newest one without the time limit is from "
+                                f"{_when(wider.get('timestamp'))} on {wider.get('host')}. Say plainly that nothing was found.")
+        raise ToolError(f"No alerts match{' ' + repr(str(query)) if _given(query) else f' ({label})'}. "
                         "Say plainly that nothing was found; don't guess what it is or whether it's safe.")
     rows = list(alerts_collection.find(q, ALERT_FIELDS).sort("timestamp", -1).limit(limit))
     sev = Counter(a.get("severity") for a in rows)
@@ -201,7 +211,8 @@ def search_alerts(query=None, severity=None, engine=None, host=None, status=None
     facts = (f"**{total} alert{'s' if total != 1 else ''}** match{relaxed.split(' (')[0]} "
              f"({_sev_text(Counter(a.get('severity') for a in every))}). Hosts: {_ranked(every, 'host')}."
              + (" The other filters matched nothing, so only the name was used." if relaxed else ""))
-    return {"summary": summary, "facts": facts, "data": {"alerts": rows, "total": total}}
+    every_next = list(alerts_collection.find(q, {"_id": 0, "source": 1, "user": 1, "host": 1, "domain": 1, "status": 1}).limit(500))
+    return {"summary": summary, "facts": facts, "next": _set_next(every_next), "data": {"alerts": rows, "total": total}}
 
 
 def get_alert(alert_id):
@@ -259,7 +270,7 @@ def entity_summary(name):
         summary += (f"Hosts: {', '.join(f'{h} ({n})' for h, n in hosts.most_common(8)) or 'none'}. "
                     f"Domains: {', '.join(data['domains'][:5]) or 'none'}. Engines: {', '.join(data['engines'])}. ")
         summary += _cross_engine(list(hosts), data)
-    return {"summary": summary, "facts": _entity_facts(data), "data": data}
+    return {"summary": summary, "facts": _entity_facts(data), "next": _next_steps(data), "data": data}
 
 
 def _entity_facts(d):
@@ -289,6 +300,82 @@ def _entity_facts(d):
         if both:
             out += f" **{_list(both, 4)}** had both phishing and C2 alerts."
     return out
+
+
+# ── next steps: written from the data, so they're always right ──────────
+# The model explains what a result means; what to DO comes from here. A 3B
+# model suggests isolating hosts that only saw phishing, or blocking things
+# that don't exist.
+
+def _isolated(d):
+    last = (d.get("ledger_latest") or {}).get("action") or ""
+    return "isolation" in last
+
+
+def _next_steps(d):
+    """What to do about one host / user / domain, from its alerts."""
+    steps, name, kind = [], d["name"], d["kind"]
+    users = d.get("users") or []
+    if kind == "host":
+        eng = set(d.get("engines") or [])
+        phish, c2 = d.get("phishing_domains") or [], d.get("c2_destinations") or []
+        if {"verifyeye", "spectrac2"} <= eng:
+            steps.append(f"Isolation of **{name}** is recorded (simulated): confirm it's really cut off from the network"
+                         if _isolated(d) else f"Isolate **{name}**: say \"contain {name}\" and approve the card")
+            if users:
+                steps.append(f"Reset the password for {_list(users, 3)} and end their sessions")
+            if c2:
+                steps.append(f"Block {_list(c2, 3)} at the firewall / DNS")
+        elif phish:
+            steps.append(f"Check whether {_list(users, 3) or 'the user'} entered a password on {_list(phish, 2)}; if so, reset it")
+            steps.append(f"Block {_list(phish, 3)}")
+        elif c2:
+            steps.append(f"Ask \"investigate {name}\" for a verdict on the C2 traffic to {_list(c2, 2)}")
+            steps.append(f"Block {_list(c2, 3)} at the firewall / DNS")
+        if d.get("open"):
+            steps.append(f"Triage its {d['open']} open alert{'s' if d['open'] != 1 else ''}")
+    elif kind == "user":
+        he = d.get("host_engines") or {}
+        hosts = [h["host"] for h in d.get("hosts") or []]
+        both = [h for h in hosts if {"verifyeye", "spectrac2"} <= set(he.get(h, []))]
+        if both:
+            steps.append(f"Start with **{both[0]}**: it had both phishing and C2 (ask \"tell me about {both[0]}\")")
+        steps.append(f"Reset {name}'s password and end their sessions")
+        if d.get("domains"):
+            steps.append(f"Check what {name} did on {_list(d['domains'], 2)}")
+    elif kind in ("domain", "IP address"):
+        steps.append(f"Block {name} at the firewall / DNS")
+        hosts = [h["host"] for h in d.get("hosts") or []]
+        if hosts:
+            steps.append(f"Check the hosts that reached it: {_list(hosts, 4)}")
+    elif kind == "impersonated brand":
+        steps.append(f"Warn users about fake {name} login pages")
+        if d.get("domains"):
+            steps.append(f"Block {_list(d['domains'], 3)}")
+    return steps[:4]
+
+
+def _set_next(rows):
+    """What to do about a set of alerts (a search / dashboard)."""
+    steps = []
+    phish = [a for a in rows if a.get("source") == "verifyeye"]
+    users = sorted({a["user"] for a in phish if a.get("user")})
+    hosts = {}
+    for a in rows:
+        if a.get("host"):
+            hosts.setdefault(a["host"], set()).add(a.get("source"))
+    both = sorted(h for h, e in hosts.items() if {"verifyeye", "spectrac2"} <= e)
+    if both:
+        steps.append(f"Start with **{both[0]}**: it had both phishing and C2 (ask \"investigate {both[0]}\")")
+    if users:
+        steps.append(f"Check whether {_list(users, 3)} entered a password on those pages; reset any that did")
+    domains = sorted({a["domain"] for a in phish if a.get("domain") and a["domain"] != "localhost"})
+    if domains:
+        steps.append(f"Block {_list(domains, 3)}")
+    untriaged = sum(1 for a in rows if a.get("status") == "new")
+    if untriaged:
+        steps.append(f"Triage the {untriaged} untriaged alert{'s' if untriaged != 1 else ''}")
+    return steps[:4]
 
 
 # what kinds of alert each engine raises, in words the analyst uses
@@ -411,7 +498,10 @@ def attention_findings():
     for a in alerts:
         if a.get("host"):
             engines.setdefault(a["host"], set()).add(a.get("source"))
-    both = sorted(h for h, e in engines.items() if {"verifyeye", "spectrac2"} <= e)
+    crit = Counter(a.get("host") for a in alerts if a.get("severity") == "critical")
+    total = Counter(a.get("host") for a in alerts)
+    # worst first: most critical alerts, then most alerts
+    both = sorted((h for h, e in engines.items() if {"verifyeye", "spectrac2"} <= e), key=lambda h: (-crit[h], -total[h], h))
     if both:
         findings.append({"tone": "bad", "entities": both,
                          "text": f"{', '.join(both)} have both a phishing and a C2 alert — two engines agreeing usually means a real compromise."})
@@ -444,7 +534,16 @@ def attention_findings():
     bad = [f for f in findings if f["tone"] == "bad"]
     facts = (f"**{len(bad)} thing{'s' if len(bad) != 1 else ''} need{'s' if len(bad) == 1 else ''} attention.** Most urgent: {bad[0]['text']}"
              if bad else findings[0]["text"])
-    return {"summary": "\n".join(f"- {f['text']}" for f in findings), "facts": facts, "data": {"findings": findings}}
+    nxt = []
+    if both:
+        nxt.append(f"Start with **{both[0]}**, the worst of them: ask \"investigate {both[0]}\"")
+    shared = [f["entities"][0] for f in findings if "shared attacker infrastructure" in f["text"]]
+    if shared:
+        nxt.append(f"Block the shared infrastructure: {_list(shared, 3)}")
+    if open_crit:
+        nxt.append("Triage the untriaged critical alerts")
+    return {"summary": "\n".join(f"- {f['text']}" for f in findings), "facts": facts, "next": nxt,
+            "data": {"findings": findings}}
 
 
 def system_status():
@@ -481,7 +580,12 @@ def investigate_host(hostname):
     acts = c.get("recommended_actions", [])
     facts = (f"Verdict on **{hostname}**: **{str(t.get('classification', 'unknown')).replace('_', ' ').lower()}**, risk {t.get('risk_score')}/100."
              + (f" Recommended first: {acts[0].get('action', '').replace('_', ' ').lower()}." if acts else ""))
-    return {"summary": summary, "facts": facts, "data": {"investigation": result}}
+    words = lambda a: str(a.get("action", "")).replace("_", " ").lower()
+    isolated = any("ISOLAT" in str(r.get("action_taken", "")).upper() for r in get_ledger_for_entity(hostname)[:5])
+    nxt = [((f"Isolation of **{hostname}** is recorded (simulated): confirm it's really cut off from the network" if isolated
+             else f"Isolate **{hostname}**: say \"contain {hostname}\" and approve the card") if "isolat" in words(a)
+            else words(a)[:1].upper() + words(a)[1:]) for a in acts[:4] if a.get("action")]
+    return {"summary": summary, "facts": facts, "next": nxt, "data": {"investigation": result}}
 
 
 # ── view tools: draw a whole dashboard view inside the reply ─────────────
@@ -535,7 +639,7 @@ def show_dashboard(query=None, severity=None, engine=None, host=None, status=Non
              f"{sum(1 for a in rows if a.get('status') == 'new')} untriaged. Hosts: {_ranked(rows, 'host')}."
              + (f" Users: {_ranked(rows, 'user')}." if any(a.get('user') for a in rows) else "")
              + (f" Brands impersonated: {_ranked(rows, 'brand_target', 4)}." if any(a.get('brand_target') for a in rows) else ""))
-    return {"summary": summary, "facts": facts, "data": {"label": label, "term": str(query) if _given(query) else label,
+    return {"summary": summary, "facts": facts, "next": _set_next(rows), "data": {"label": label, "term": str(query) if _given(query) else label,
                                           "alert_ids": [a["alert_id"] for a in rows]}}
 
 

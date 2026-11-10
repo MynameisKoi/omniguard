@@ -15,7 +15,8 @@ from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_vi
 from tools import tool_specs, run_tool
 from conversations import (create_conversation, list_conversations, get_conversation,
                            rename_conversation, delete_conversation)
-from agent import run_turn, decide_approval
+from agent import decide_approval
+import turns
 from evidence import store_evidence, list_evidence, get_evidence, get_image, EvidenceError
 from dedup import compute_alert_simhash, find_matching_alert
 from ledger import (
@@ -280,7 +281,11 @@ class ConversationIn(BaseModel):
 
 @app.get("/conversations")
 async def conversations_list(me: dict = Depends(current_user)):
-    return await run_in_threadpool(list_conversations, me["email"])
+    rows = await run_in_threadpool(list_conversations, me["email"])
+    busy = turns.running_ids(me["email"])
+    for r in rows:
+        r["running"] = r["conversation_id"] in busy    # still replying in the background
+    return rows
 
 @app.post("/conversations", status_code=201)
 async def conversations_create(payload: ConversationIn, me: dict = Depends(current_user)):
@@ -315,9 +320,20 @@ class AgentMessage(BaseModel):
 async def agent_message(conversation_id: str, payload: AgentMessage, me: dict = Depends(current_user)):
     if not await run_in_threadpool(get_conversation, me["email"], conversation_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
-    # newline-delimited JSON events: step, block, approval, token, done
-    return StreamingResponse(run_turn(me["email"], conversation_id, payload.content, payload.context),
-                             media_type="application/x-ndjson")
+    # the turn runs in the background (turns.py): this response only follows it, so
+    # leaving the page doesn't stop the reply. Events: step, block, approval, token, done
+    turn = turns.start(me["email"], conversation_id, payload.content, payload.context)
+    if not turn:
+        raise HTTPException(status_code=409, detail="Still replying to the last message in this chat")
+    return StreamingResponse(turn.follow(), media_type="application/x-ndjson")
+
+@app.get("/conversations/{conversation_id}/stream")
+async def agent_follow(conversation_id: str, me: dict = Depends(current_user)):
+    """Re-attach to a reply still running in the background: everything so far, then live."""
+    turn = turns.running(me["email"], conversation_id)
+    if not turn:
+        return Response(status_code=204)
+    return StreamingResponse(turn.follow(), media_type="application/x-ndjson")
 
 class ApprovalDecision(BaseModel):
     approve: bool

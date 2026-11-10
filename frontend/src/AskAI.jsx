@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
     Sparkles, Plus, Send, MessageSquare, Trash2, Pencil, Check, X, ArrowRight,
     ShieldAlert, ShieldCheck, ShieldOff, CircleAlert, Wrench, Maximize2, Link2, Lock, LockOpen,
@@ -10,6 +10,7 @@ import { EvidenceList } from './Evidence'
 import { timeAgo, exactTime } from './time'
 import { label, humanize, MITRE_NAMES } from './labels'
 import { scopeIds } from './graphScope'
+import { useAskActivity, markRunning, markDone, syncRunning, setViewing, forget } from './askActivity'
 
 /* Ask AI (#1, #23, #19): the SOC agent. Saved conversations on the left; on
  * the right the agent answers by calling tools, and what they return is drawn
@@ -435,9 +436,34 @@ function Choices({ data, onAsk, disabled }) {
     )
 }
 
-function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views }) {
+// A reply that's coming in is revealed a few letters at a time, left to right.
+// The server sends whole checked sentences; this smooths them out, and speeds up
+// when it falls behind so it never lags far. Saved replies show at once.
+function useTypewriter(text, animate) {
+    const [n, setN] = useState(animate ? 0 : text.length)
+    const typing = animate && n < text.length
+    useEffect(() => {
+        if (!typing) return
+        const id = requestAnimationFrame(() =>
+            setN(k => Math.min(text.length, k + Math.max(2, Math.ceil((text.length - k) / 40)))))
+        return () => cancelAnimationFrame(id)
+    }, [typing, n, text])
+    if (!animate) return { shown: text, typing: false }
+    let shown = text.slice(0, n)
+    if ((shown.match(/\*\*/g) || []).length % 2) shown += "**"     // don't flash a half-open **bold**
+    return { shown, typing }
+}
+
+function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views, onGrow }) {
+    // animate replies that were still coming in when this message appeared
+    const [animate] = useState(!!live)
+    const { shown: text } = useTypewriter(m.content || "", animate)
+    useEffect(() => { if (animate) onGrow?.() }, [text, animate, onGrow])
     if (m.role === "user") return <div className="ask-msg user"><div className="ask-bubble">{m.content}</div></div>
-    const thinking = live && !m.content && !(m.steps || []).length
+    // while the reply is still coming: what it's doing, at the bottom, until it's done
+    // (hidden while a tool's own step line is spinning)
+    const lookingUp = (m.steps || []).some(s => s.status === "running")
+    const working = live && !lookingUp
     return (
         <div className={`ask-msg ai${(m.blocks || []).some(b => WIDE.has(b.render)) ? " wide" : ""}`}>
             <span className="ask-avatar"><Sparkles /></span>
@@ -445,13 +471,22 @@ function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views 
                 {(m.steps || []).length > 0 && <Steps steps={m.steps} live={live} />}
                 {(m.blocks || []).filter(b => b.render !== "choices").map((b, i) => <Block key={i} block={b} onOpenAlert={onOpenAlert} onFilter={onFilter} views={views} />)}
                 {(m.approvals || []).map(a => <ApprovalCard key={a.approval_id} approval={a} onDecide={(ap, ok) => onDecide(m, ap, ok)} />)}
-                {thinking ? <div className="ai-loading"><span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />Thinking…</div>
-                    : m.content ? <AiMarkdown text={m.content} /> : null}
+                {text ? <AiMarkdown text={text} /> : null}
+                {working && (
+                    <div className="ai-loading ask-working" role="status">
+                        <span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />
+                        {m.status || "Thinking…"}
+                    </div>
+                )}
                 {(m.blocks || []).filter(b => b.render === "choices").map((b, i) => <Choices key={i} data={b.data || {}} onAsk={onAsk} disabled={busy} />)}
             </div>
         </div>
     )
 }
+
+// uid: the same Message stays mounted when the live reply becomes the saved one
+const emptyReply = () => ({ role: "assistant", content: "", steps: [], blocks: [], approvals: [], live: true,
+                            uid: Math.random().toString(36).slice(2) })
 
 export default function AskAI({ onOpenAlert, onFilter, views }) {
     const [convos, setConvos] = useState([])
@@ -459,18 +494,46 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
     const [messages, setMessages] = useState([])
     const [loadedId, setLoadedId] = useState(null)      // whose messages are in `messages`
     const justCreated = useRef(null)                     // a chat send() just made: nothing to load
-    const [streaming, setStreaming] = useState(false)
-    const [draft, setDraft] = useState("")
+    // replies still coming in, per chat. They run on the server (turns.py), so
+    // switching chats or pages doesn't stop them; this page just follows along
+    const [live, setLive] = useState({})
+    const liveRef = useRef({})
+    const readers = useRef({})                           // chat id -> AbortController
+    const activeRef = useRef(activeId)
+    activeRef.current = activeId
+    const activity = useAskActivity()
+    // an unsent message is kept per chat, across chat switches and leaving the page
+    const draftKey = (id) => `og_ask_draft:${id || "new"}`
+    const readDraft = (id) => { try { return sessionStorage.getItem(draftKey(id)) || "" } catch { return "" } }
+    const [draft, setDraftState] = useState(() => readDraft(activeId))
+    const setDraft = (text) => {
+        setDraftState(text)
+        try { text ? sessionStorage.setItem(draftKey(activeRef.current), text) : sessionStorage.removeItem(draftKey(activeRef.current)) } catch { /* private mode */ }
+    }
     const [renaming, setRenaming] = useState(null)   // { id, title }
     const [confirmDelete, setConfirmDelete] = useState(null)
     const [error, setError] = useState(null)
     const logRef = useRef(null)
     const inputRef = useRef(null)
 
-    const loadList = () => api("/conversations").then(r => r.ok ? r.json() : []).then(setConvos).catch(() => {})
-    useEffect(() => { loadList() }, [])
+    const patchLive = (id, fn) => { liveRef.current = { ...liveRef.current, [id]: fn(liveRef.current[id] || emptyReply()) }; setLive(liveRef.current) }
+    const dropLive = (id) => { const { [id]: gone, ...rest } = liveRef.current; liveRef.current = rest; setLive(rest); return gone }
+
+    const loadList = () => api("/conversations").then(r => r.ok ? r.json() : []).then(rows => {
+        setConvos(rows)
+        syncRunning(rows.filter(r => r.running).map(r => r.conversation_id))
+        return rows
+    }).catch(() => [])
 
     useEffect(() => {
+        loadList()
+        const followed = readers.current
+        // leaving the page: stop following (the replies keep running on the server)
+        return () => { Object.values(followed).forEach(c => c.abort()); setViewing(null) }
+    }, [])
+
+    useEffect(() => {
+        setViewing(activeId)
         try { activeId ? localStorage.setItem("og_ask_convo", activeId) : localStorage.removeItem("og_ask_convo") } catch { /* private mode */ }
         // a brand-new chat from send(): its first message is already on screen
         if (!activeId || justCreated.current === activeId) return
@@ -479,24 +542,37 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
             .then(r => r.ok ? r.json() : null)
             .then(c => {
                 if (!alive) return
-                if (c) { setMessages(c.messages || []); setLoadedId(activeId) }
-                else setActiveId(null)   // deleted elsewhere
+                if (!c) { setActiveId(null); return }   // deleted elsewhere
+                setMessages(c.messages || []); setLoadedId(activeId)
+                // still replying, and this page isn't following it (we left and came back): re-attach
+                if (!readers.current[activeId]) attach(activeId)
             })
         return () => { alive = false }
-    }, [activeId])
+    }, [activeId]) // eslint-disable-line react-hooks/exhaustive-deps -- attach only reads refs
     const loadingChat = !!activeId && loadedId !== activeId
 
     const openChat = (id) => {
         setError(null)
+        setDraftState(readDraft(id))
         if (!id) { setMessages([]); setLoadedId(null) }
         setActiveId(id)
     }
+
+    const reply = activeId && loadedId === activeId ? live[activeId] : null
+    const shown = reply ? [...messages, reply] : messages
+    const busy = !!reply
+
+    // while a reply types out: keep following it, unless the analyst scrolled up to read
+    const stickToBottom = useCallback(() => {
+        const el = logRef.current
+        if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight
+    }, [])
 
     // keep the newest message in view while the agent works
     useEffect(() => {
         const el = logRef.current
         if (el) el.scrollTop = el.scrollHeight
-    }, [messages])
+    }, [messages, reply])
 
     // grow the composer with its text
     useEffect(() => {
@@ -506,29 +582,11 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
         el.style.height = `${Math.min(el.scrollHeight, 160)}px`
     }, [draft])
 
-    const patchLast = (fn) => setMessages(ms => ms.map((m, i) => i === ms.length - 1 ? fn(m) : m))
-
-    async function send(text) {
-        text = text.trim()
-        if (!text || streaming) return
-        setDraft(""); setError(null); setStreaming(true)
-        let id = activeId
+    // read one reply's events into live[id] until it's done
+    async function follow(id, res) {
+        const reader = res.body.getReader(), decoder = new TextDecoder()
+        let buffer = "", finished = false
         try {
-            if (!id) {
-                const r = await api("/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
-                id = (await r.json()).conversation_id
-                justCreated.current = id
-                setMessages([]); setLoadedId(id); setActiveId(id)
-            }
-            setMessages(ms => [...ms, { role: "user", content: text },
-                { role: "assistant", content: "", steps: [], blocks: [], approvals: [], live: true }])
-
-            const res = await api(`/conversations/${id}/messages`, {
-                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: text }),
-            })
-            if (!res.ok || !res.body) throw new Error(`the server answered ${res.status}`)
-            const reader = res.body.getReader(), decoder = new TextDecoder()
-            let buffer = ""
             for (;;) {
                 const { value, done } = await reader.read()
                 if (done) break
@@ -538,25 +596,84 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
                 for (const line of lines) {
                     if (!line.trim()) continue
                     const e = JSON.parse(line)
-                    if (e.type === "step" && e.status === "running") patchLast(m => ({ ...m, steps: [...m.steps, e] }))
-                    else if (e.type === "step") patchLast(m => {
+                    if (e.type === "step" && e.status === "running") patchLive(id, m => ({ ...m, steps: [...m.steps, e] }))
+                    else if (e.type === "step") patchLive(id, m => {
                         const steps = [...m.steps]
                         const i = steps.map(s => s.status).lastIndexOf("running")
                         steps[i >= 0 ? i : steps.length] = e
                         return { ...m, steps }
                     })
-                    else if (e.type === "block") patchLast(m => ({ ...m, blocks: [...m.blocks, e] }))
-                    else if (e.type === "approval") patchLast(m => ({ ...m, approvals: [...m.approvals, e] }))
-                    else if (e.type === "token") patchLast(m => ({ ...m, content: m.content + e.text }))
-                    else if (e.type === "done") patchLast(m => ({ ...m, content: e.content ?? m.content, message_id: e.message_id, live: false }))
+                    else if (e.type === "block") patchLive(id, m => ({ ...m, blocks: [...m.blocks, e] }))
+                    else if (e.type === "approval") patchLive(id, m => ({ ...m, approvals: [...m.approvals, e] }))
+                    else if (e.type === "token") patchLive(id, m => ({ ...m, content: m.content + e.text }))
+                    else if (e.type === "status") patchLive(id, m => ({ ...m, status: e.text }))
                     else if (e.type === "error") throw new Error(e.message)
+                    else if (e.type === "done") {
+                        finished = true
+                        const final = { ...dropLive(id), content: e.content, message_id: e.message_id, live: false }
+                        if (activeRef.current === id)
+                            setMessages(ms => ms.some(m => m.message_id && m.message_id === final.message_id) ? ms : [...ms, final])
+                        markDone(id)
+                    }
                 }
             }
+            if (!finished) throw new Error("the reply stopped before it finished")
         } catch (err) {
+            if (err.name === "AbortError") return          // we left the page; it carries on without us
+            const partial = dropLive(id)
+            markDone(id)
+            if (activeRef.current === id) {
+                setError(`Something went wrong: ${err.message}`)
+                if (partial?.content) setMessages(ms => [...ms, { ...partial, live: false }])
+            }
+        }
+    }
+
+    async function attach(id) {
+        const ctrl = new AbortController()
+        readers.current[id] = ctrl
+        try {
+            const res = await api(`/conversations/${id}/stream`, { signal: ctrl.signal })
+            if (res.status !== 200 || !res.body) return     // nothing running
+            markRunning(id)
+            patchLive(id, () => emptyReply())
+            await follow(id, res)
+        } catch { /* left the page */ } finally {
+            delete readers.current[id]
+            loadList()
+        }
+    }
+
+    async function send(text) {
+        text = text.trim()
+        let id = activeId
+        if (!text || (id && liveRef.current[id])) return   // this chat is still replying: keep the draft
+        setDraft(""); setError(null)
+        const ctrl = new AbortController()
+        try {
+            if (!id) {
+                const r = await api("/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+                id = (await r.json()).conversation_id
+                justCreated.current = id
+                setMessages([]); setLoadedId(id); setActiveId(id)
+            }
+            readers.current[id] = ctrl
+            setMessages(ms => [...ms, { role: "user", content: text }])
+            patchLive(id, () => emptyReply())
+            markRunning(id)
+            const res = await api(`/conversations/${id}/messages`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ content: text }), signal: ctrl.signal,
+            })
+            if (!res.ok || !res.body) throw new Error(res.status === 409 ? "this chat is still replying" : `the server answered ${res.status}`)
+            loadList()          // the reply is running on the server now: the list says so (and shows the new title)
+            await follow(id, res)
+        } catch (err) {
+            if (err.name === "AbortError") return
             setError(`Something went wrong: ${err.message}`)
-            patchLast(m => m.role === "assistant" ? { ...m, live: false } : m)
+            if (id) { dropLive(id); markDone(id) }
         } finally {
-            setStreaming(false)
+            if (id && readers.current[id] === ctrl) delete readers.current[id]
             loadList()
         }
     }
@@ -582,6 +699,7 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
         setConfirmDelete(null)
         await api(`/conversations/${id}`, { method: "DELETE" })
         if (id === activeId) openChat(null)
+        forget(id)
         loadList()
     }
 
@@ -619,6 +737,10 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
                                         <>
                                             <button className="ask-item-main" onClick={() => openChat(c.conversation_id)} title={c.title}>
                                                 <MessageSquare /><span>{c.title}</span>
+                                                {live[c.conversation_id] || activity.running.has(c.conversation_id)
+                                                    ? <span className="btn-spinner ask-item-busy" aria-label="Replying" />
+                                                    : activity.unread.has(c.conversation_id) && c.conversation_id !== activeId
+                                                        ? <span className="ask-item-new" aria-label="New reply" /> : null}
                                             </button>
                                             <span className="ask-item-tools">
                                                 <button onClick={() => setRenaming({ id: c.conversation_id })} aria-label="Rename"><Pencil /></button>
@@ -637,7 +759,7 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
             <section className="ask-main">
                 <div className="ask-log" ref={logRef}>
                     {loadingChat ? <div className="content-spinner"><div className="spinner" /></div>
-                        : messages.length === 0 ? (
+                        : shown.length === 0 ? (
                             <div className="ask-welcome">
                                 <span className="ask-welcome-mark"><Sparkles /></span>
                                 <h2>What can I help you investigate?</h2>
@@ -647,10 +769,10 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
                                     {SUGGESTIONS.map(q => <button key={q} onClick={() => send(q)}>{q}</button>)}
                                 </div>
                             </div>
-                        ) : messages.map((m, i) => (
-                            <Message key={m.message_id || i} m={m} live={!!m.live}
+                        ) : shown.map((m, i) => (
+                            <Message key={m.uid || m.message_id || i} m={m} live={!!m.live} onGrow={stickToBottom}
                                 onOpenAlert={onOpenAlert} onFilter={onFilter} onDecide={decide}
-                                onAsk={send} busy={streaming} views={views} />
+                                onAsk={send} busy={busy} views={views} />
                         ))}
                     {error && <div className="login-error ask-error">{error}</div>}
                 </div>
@@ -660,13 +782,13 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
                         ref={inputRef}
                         rows={1}
                         value={draft}
-                        placeholder={streaming ? "Working on it…" : "Ask about your alerts, hosts, domains — or ask me to act"}
+                        placeholder={busy ? "Still replying… you can type your next message, or open another chat" : "Ask about your alerts, hosts, domains — or ask me to act"}
                         onChange={e => setDraft(e.target.value)}
                         onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(draft) } }}
-                        disabled={streaming}
                     />
-                    <button type="submit" className="ask-send" disabled={streaming || !draft.trim()} aria-label="Send">
-                        {streaming ? <span className="btn-spinner" /> : <Send />}
+                    <button type="submit" className="ask-send" disabled={busy || !draft.trim()} aria-label="Send"
+                        title={busy ? "Still replying — you can keep typing, or open another chat" : "Send"}>
+                        {busy ? <span className="btn-spinner" /> : <Send />}
                     </button>
                 </form>
             </section>

@@ -4301,3 +4301,18 @@ mark.hl-match { background: var(--accent-wash); color: var(--accent-text); borde
 }
 .ask-choices button:hover:not(:disabled) { background: var(--hover); }
 .ask-choices button:disabled { opacity: .5; cursor: default; }
+
+/* Ask AI replies running in the background */
+.ask-item-main { position: relative; }
+.ask-item-busy { margin-left: auto; flex: none; width: 12px; height: 12px; }
+.ask-item-new { margin-left: auto; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.nav-icon { position: relative; }
+.nav-ask-dot {
+  position: absolute; top: -2px; right: -3px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 2px var(--panel, var(--bg, #0b1220));
+}
+.nav-ask-dot.running { animation: nav-ask-pulse 1.2s ease-in-out infinite; }
+@keyframes nav-ask-pulse { 50% { opacity: .35; } }
+
+/* what an Ask AI reply is doing while it's still coming in */
+.ask-working { margin-top: 10px; }

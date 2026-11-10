@@ -109,6 +109,8 @@ def test_api_alert_fusion_flow():
         from fastapi.testclient import TestClient
 
         client = TestClient(app)
+        # endpoints need a signed-in analyst (session tokens): sign the test client in
+        app.dependency_overrides[backend_main.current_user] = lambda: {"email": "test@omniguard.io", "name": "Test"}
 
         alert_payload = {
             "source": "spectrac2",
