@@ -131,6 +131,14 @@ class Alert(AlertCreate):
         1,
         description="Number of fused near-duplicate occurrences within the deduplication window",
     )
+    triage: dict | None = Field(
+        None,
+        description="the analyst's triage: verdict, notes, response actions, who and when (triage.py)",
+    )
+    triage_proposal: dict | None = Field(
+        None,
+        description="the AI's proposed triage, waiting for an analyst to approve or reject it",
+    )
     last_seen: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp of the most recent occurrence of this fused incident",

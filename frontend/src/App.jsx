@@ -5,10 +5,12 @@ import GraphCanvas from './GraphCanvas';
 import GraphExplorer from './GraphExplorer';
 import { timeAgo, exactTime } from './time';
 import { scopeIds } from './graphScope';
-import { label, humanize, MITRE_NAMES } from './labels';
+import { label, humanize, MITRE_NAMES, VERDICT_SHORT } from './labels';
+import TriageCell from './TriageCell';
 import { EvidencePanel, EvidenceGallery } from './Evidence';
 import AiMarkdown from './AiMarkdown';
 import AskAI from './AskAI';
+import TriagePanel from './Triage';
 import { useAskActivity } from './askActivity'
 import {
     LayoutDashboard, Flag, Share2, Server, Cpu, Settings, Menu,
@@ -123,6 +125,30 @@ function App({ user, onLogout, onUserChange }) {
     // adding the state for alerts
     const [alerts, setAlerts] = useState([])
 
+    // "Ask AI about this alert": a chat tied to the alert, its first question already
+    // asked. The reply runs on the server, and Ask AI opens the chat and follows it
+    // (however often the page mounts on the way there)
+    const [askingAbout, setAskingAbout] = useState(false)
+    async function askAboutAlert(a) {
+        setAskingAbout(true)
+        try {
+            const r = await api("/conversations", { method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: `${humanize(a.event_type)} on ${a.host}`.slice(0, 80), alert_id: a.alert_id }) })
+            if (!r.ok) throw new Error()
+            const chat = await r.json()
+            const ctrl = new AbortController()
+            await api(`/conversations/${chat.conversation_id}/messages`, { method: "POST", signal: ctrl.signal,
+                headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "Tell me about this alert" }) })
+            ctrl.abort()   // started: Ask AI re-attaches to it
+            try { localStorage.setItem("og_ask_convo", chat.conversation_id) } catch { /* private mode */ }
+            setSelectedId(null); setPage("ask")
+        } catch {
+            setError("Couldn't start the chat about this alert")
+        } finally {
+            setAskingAbout(false)
+        }
+    }
+
     // Ask AI replies running in the background / finished while you were elsewhere
     const askActivity = useAskActivity({ poll: true })
 
@@ -177,6 +203,16 @@ function App({ user, onLogout, onUserChange }) {
     const [searchFrom, setSearchFrom] = useState("overview")
     // the Alerts page's own search box: filters that list as you type
     const [alertQuery, setAlertQuery] = useState("")
+    // Alerts page: where each alert is in triage, its verdict, and the order
+    const [statusFilter, setStatusFilter] = useState(null)    // null | "new" | "proposal" | "triaged" | "resolved"
+    const [verdictFilter, setVerdictFilter] = useState(null)  // null | a verdict id | "none"
+    const [sortBy, setSortBy] = useState("newest")            // "newest" | "oldest" | "severity"
+    // several alerts at once: the ticked rows, and what the bar is doing
+    const [picked, setPicked] = useState(() => new Set())
+    const [bulkVerdict, setBulkVerdict] = useState("")
+    const [bulkStatus, setBulkStatus] = useState("triaged")
+    const [bulkBusy, setBulkBusy] = useState(null)            // "ai" | "approve" | "mark"
+    const [bulkNote, setBulkNote] = useState(null)
     const [searchKind, setSearchKind] = useState(() => { try { return localStorage.getItem("og_searchKind") || "search" } catch { return "search" } }) // "search" (typed) | "filter" (chart click)
     const [recentSearches, setRecentSearches] = useState(() => {
         try { return JSON.parse(localStorage.getItem("og_recent_searches") || "[]") } catch { return [] }
@@ -258,6 +294,9 @@ function App({ user, onLogout, onUserChange }) {
                 if (msg.type === "alert_fused") {
                     const fused = msg.alert
                     setAlerts(prev => [fused, ...prev.filter(a => a.alert_id !== fused.alert_id)])
+                } else if (msg.type === "alert_updated") {
+                    // triaged (or an AI proposal added) here or on another analyst's screen
+                    setAlerts(prev => prev.map(a => a.alert_id === msg.alert.alert_id ? msg.alert : a))
                 } else {
                     setAlerts(prev => [msg, ...prev])
                 }
@@ -396,7 +435,39 @@ function App({ user, onLogout, onUserChange }) {
         }
         return true;
     };
-    const visible = [...scoped].filter(inDateRange).filter(a => matchesTerm(a, alertQuery)).sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
+    // everything but the triage filters: what the status tabs and cards count
+    const triageBase = scoped.filter(inDateRange).filter(a => matchesTerm(a, alertQuery))
+    const triageState = (a) => a.triage_proposal ? "proposal" : a.status
+    const statusCount = (st) => triageBase.filter(a => triageState(a) === st).length
+    const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 }
+    const visible = triageBase
+        .filter(a => !statusFilter || triageState(a) === statusFilter)
+        .filter(a => !verdictFilter || (verdictFilter === "none" ? !a.triage : a.triage?.verdict === verdictFilter))
+        .sort((x, y) => sortBy === "severity"
+            ? (SEV_RANK[x.severity] - SEV_RANK[y.severity]) || (new Date(y.timestamp) - new Date(x.timestamp))
+            : (new Date(y.timestamp) - new Date(x.timestamp)) * (sortBy === "oldest" ? -1 : 1));
+    const togglePick = (id) => setPicked(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
+    const pickedAlerts = alerts.filter(a => picked.has(a.alert_id))
+    const pickedProposals = pickedAlerts.filter(a => a.triage_proposal)
+    async function runBulk(kind, path, body, done) {
+        setBulkBusy(kind); setBulkNote(null)
+        try {
+            const r = await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+            const out = await r.json().catch(() => ({}))
+            if (!r.ok) throw new Error(out.detail || `the server answered ${r.status}`)
+            const changed = new Map(out.alerts.map(a => [a.alert_id, a]))
+            setAlerts(prev => prev.map(a => changed.get(a.alert_id) || a))
+            setBulkNote(done(out.alerts.length) + (out.problems.length ? ` ${out.problems.length} couldn't be done: ${out.problems[0].error}` : ""))
+            setPicked(new Set())
+        } catch (e) {
+            setBulkNote(`Couldn't do that: ${e.message}`)
+        } finally {
+            setBulkBusy(null)
+        }
+    }
+    const anyAlertFilter = !!(filter || srcFilter || dateFilter || statusFilter || verdictFilter || alertQuery.trim())
+    const clearAlertFilters = () => { setFilter(null); setSrcFilter(null); setDateFilter(null); setDateFrom(""); setDateTo("");
+                                      setStatusFilter(null); setVerdictFilter(null); setAlertQuery("") }
     const selected = alerts.find(a => a.alert_id === selectedId);
     const maxCount = Math.max(1, ...SEVERITIES.map(countOf));
     const engineCounts = countBy("source");
@@ -822,7 +893,7 @@ function App({ user, onLogout, onUserChange }) {
                     // enter animation (.content > *) plays; live alerts don't change it
                     <Fragment key={page}>
 
-                    {(filter || srcFilter) && (page === "overview" || page === "alerts") && (
+                    {(filter || srcFilter) && page === "overview" && (
                         <div className="active-filters">
                             <span className="af-label">Filtered by</span>
                             {filter && (
@@ -852,18 +923,40 @@ function App({ user, onLogout, onUserChange }) {
                     {page === "alerts" && (
                         <>
                             <div className="stats">
-                                <Stat label="Total" value={alerts.length} />
-                                <Stat label="Critical" value={countOf("critical")} tone="critical" />
-                                <Stat label="High" value={countOf("high")} tone="high" />
-                                <Stat label="Untriaged" value={alerts.filter(a => a.status === "new").length} />
-                                <Stat label="Engines" value="2" tone="good" />
+                                {[["new", null, Inbox, "Needs triage", statusCount("new"), "critical", "not looked at yet"],
+                                  ["proposal", null, Bot, "AI proposals", statusCount("proposal"), "accent", "waiting for your approval"],
+                                  ["triaged", null, UserCheck, "Triaged", statusCount("triaged"), "high", "decided, still being worked"],
+                                  ["resolved", null, ShieldCheck, "Resolved", statusCount("resolved"), "good", "done"],
+                                  [null, "true_positive", Target, "True positives", triageBase.filter(a => a.triage?.verdict === "true_positive").length, "critical", "confirmed real"],
+                                ].map(([st, verdict, icon, text, n, tone, foot]) => {
+                                    // one card at a time: a card is a view of the list, not a filter to stack
+                                    const on = statusFilter === st && verdictFilter === verdict
+                                    return <Stat key={text} icon={icon} label={text} value={n} tone={tone} foot={foot} active={on}
+                                        onClick={() => { setStatusFilter(on ? null : st); setVerdictFilter(on ? null : verdict) }} />
+                                })}
                             </div>
 
-                            <Panel
-                                title="Alerts"
-                                note={alertQuery.trim() ? `${visible.length} match “${alertQuery.trim()}”` : `${visible.length} shown`}
-                                flush
-                            >
+                            <div className="panel alerts-panel">
+                                <div className="alerts-tabs" role="tablist" aria-label="Triage status">
+                                    {[[null, "All", triageBase.length], ["new", "Untriaged", statusCount("new")],
+                                      ["proposal", "AI proposal", statusCount("proposal")], ["triaged", "Triaged", statusCount("triaged")],
+                                      ["resolved", "Resolved", statusCount("resolved")]].map(([id, text, n]) => (
+                                        <button key={text} role="tab" aria-selected={statusFilter === id}
+                                            className={`alerts-tab ${statusFilter === id ? "on" : ""}`} onClick={() => setStatusFilter(id)}>
+                                            {id === "proposal" && <Bot />}{text} <span className="alerts-tab-n">{n}</span>
+                                        </button>
+                                    ))}
+                                    <span className="alerts-tabs-fill" />
+                                    <label className="alerts-sort">
+                                        Sort
+                                        <select value={sortBy} onChange={e => setSortBy(e.target.value)}>
+                                            <option value="newest">Newest first</option>
+                                            <option value="oldest">Oldest first</option>
+                                            <option value="severity">Most severe first</option>
+                                        </select>
+                                    </label>
+                                </div>
+
                                 <div className="alerts-search">
                                     <Search />
                                     <input
@@ -877,14 +970,31 @@ function App({ user, onLogout, onUserChange }) {
                                         <button className="search-clear" onClick={() => setAlertQuery("")} aria-label="Clear alert search"><X /></button>
                                     )}
                                 </div>
-                                <div className="filterbar">
+
+                                <div className="filterbar alerts-filters">
                                     <span className="label">Severity</span>
-                                    <button className={`chip ${filter === null ? "on" : ""}`} onClick={() => setFilter(null)}>all</button>
                                     {SEVERITIES.map(sev => (
-                                        <button key={sev} className={`chip ${filter === sev ? "on" : ""}`} onClick={() => setFilter(sev)}>
-                                            {sev}
+                                        <button key={sev} className={`chip sev-chip ${filter === sev ? "on" : ""}`} onClick={() => setFilter(filter === sev ? null : sev)}>
+                                            <span className={`dot sev-${sev}`} />{sev}<span className="chip-n">{sevCount(sev)}</span>
                                         </button>
                                     ))}
+                                    <span className="filterbar-sep" />
+                                    <span className="label">Engine</span>
+                                    {Object.entries(countBy("source")).sort((a, b) => b[1] - a[1]).map(([src]) => (
+                                        <button key={src} className={`chip ${srcFilter === src ? "on" : ""}`} onClick={() => setSrcFilter(srcFilter === src ? null : src)}>
+                                            {ENGINE_NAME[src] || src}
+                                        </button>
+                                    ))}
+                                    <span className="filterbar-sep" />
+                                    <span className="label">Verdict</span>
+                                    <select className="chip-select" value={verdictFilter || ""} onChange={e => setVerdictFilter(e.target.value || null)}>
+                                        <option value="">Any</option>
+                                        <option value="true_positive">True positive</option>
+                                        <option value="false_positive">False positive</option>
+                                        <option value="benign">Benign / expected</option>
+                                        <option value="escalate">Needs escalation</option>
+                                        <option value="none">No verdict yet</option>
+                                    </select>
                                     <span className="filterbar-sep" />
                                     <span className="label">When</span>
                                     <DateRangePicker
@@ -894,39 +1004,104 @@ function App({ user, onLogout, onUserChange }) {
                                         onPreset={(k) => { setDateFilter(k); setDateFrom(""); setDateTo(""); }}
                                         onCustom={(f, t) => { setDateFrom(f); setDateTo(t); setDateFilter("custom"); }}
                                     />
+                                    {anyAlertFilter && <button className="link alerts-clear" onClick={clearAlertFilters}>Clear filters</button>}
                                 </div>
 
+                                <div className="alerts-count">
+                                    <span>{anyAlertFilter ? `${visible.length} of ${alerts.length} alerts` : `${visible.length} alerts`}</span>
+                                    {/* exactly what's being shown, each removable on its own */}
+                                    {[statusFilter && [{ new: "Untriaged", proposal: "AI proposal waiting", triaged: "Triaged", resolved: "Resolved" }[statusFilter], () => setStatusFilter(null)],
+                                      verdictFilter && [verdictFilter === "none" ? "No verdict yet" : `Verdict: ${VERDICT_SHORT[verdictFilter]}`, () => setVerdictFilter(null)],
+                                      filter && [`${filter[0].toUpperCase()}${filter.slice(1)} severity`, () => setFilter(null)],
+                                      srcFilter && [ENGINE_NAME[srcFilter] || srcFilter, () => setSrcFilter(null)],
+                                      dateFilter && [{ today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days", custom: "Custom dates" }[dateFilter] || dateFilter,
+                                                     () => { setDateFilter(null); setDateFrom(""); setDateTo("") }],
+                                      alertQuery.trim() && [`“${alertQuery.trim()}”`, () => setAlertQuery("")],
+                                    ].filter(Boolean).map(([text, clear]) => (
+                                        <button key={text} className="af-chip alerts-on" onClick={clear} title="Remove this filter">{text} <X /></button>
+                                    ))}
+                                </div>
+
+                                {(picked.size > 0 || bulkNote) && (
+                                    <div className="bulk-bar">
+                                        {picked.size > 0 ? <>
+                                            <b>{picked.size} selected</b>
+                                            <button className="btn sm primary" disabled={!!bulkBusy}
+                                                onClick={() => runBulk("ai", "/alerts/triage/ai/bulk", { alert_ids: [...picked] }, n => {
+                                                    setStatusFilter("proposal"); setVerdictFilter(null)
+                                                    return `The AI proposed a triage for ${n} alert${n === 1 ? "" : "s"}: review them here, then approve or reject.`
+                                                })}>
+                                                {bulkBusy === "ai" ? <span className="btn-spinner" /> : <Sparkles />} Triage with AI
+                                            </button>
+                                            {pickedProposals.length > 0 && (
+                                                <button className="btn sm" disabled={!!bulkBusy}
+                                                    onClick={() => runBulk("approve", "/alerts/triage/ai/approve/bulk", { alert_ids: pickedProposals.map(a => a.alert_id) },
+                                                        n => `Approved the AI's triage for ${n} alert${n === 1 ? "" : "s"}.`)}>
+                                                    {bulkBusy === "approve" ? <span className="btn-spinner" /> : <Check />} Approve {pickedProposals.length} AI proposal{pickedProposals.length === 1 ? "" : "s"}
+                                                </button>
+                                            )}
+                                            <span className="filterbar-sep" />
+                                            <span className="bulk-label">Mark as</span>
+                                            <select className="chip-select" value={bulkVerdict} onChange={e => setBulkVerdict(e.target.value)} aria-label="Verdict for the selected alerts">
+                                                <option value="">verdict…</option>
+                                                <option value="true_positive">True positive</option>
+                                                <option value="false_positive">False positive</option>
+                                                <option value="benign">Benign / expected</option>
+                                                <option value="escalate">Needs escalation</option>
+                                            </select>
+                                            <select className="chip-select" value={bulkStatus} onChange={e => setBulkStatus(e.target.value)} aria-label="Status for the selected alerts">
+                                                <option value="triaged">triaged</option>
+                                                <option value="resolved">resolved</option>
+                                            </select>
+                                            <button className="btn sm" disabled={!bulkVerdict || !!bulkBusy}
+                                                onClick={() => runBulk("mark", "/alerts/triage/bulk",
+                                                    { alert_ids: [...picked], verdict: bulkVerdict, status: bulkStatus, notes: "Triaged together with other alerts." },
+                                                    n => `Marked ${n} alert${n === 1 ? "" : "s"} ${bulkStatus}: ${VERDICT_SHORT[bulkVerdict].toLowerCase()}.`)}>
+                                                {bulkBusy === "mark" ? <span className="btn-spinner" /> : <Check />} Apply
+                                            </button>
+                                            <button className="link bulk-clear" onClick={() => { setPicked(new Set()); setBulkNote(null) }}>Clear selection</button>
+                                        </> : <>
+                                            <span className="bulk-note">{bulkNote}</span>
+                                            <button className="link bulk-clear" onClick={() => setBulkNote(null)}>Dismiss</button>
+                                        </>}
+                                    </div>
+                                )}
+
                                 {visible.length === 0 ? (
-                                    alertQuery.trim() ? (
-                                        <div className="empty">
-                                            No alerts match “{alertQuery.trim()}”{(filter || dateFilter) ? " with the current filters" : ""}.{" "}
-                                            <button className="link" onClick={() => setAlertQuery("")}>Clear search</button>
-                                        </div>
-                                    ) : (
-                                        <div className="empty">
-                                            No alerts. Post one at <code>localhost:8000/docs</code>.
-                                        </div>
-                                    )
+                                    <div className="empty">
+                                        {alerts.length === 0
+                                            ? <>No alerts yet. Post one at <code>localhost:8000/docs</code>.</>
+                                            : <>No alerts match these filters. <button className="link" onClick={clearAlertFilters}>Clear filters</button></>}
+                                    </div>
                                 ) : (
-                                    <table className="table">
+                                    <table className="table alerts-table">
                                         <thead>
                                             <tr>
+                                                <th className="td-pick">
+                                                    <input type="checkbox" aria-label="Select every alert shown"
+                                                        checked={visible.length > 0 && visible.every(a => picked.has(a.alert_id))}
+                                                        onChange={e => setPicked(e.target.checked ? new Set([...picked, ...visible.map(a => a.alert_id)]) : new Set())} />
+                                                </th>
                                                 <th>Alert</th>
                                                 <th>Severity</th>
                                                 <th>Host</th>
                                                 <th className="td-wide">Domain</th>
-                                                <th>Source</th>
-                                                <th>Status</th>
+                                                <th>Engine</th>
+                                                <th>Triage</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {visible.map(a => (
-                                                <tr key={a.alert_id} onClick={() => openAlert(a.alert_id)}>
+                                                <tr key={a.alert_id} onClick={() => openAlert(a.alert_id)}
+                                                    className={`${a.status === "resolved" ? "row-done" : ""} ${picked.has(a.alert_id) ? "row-picked" : ""}`}>
+                                                    <td className="td-pick" onClick={e => { e.stopPropagation(); togglePick(a.alert_id) }}>
+                                                        <input type="checkbox" checked={picked.has(a.alert_id)} onChange={() => {}} aria-label="Select this alert" />
+                                                    </td>
                                                     <td>
                                                         <span className="cell">
                                                             <span className={`cell-mark ${a.severity}`} />
                                                             <span className="cell-main">
-                                                                <span className="cell-top"><Hl text={a.event_type} q={alertQuery} /></span>
+                                                                <span className="cell-top"><Hl text={humanize(a.event_type)} q={alertQuery} /></span>
                                                                 <span className="cell-sub">{timeAgo(a.timestamp)} · {exactTime(a.timestamp)}</span>
                                                             </span>
                                                         </span>
@@ -939,14 +1114,14 @@ function App({ user, onLogout, onUserChange }) {
                                                         </span>
                                                     </td>
                                                     <td className={`td-mono td-wide ${a.domain ? "td-dim" : "td-faint"}`}>{a.domain ? <Hl text={a.domain} q={alertQuery} /> : "—"}</td>
-                                                    <td><span className="tag"><Hl text={a.source} q={alertQuery} /></span></td>
-                                                    <td className="td-dim">{a.status}</td>
+                                                    <td><span className={`engine-tag ${a.source}`}>{ENGINE_NAME[a.source] || a.source}</span></td>
+                                                    <td><TriageCell a={a} /></td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
                                 )}
-                            </Panel>
+                            </div>
                         </>
                     )}
 
@@ -962,11 +1137,17 @@ function App({ user, onLogout, onUserChange }) {
                                 <span className="tag">{selected.source}</span>
                                 <span className="tag">{selected.status}</span>
                                 <span className="when" title={new Date(selected.timestamp).toLocaleString()}>{exactTime(selected.timestamp)} · {timeAgo(selected.timestamp)}</span>
+                                <button className="btn sm detail-ask" disabled={askingAbout} onClick={() => askAboutAlert(selected)}>
+                                    {askingAbout ? <span className="btn-spinner" /> : <Sparkles />} Ask AI about this alert
+                                </button>
                             </div>
 
                             <div className="split">
                                 <div>
                                     {selected.description && <p className="note">{selected.description}</p>}
+
+                                    <TriagePanel alert={selected}
+                                        onUpdated={updated => setAlerts(prev => prev.map(a => a.alert_id === updated.alert_id ? updated : a))} />
 
                                     {/* what VerifyEye's agent saw at this page (#3) */}
                                     {selected.target_url && <EvidencePanel alert={selected} />}
@@ -1208,7 +1389,7 @@ function App({ user, onLogout, onUserChange }) {
                                             <thead>
                                                 <tr>
                                                     <th>Time</th><th>Severity</th><th>Type</th>
-                                                    <th>Host</th><th className="td-wide">Description</th>
+                                                    <th>Host</th><th className="td-wide">Description</th><th>Triage</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -1219,6 +1400,7 @@ function App({ user, onLogout, onUserChange }) {
                                                         <td className="td-mono">{a.event_type}</td>
                                                         <td className="td-mono td-dim">{a.host}</td>
                                                         <td className="td-wide td-dim td-clip">{a.description || "—"}</td>
+                                                        <td><TriageCell a={a} compact /></td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -2668,7 +2850,7 @@ function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph, asEntity 
                         <thead>
                             <tr>
                                 <th>Time</th><th>Severity</th><th>Type</th><th>Host</th>
-                                <th>User</th><th className="td-wide">Domain / description</th><th>Engine</th>
+                                <th>User</th><th className="td-wide">Domain / description</th><th>Engine</th><th>Triage</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -2681,6 +2863,7 @@ function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph, asEntity 
                                     <td className="td-mono td-dim">{a.user || "—"}</td>
                                     <td className="td-wide td-dim td-clip">{a.domain || a.description || "—"}</td>
                                     <td className="td-mono td-dim">{a.source}</td>
+                                    <td><TriageCell a={a} compact /></td>
                                 </tr>
                             ))}
                         </tbody>
@@ -2923,6 +3106,8 @@ function RankList({ data }) {
 }
 
 // highlight where the search text appears in a value
+const ENGINE_NAME = { verifyeye: "VerifyEye", spectrac2: "SpectraC2", manual: "Manual" }
+
 function Hl({ text, q }) {
     const t = (q || "").trim();
     const str = String(text ?? "");

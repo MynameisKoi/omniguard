@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_view
 from tools import tool_specs, run_tool
+from triage import apply_triage, propose_triage, approve_proposal, reject_proposal, bulk, TriageError
 from conversations import (create_conversation, list_conversations, get_conversation,
                            rename_conversation, delete_conversation)
 from agent import decide_approval
@@ -278,6 +279,7 @@ async def call_tool(name: str, payload: ToolCall, me: dict = Depends(current_use
 # ── saved AI conversations (#1): ChatGPT-style threads, per analyst ──
 class ConversationIn(BaseModel):
     title: str | None = Field(default=None, max_length=80)
+    alert_id: str | None = Field(default=None, max_length=64)   # "Ask AI about this alert"
 
 @app.get("/conversations")
 async def conversations_list(me: dict = Depends(current_user)):
@@ -289,7 +291,9 @@ async def conversations_list(me: dict = Depends(current_user)):
 
 @app.post("/conversations", status_code=201)
 async def conversations_create(payload: ConversationIn, me: dict = Depends(current_user)):
-    return await run_in_threadpool(create_conversation, me["email"], payload.title)
+    if payload.alert_id and not await run_in_threadpool(alerts_collection.find_one, {"alert_id": payload.alert_id}, {"_id": 1}):
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return await run_in_threadpool(create_conversation, me["email"], payload.title, payload.alert_id)
 
 @app.get("/conversations/{conversation_id}")
 async def conversations_get(conversation_id: str, me: dict = Depends(current_user)):
@@ -361,6 +365,84 @@ async def update_alert_status(alert_id: str, payload: AlertStatus, me: dict = De
     if not out["ok"]:
         raise HTTPException(status_code=404 if "no alert" in out["summary"] else 400, detail=out["summary"])
     return out["data"]
+
+# ── triage: by hand, or proposed by the AI and approved by an analyst ──
+class TriageIn(BaseModel):
+    verdict: Literal["true_positive", "false_positive", "benign", "escalate"]
+    severity: Literal["critical", "high", "medium", "low"]
+    status: Literal["triaged", "resolved"] = "triaged"
+    notes: str = Field(default="", max_length=2000)
+    actions: list[Literal["isolate_host", "reset_password", "block_domain"]] = Field(default_factory=list)
+
+class TriageEdits(BaseModel):
+    verdict: Literal["true_positive", "false_positive", "benign", "escalate"] | None = None
+    severity: Literal["critical", "high", "medium", "low"] | None = None
+    status: Literal["triaged", "resolved"] | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+    actions: list[Literal["isolate_host", "reset_password", "block_domain"]] | None = None
+
+class TriageReject(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+async def _triage_call(fn, *args, **kwargs):
+    """Run a triage step and map its errors to HTTP."""
+    try:
+        alert = await run_in_threadpool(fn, *args, **kwargs)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except TriageError as e:
+        raise HTTPException(status_code=409 if "proposal" in str(e) else 400, detail=str(e))
+    return Alert(**alert).model_dump(mode="json")   # triage.py already told every open dashboard
+
+class BulkTriageIn(BaseModel):
+    alert_ids: list[str] = Field(min_length=1, max_length=50)
+    verdict: Literal["true_positive", "false_positive", "benign", "escalate"]
+    status: Literal["triaged", "resolved"] = "triaged"
+    notes: str = Field(default="", max_length=2000)
+
+class BulkIds(BaseModel):
+    alert_ids: list[str] = Field(min_length=1, max_length=50)
+
+async def _bulk_call(fn, ids, *args, **kwargs):
+    done, problems = await run_in_threadpool(bulk, fn, ids, *args, **kwargs)
+    return {"alerts": [Alert(**a).model_dump(mode="json") for a in done], "problems": problems}
+
+# bulk routes before /alerts/{alert_id}/... so "triage" isn't read as an alert id
+@app.post("/alerts/triage/bulk")
+async def triage_bulk(payload: BulkTriageIn, me: dict = Depends(current_user)):
+    """The same verdict for several alerts (each keeps its own severity; no response actions)."""
+    return await _bulk_call(apply_triage, payload.alert_ids, payload.verdict, None, payload.notes, [],
+                            payload.status, me["email"])
+
+@app.post("/alerts/triage/ai/bulk")
+async def triage_ai_bulk(payload: BulkIds, me: dict = Depends(current_user)):
+    """AI proposals for several alerts (reasons only, no model explanation, so it's quick)."""
+    return await _bulk_call(propose_triage, payload.alert_ids, me["email"], explain=False)
+
+@app.post("/alerts/triage/ai/approve/bulk")
+async def triage_ai_approve_bulk(payload: BulkIds, me: dict = Depends(current_user)):
+    """Approve the AI's proposals as they are."""
+    return await _bulk_call(approve_proposal, payload.alert_ids, me["email"])
+
+@app.post("/alerts/{alert_id}/triage")
+async def triage_manual(alert_id: str, payload: TriageIn, me: dict = Depends(current_user)):
+    """The analyst's own triage."""
+    return await _triage_call(apply_triage, alert_id, payload.verdict, payload.severity, payload.notes,
+                              payload.actions, payload.status, me["email"])
+
+@app.post("/alerts/{alert_id}/triage/ai")
+async def triage_ai_propose(alert_id: str, me: dict = Depends(current_user)):
+    """The AI triages the alert as a proposal. Nothing is applied until approved."""
+    return await _triage_call(propose_triage, alert_id, me["email"])
+
+@app.post("/alerts/{alert_id}/triage/ai/approve")
+async def triage_ai_approve(alert_id: str, payload: TriageEdits, me: dict = Depends(current_user)):
+    """Apply the AI's proposal, with any edits."""
+    return await _triage_call(approve_proposal, alert_id, me["email"], **payload.model_dump())
+
+@app.post("/alerts/{alert_id}/triage/ai/reject")
+async def triage_ai_reject(alert_id: str, payload: TriageReject, me: dict = Depends(current_user)):
+    return await _triage_call(reject_proposal, alert_id, me["email"], payload.reason)
 
 # This is for graph to be shown in the frontend 
 @app.get("/graph", dependencies=AUTH)

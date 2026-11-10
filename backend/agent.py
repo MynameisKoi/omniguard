@@ -22,7 +22,7 @@ import httpx
 
 from config import OLLAMA_URL, OLLAMA_MODEL
 from conversations import append_message, get_conversation, update_message
-from tools import TOOLS, closest_entity, mentioned_entities, run_tool, tool_specs
+from tools import TOOLS, alert_context, alerts_collection, closest_entity, mentioned_entities, run_tool, tool_specs
 
 MAX_ROUNDS = 5        # tool rounds per message, so a small model can't loop forever
 HISTORY = 12          # past messages the model sees (older ones still show on the page)
@@ -155,7 +155,8 @@ ALERTS_WORD = re.compile(r"\b([\w.-]+) alerts\b", re.I)
 # words before "alerts" that aren't a search term
 NOT_A_TERM = {"the", "all", "my", "our", "these", "those", "any", "new", "open", "recent", "latest", "critical", "high",
               "medium", "low", "phishing", "c2", "untriaged", "resolved", "triaged", "me", "of", "many", "some", "more",
-              "other", "same", "today's", "verifyeye", "spectrac2", "beacon", "beaconing", "much", "unresolved"}
+              "other", "same", "today's", "verifyeye", "spectrac2", "beacon", "beaconing", "much", "unresolved",
+              "which", "what", "how", "are", "were", "there", "many", "show", "list", "see", "get", "find"}
 WHOLE_VIEW = re.compile(r"dashboard|overview|everything|all (the )?alerts|break ?down", re.I)
 
 
@@ -176,7 +177,16 @@ def _focus(convo, kind=None):
             named = [e for e in mentioned_entities(m["content"]) if fits(e)]
             if named:
                 return named[-1]
+    a = _chat_alert(convo)   # a chat about an alert: "it" is that alert's host (or user)
+    for value, label in ((a or {}).get("host"), "host"), ((a or {}).get("user"), "user"):
+        if value and (kind is None or kind == label):
+            return (value, label)
     return None
+
+
+def _chat_alert(convo):
+    aid = (convo or {}).get("alert_id")
+    return alerts_collection.find_one({"alert_id": aid}, {"_id": 0, "alert_id": 1, "host": 1, "user": 1}) if aid else None
 
 
 def _filters(text):
@@ -285,7 +295,7 @@ def _not_again(plan, text, convo):
     if not plan:
         return plan, False
     recent = _recent_calls(convo)
-    if not all((n, json.dumps(a, sort_keys=True)) in recent for n, a in plan) or any(n in VIEW_TOOLS for n, _ in plan):
+    if not all((n, json.dumps(a, sort_keys=True)) in recent for n, a in plan) or any(n in ALWAYS_RUN for n, _ in plan):
         return plan, False
     hosts = [a.get("name") for n, a in plan if n == "entity_summary"
              and any(k == "host" for _, k in mentioned_entities(a.get("name") or ""))]
@@ -295,12 +305,40 @@ def _not_again(plan, text, convo):
 
 
 VIEW_TOOLS = {"show_dashboard", "show_graph", "show_screenshots", "show_ledger", "compare_entities"}
+# asked again = run again: views are redrawn, and a repeated triage request must say what's
+# actually left (answered from history, a small model "remembers" approving them)
+ALWAYS_RUN = VIEW_TOOLS | {"triage_alerts", "_ask_which"}
+
+
+# asking the AI to triage (not "which alerts are triaged?")
+TRIAGE_ASK = re.compile(r"^\W*(please |can you |could you |can we |could we |should we |shall we |let'?s |lets |go ahead and |now |ok |okay )*(auto-?)?triage\b"
+                        r"|\btriage (this|it|that|these|those|them|all|the|its|his|her|their)\b", re.I)
+ALERT_REF = re.compile(r"\b(this|the|that) alert\b", re.I)
 
 
 def _route(text, convo=None):
     """The tool calls a plain request obviously needs, as [(tool, args)], or None
     to let the model choose (actions, open questions, general knowledge)."""
     text = text or ""
+    a = _chat_alert(convo)
+    if TRIAGE_ASK.search(text):
+        # "triage this alert" / "triage LAPTOP-10" / "can we triage this?" (a user we
+        # were talking about): propose, never apply
+        ids = UUID.findall(text)
+        named = [(v, k) for v, k in mentioned_entities(text) if k in ("host", "user")]
+        if ids:
+            return [("triage_alerts", {"alert_id": ids[0]})]
+        if named:
+            return [("triage_alerts", {named[0][1]: named[0][0]})]
+        if a:
+            return [("triage_alerts", {"alert_id": a["alert_id"]})]
+        focus = _focus(convo)
+        if focus and focus[1] in ("host", "user"):
+            return [("triage_alerts", {focus[1]: focus[0]})]
+        return [("_ask_which", {})]    # nothing to go on: ask, don't guess
+    if a and ALERT_REF.search(text) and not _views(text) and not ACTION_ASK.search(text):
+        # "tell me about this alert": the alert, then its host
+        return [("get_alert", {"alert_id": a["alert_id"]})] + ([("entity_summary", {"name": a["host"]})] if a.get("host") else [])
     if ACTION_ASK.search(text):
         return None          # actions go through the model + the approval card
     named = [(v, k) for v, k in mentioned_entities(text, limit=6) if k != "detection engine"]
@@ -395,7 +433,10 @@ CLAIMED_ACTION = re.compile(
     r"(isolated|contained|quarantined|resolved|blocked|triaged|revoked|disabled|removed|cut off|taken offline)\b"
     r"|\b(is|are|was|were) (now |fully |successfully )+(isolated|contained|quarantined|offline|blocked|revoked)\b"
     r"|\b(isolation|containment|quarantine|revocation) (was|has been) (applied|completed|performed|done|executed)\b"
-    r"|\bI('ve| have) (isolated|contained|quarantined|blocked|revoked|resolved)\b", re.I)
+    r"|\bI('ve| have) (isolated|contained|quarantined|blocked|revoked|resolved|approved|triaged|reset)\b"
+    # "Triage approved." / "Password reset and session termination initiated."
+    r"|\b(triage|triages|isolation|reset|termination|revocation|block|blocking|containment|actions?)\b[^.]{0,40}"
+    r"\b(approved|initiated|applied|completed|performed|executed|carried out|in place|done)\b", re.I)
 
 
 def _contain_intent(text, convo=None):
@@ -508,6 +549,8 @@ class _Cleaner:
             return False
         if s.lstrip().startswith("{") or re.search(r'"(name|parameters|arguments)"\s*:', s):
             return False      # a tool call written as text
+        if re.fullmatch(r"\s*(#+\s*[^.!?]{1,40}|\*\*[^*.!?]{1,40}\*\*:?|[\w ]{1,30}:)\s*", s):
+            return False      # a bare heading ("**Alert Card**"): the model's own layout, nothing said
         if WRONG_WAY.search(s):
             return False      # "the host sent phishing pages": the host was the victim
         if self.facts and (META.search(s) or STEPLIKE.search(s)):
@@ -551,8 +594,14 @@ def _tidy(answer):
 
 # when a view is asked for, the smaller tool it replaces is hidden
 SUPERSEDED = {"show_screenshots": "get_evidence", "show_graph": "get_host_graph", "show_ledger": "ledger_lookup"}
-VIEW_RENDERS = {"dashboard", "graph_explorer", "screenshots", "ledger_view", "compare"}
+VIEW_RENDERS = {"dashboard", "graph_explorer", "screenshots", "ledger_view", "compare", "triage"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
+# kept for the MCP server; in the chat, triage goes through triage_alerts (proposals)
+CHAT_HIDDEN = {"set_alert_status"}
+WHICH = ("Which alerts should I triage? Name a host or a user (\"triage LAPTOP-10\"), or open an alert and use "
+         "**Ask AI about this alert**, then say \"triage this alert\".")
 
 
 def _ollama_tools(text, context):
@@ -566,6 +615,7 @@ def _ollama_tools(text, context):
                                               "parameters": t["inputSchema"]}}
             for t in tool_specs()
             if (t["name"] != "get_alert" or has_id) and t["name"] not in hidden
+            and t["name"] not in CHAT_HIDDEN
             and (t.get("render") not in VIEW_RENDERS or t["name"] in views)]
 
 
@@ -663,6 +713,8 @@ def run_turn(owner, conversation_id, text, context=None):
         yield _event("error", message="Conversation not found")
         return
     append_message(owner, conversation_id, "user", text)
+    if not context and convo.get("alert_id"):
+        context = alert_context(convo["alert_id"])   # current status/verdict, every turn
 
     history = _history(convo)
     general = _general(text)
@@ -720,6 +772,9 @@ def run_turn(owner, conversation_id, text, context=None):
 
     try:
         for _ in range(MAX_ROUNDS):
+            if plan and plan[0][0] == "_ask_which":
+                yield say(WHICH)
+                break
             routed = bool(plan)
             if plan:
                 # the backend chose: same as if the model had called them
@@ -751,7 +806,8 @@ def run_turn(owner, conversation_id, text, context=None):
                         args = {}
                 yield _event("step", tool=name, args=args, status="running")
                 result = run_tool(name, args, analyst=owner)
-                step = {"tool": name, "args": result.get("args", args), "ok": result["ok"], "summary": result["summary"]}
+                step = {"tool": name, "args": result.get("args", args), "ok": result["ok"], "summary": result["summary"],
+                        "proposed": bool(result.get("needs_approval"))}
                 steps.append(step)
                 yield _event("step", **step, status="done")
 
@@ -792,7 +848,8 @@ def run_turn(owner, conversation_id, text, context=None):
             if written and len(written) == len(calls):
                 yield say("\n\n".join(written))
                 break
-            failed = [st for st in steps[-len(calls):] if not st["ok"] and "approval" not in st["summary"]]
+            # an action waiting on its approval card isn't a failure; anything else not ok is
+            failed = [st for st in steps[-len(calls):] if not st["ok"] and not st.get("proposed")]
             if routed and failed and len(failed) == len(calls):
                 # the backend looked up exactly what was asked and it isn't there:
                 # say so, don't let the model guess (or search again for a typo)

@@ -33,11 +33,14 @@ def title_from(text):
     return (title + ("…" if len(words) > TITLE_WORDS else ""))[:MAX_TITLE] or "New chat"
 
 
-def create_conversation(owner, title=None):
+def create_conversation(owner, title=None, alert_id=None):
+    """alert_id: a chat about one alert ("Ask AI about this alert"); every message
+    in it is answered with that alert in mind."""
     now = _now()
     doc = {
         "conversation_id": str(uuid.uuid4()),
         "owner": owner,
+        "alert_id": alert_id or None,
         "title": (title or "").strip()[:MAX_TITLE] or "New chat",
         "titled": bool((title or "").strip()),   # false: take the title from the first question
         "created_at": now,
@@ -52,7 +55,7 @@ def create_conversation(owner, title=None):
 def list_conversations(owner, limit=100):
     rows = conversations_collection.find(
         {"owner": owner},
-        {"_id": 0, "conversation_id": 1, "title": 1, "created_at": 1, "updated_at": 1, "messages": {"$slice": -1}},
+        {"_id": 0, "conversation_id": 1, "title": 1, "alert_id": 1, "created_at": 1, "updated_at": 1, "messages": {"$slice": -1}},
     ).sort("updated_at", DESCENDING).limit(limit)
     out = []
     for r in rows:
