@@ -873,16 +873,17 @@ function App({ user, onLogout, onUserChange }) {
                     {page === "alerts" && (
                         <>
                             <div className="stats">
-                                <Stat icon={Inbox} label="Needs triage" value={statusCount("new")} tone="critical"
-                                    foot="not looked at yet" onClick={() => setStatusFilter(statusFilter === "new" ? null : "new")} active={statusFilter === "new"} />
-                                <Stat icon={Bot} label="AI proposals" value={statusCount("proposal")} tone="accent"
-                                    foot="waiting for your approval" onClick={() => setStatusFilter(statusFilter === "proposal" ? null : "proposal")} active={statusFilter === "proposal"} />
-                                <Stat icon={UserCheck} label="Triaged" value={statusCount("triaged")} tone="high"
-                                    foot="decided, still being worked" onClick={() => setStatusFilter(statusFilter === "triaged" ? null : "triaged")} active={statusFilter === "triaged"} />
-                                <Stat icon={ShieldCheck} label="Resolved" value={statusCount("resolved")} tone="good"
-                                    foot="done" onClick={() => setStatusFilter(statusFilter === "resolved" ? null : "resolved")} active={statusFilter === "resolved"} />
-                                <Stat icon={Target} label="True positives" value={triageBase.filter(a => a.triage?.verdict === "true_positive").length} tone="critical"
-                                    foot="confirmed real" onClick={() => setVerdictFilter(verdictFilter === "true_positive" ? null : "true_positive")} active={verdictFilter === "true_positive"} />
+                                {[["new", null, Inbox, "Needs triage", statusCount("new"), "critical", "not looked at yet"],
+                                  ["proposal", null, Bot, "AI proposals", statusCount("proposal"), "accent", "waiting for your approval"],
+                                  ["triaged", null, UserCheck, "Triaged", statusCount("triaged"), "high", "decided, still being worked"],
+                                  ["resolved", null, ShieldCheck, "Resolved", statusCount("resolved"), "good", "done"],
+                                  [null, "true_positive", Target, "True positives", triageBase.filter(a => a.triage?.verdict === "true_positive").length, "critical", "confirmed real"],
+                                ].map(([st, verdict, icon, text, n, tone, foot]) => {
+                                    // one card at a time: a card is a view of the list, not a filter to stack
+                                    const on = statusFilter === st && verdictFilter === verdict
+                                    return <Stat key={text} icon={icon} label={text} value={n} tone={tone} foot={foot} active={on}
+                                        onClick={() => { setStatusFilter(on ? null : st); setVerdictFilter(on ? null : verdict) }} />
+                                })}
                             </div>
 
                             <div className="panel alerts-panel">
@@ -957,10 +958,18 @@ function App({ user, onLogout, onUserChange }) {
                                 </div>
 
                                 <div className="alerts-count">
-                                    {visible.length === triageBase.length && !statusFilter && !verdictFilter
-                                        ? `${visible.length} alert${visible.length === 1 ? "" : "s"}`
-                                        : `${visible.length} of ${alerts.length} alerts`}
-                                    {alertQuery.trim() && <> matching “{alertQuery.trim()}”</>}
+                                    <span>{anyAlertFilter ? `${visible.length} of ${alerts.length} alerts` : `${visible.length} alerts`}</span>
+                                    {/* exactly what's being shown, each removable on its own */}
+                                    {[statusFilter && [{ new: "Untriaged", proposal: "AI proposal waiting", triaged: "Triaged", resolved: "Resolved" }[statusFilter], () => setStatusFilter(null)],
+                                      verdictFilter && [verdictFilter === "none" ? "No verdict yet" : `Verdict: ${VERDICT_SHORT[verdictFilter]}`, () => setVerdictFilter(null)],
+                                      filter && [`${filter[0].toUpperCase()}${filter.slice(1)} severity`, () => setFilter(null)],
+                                      srcFilter && [ENGINE_NAME[srcFilter] || srcFilter, () => setSrcFilter(null)],
+                                      dateFilter && [{ today: "Today", yesterday: "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days", custom: "Custom dates" }[dateFilter] || dateFilter,
+                                                     () => { setDateFilter(null); setDateFrom(""); setDateTo("") }],
+                                      alertQuery.trim() && [`“${alertQuery.trim()}”`, () => setAlertQuery("")],
+                                    ].filter(Boolean).map(([text, clear]) => (
+                                        <button key={text} className="af-chip alerts-on" onClick={clear} title="Remove this filter">{text} <X /></button>
+                                    ))}
                                 </div>
 
                                 {visible.length === 0 ? (

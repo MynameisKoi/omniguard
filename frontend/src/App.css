@@ -4438,3 +4438,8 @@ mark.hl-match { background: var(--accent-wash); color: var(--accent-text); borde
 .sev-chip .dot.sev-high { background: var(--fill-high); }
 .sev-chip .dot.sev-medium { background: var(--fill-medium); }
 .sev-chip .dot.sev-low { background: var(--fill-low, var(--low)); }
+.alerts-count { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.alerts-count > span { margin-right: 4px; }
+.af-chip.alerts-on { font-size: var(--t-xs); padding: 2px 8px; }
+.af-chip.alerts-on svg { width: 11px; height: 11px; }
+.af-chip.alerts-on { text-transform: none; }
