@@ -4443,3 +4443,43 @@ mark.hl-match { background: var(--accent-wash); color: var(--accent-text); borde
 .af-chip.alerts-on { font-size: var(--t-xs); padding: 2px 8px; }
 .af-chip.alerts-on svg { width: 11px; height: 11px; }
 .af-chip.alerts-on { text-transform: none; }
+
+/* "Ask AI about this alert" */
+.detail-ask { margin-left: 8px; }
+.ask-alert-strip {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 auto 14px; max-width: 920px;
+  padding: 9px 12px; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--edge), var(--shadow-sm);
+  border-left: 3px solid var(--accent); font-size: var(--t-md);
+}
+.ask-alert-strip > svg { width: 15px; height: 15px; color: var(--accent); flex: none; }
+.ask-alert-what { flex: 1; min-width: 200px; }
+.ask-alert-triage { font-size: var(--t-xs); color: var(--dim); }
+
+/* triage proposals inside an Ask AI reply */
+.ask-triage { display: grid; gap: 10px; }
+.ask-triage-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 600; font-size: var(--t-md); }
+.ask-triage-head svg { width: 14px; height: 14px; color: var(--accent); vertical-align: -2px; margin-right: 4px; }
+.ask-triage-row { border: 1px solid var(--line-soft); border-left: 3px solid var(--accent); border-radius: var(--r-md); padding: 10px 12px; display: grid; gap: 7px; background: var(--surface); }
+.ask-triage-row.done { border-left-color: var(--good); }
+.ask-triage-row.dropped { border-left-color: var(--line); opacity: .75; }
+.ask-triage-what { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--t-md); }
+.ask-triage-verdict { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--t-sm); }
+.ask-triage-why { margin: 0; font-size: var(--t-sm); line-height: 1.5; }
+.ask-triage-reasons { margin: 0; padding-left: 18px; font-size: var(--t-sm); color: var(--dim); display: grid; gap: 2px; }
+.ask-triage-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.ask-triage-decided { font-size: var(--t-sm); color: var(--good); display: flex; align-items: center; gap: 5px; }
+.ask-triage-decided.dim { color: var(--dim); }
+.ask-triage-decided svg { width: 13px; height: 13px; }
+.triage-pill.verdict-true_positive { color: var(--critical); }
+
+/* triaging several alerts at once */
+.bulk-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 16px;
+  background: var(--accent-wash); border-bottom: 1px solid var(--accent-line); font-size: var(--t-sm);
+}
+.bulk-label { color: var(--dim); font-size: var(--t-xs); }
+.bulk-note { flex: 1; }
+.bulk-clear { margin-left: auto; font-size: var(--t-xs); }
+.td-pick { width: 34px; padding-right: 0 !important; cursor: default; }
+.td-pick input { cursor: pointer; width: 15px; height: 15px; accent-color: var(--accent); vertical-align: middle; }
+.alerts-table tr.row-picked td { background: var(--accent-wash); }

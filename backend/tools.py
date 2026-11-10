@@ -215,6 +215,21 @@ def search_alerts(query=None, severity=None, engine=None, host=None, status=None
     return {"summary": summary, "facts": facts, "next": _set_next(every_next), "data": {"alerts": rows, "total": total}}
 
 
+def alert_context(alert_id):
+    """One line about an alert, for a chat that's about it: what, where, and where
+    it is in triage right now. None if there's no such alert."""
+    a = alerts_collection.find_one({"alert_id": alert_id}, ALERT_FIELDS) if alert_id else None
+    if not a:
+        return None
+    t, p = a.get("triage") or {}, a.get("triage_proposal")
+    where = (f"triaged as {str(t.get('verdict', '')).replace('_', ' ')} by {t.get('by')}" if t
+             else f"an AI triage proposal ({str(p.get('verdict', '')).replace('_', ' ')}) is waiting for approval" if p
+             else "not triaged yet")
+    return (f"alert {a['alert_id']}: {a.get('severity')} {str(a.get('event_type', 'alert')).replace('_', ' ')} on host "
+            f"{a.get('host')}" + (f", user {a['user']}" if a.get("user") else "")
+            + (f", domain {a['domain']}" if a.get("domain") else "") + f", {_when(a.get('timestamp'))}; {where}.")
+
+
 def get_alert(alert_id):
     a = alerts_collection.find_one({"alert_id": alert_id}, ALERT_FIELDS)
     if not a:
@@ -225,6 +240,9 @@ def get_alert(alert_id):
     facts = (f"**{a.get('severity', '?').capitalize()} {a.get('event_type', 'alert')}** on {a.get('host')}"
              + (f" (user {a['user']})" if a.get("user") else "") + (f", {a['domain']}" if a.get("domain") else "")
              + f", {_when(a.get('timestamp'))}, status {a.get('status', 'new')}."
+             + (f" Triaged as **{str(a['triage'].get('verdict', '')).replace('_', ' ')}** by {a['triage'].get('by')}."
+                if a.get("triage") else " An AI triage proposal is waiting for your approval on the alert page."
+                if a.get("triage_proposal") else "")
              + (f" The agent's screenshot says **{'phishing' if shots[0]['phishing'] else 'cleared'}**." if shots else ""))
     return {"summary": _alert_line(a) + (f"\n{a['description']}" if a.get("description") else "") + extra,
             "facts": facts, "data": {"alert": a, "evidence": shots[:1]}}
@@ -750,6 +768,37 @@ def compare_entities(names):
     return {"summary": "Shown side by side.\n" + "\n".join(lines), "facts": facts, "data": {"entities": out}}
 
 
+def triage_alerts(alert_id=None, host=None, analyst="unknown"):
+    """AI triage proposals from the chat. Only PROPOSES (stored on each alert, same
+    as "Triage with AI" on the alert page): nothing changes until the analyst
+    approves each one, in the chat or on the alert page."""
+    from triage import propose_triage, triage_candidates, VERDICTS, TriageError
+    if _given(alert_id):
+        ids = [str(alert_id)]
+    elif _given(host):
+        ids = triage_candidates(host=str(host))
+        if not ids:
+            raise ToolError(f"{host} has no untriaged alerts without a proposal. Say so plainly.")
+    else:
+        raise ToolError("say which alert (open it from its page) or which host's alerts to triage")
+    out = []
+    for aid in ids:
+        try:
+            out.append(propose_triage(aid, analyst, explain=len(ids) == 1))
+        except (LookupError, TriageError) as e:
+            raise ToolError(str(e))
+    verdicts = Counter(VERDICTS.get(a["triage_proposal"]["verdict"], "?") for a in out)
+    one = len(out) == 1
+    reply = ((f"I've proposed a triage for this alert: **{next(iter(verdicts))}**." if one else
+              f"I've proposed a triage for **{len(out)} alerts**" + (f" on {host}" if _given(host) else "") + ": "
+              + ", ".join(f"{n} {v.lower()}" for v, n in verdicts.most_common()) + ".")
+             + " Nothing changes until you approve " + ("it" if one else "them") + " below"
+             + ("" if one else ", one by one or all at once") + ".")
+    return {"reply": reply, "summary": f"Triage proposed for {len(out)} alert(s), waiting for the analyst's approval: "
+                                       + "; ".join(f"{a.get('event_type')} on {a.get('host')} -> {a['triage_proposal']['verdict']}" for a in out),
+            "data": {"alert_ids": [a["alert_id"] for a in out]}}
+
+
 # ── action tools: only run after an analyst approves ─────────────────────
 
 def isolate_host(hostname, reason=None, analyst="unknown"):
@@ -824,6 +873,9 @@ TOOLS = {
     "compare_entities": dict(fn=compare_entities, kind="read", render="compare",
         description="Compare two to four hosts, users, domains or IPs side by side. names is comma separated, e.g. 'BUILD-SRV-02, DEV-BOX-11'.",
         parameters={"names": S}, required=["names"]),
+    "triage_alerts": dict(fn=triage_alerts, kind="read", render="triage", needs_analyst=True,
+        description="Have the AI triage an alert (by alert_id) or a host's untriaged alerts (by host). It only proposes a verdict and actions; the analyst approves each.",
+        parameters={"alert_id": S, "host": S}, required=[]),
     "isolate_host": dict(fn=isolate_host, kind="action", render="action",
         description="Isolate a compromised host from the network. Needs the analyst's approval before it runs.",
         parameters={"hostname": S, "reason": S}, required=["hostname"]),
@@ -861,6 +913,8 @@ def run_tool(name, args=None, analyst="unknown", approved=False):
             return {"ok": False, "needs_approval": True, "render": "approval", "data": {"tool": name, "args": args},
                     "summary": f"{name} needs the analyst's approval; it has been proposed to them."}
         args["analyst"] = analyst
+    elif t.get("needs_analyst"):
+        args["analyst"] = analyst      # recorded as who asked for the proposal
     try:
         out = t["fn"](**args)
         args.pop("analyst", None)

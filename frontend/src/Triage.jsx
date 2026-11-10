@@ -185,7 +185,7 @@ export default function TriagePanel({ alert, onUpdated }) {
             {state === "done" && (done.actions?.length > 0 || done.notes || done.ai_summary) && (
                 <div className="triage-body">
                     {done.actions?.length > 0 && (
-                        <ul className="triage-actions">{done.actions.map(a => <li key={a.id}><Check /> {a.label} <em>simulated</em></li>)}</ul>
+                        <ul className="triage-actions">{done.actions.map(a => <li key={a.id}><Check /> {a.label} <em>{a.already ? "already recorded earlier" : "simulated"}</em></li>)}</ul>
                     )}
                     {done.ai_summary && <p className="triage-summary">{done.ai_summary}</p>}
                     {done.notes && <p className="triage-notes">{done.notes}</p>}

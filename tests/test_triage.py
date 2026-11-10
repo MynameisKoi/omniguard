@@ -61,9 +61,10 @@ def world(monkeypatch):
     alerts, ledger = FakeAlerts(ALERTS), []
     monkeypatch.setattr(triage, "alerts_collection", alerts)
     monkeypatch.setattr(triage, "append_ledger_entry", lambda **kw: ledger.append(kw))
-    monkeypatch.setattr(triage, "get_ledger_for_entity", lambda e: [])
+    monkeypatch.setattr(triage, "get_ledger_for_entity", lambda e: [x for x in reversed(ledger) if x["entity_id"] == e])
     monkeypatch.setattr(triage, "list_evidence", lambda **kw: [])
     monkeypatch.setattr(triage, "_explain", lambda a, v, r: "")      # no model in tests
+    monkeypatch.setattr(triage.manager, "broadcast_from_thread", lambda m: None)
     return alerts, ledger
 
 
@@ -126,3 +127,35 @@ def test_isolation_already_recorded_isnt_proposed_again(world, monkeypatch):
                         lambda e: [{"action_taken": "NETWORK_ISOLATION_SIMULATED"}] if e == "LAPTOP-10" else [])
     _, _, _, actions, reasons = triage._decide(triage._alert("c1"))
     assert "isolate_host" not in actions and any("already has an isolation" in r for r in reasons)
+
+
+def test_many_at_once_keeps_going_past_a_bad_one(world):
+    alerts, ledger = world
+    done, problems = triage.bulk(triage.apply_triage, ["p1", "nope", "c1"], "benign", None, "batch", [], "resolved", "a")
+    assert [a["alert_id"] for a in done] == ["p1", "c1"] and problems[0]["alert_id"] == "nope"
+    assert done[0]["severity"] == "medium" and done[1]["severity"] == "critical"   # each keeps its own severity
+
+
+def test_bulk_ai_proposals_skip_the_slow_explanation_then_approve_all(world, monkeypatch):
+    alerts, ledger = world
+    monkeypatch.setattr(triage, "_explain", lambda *a: pytest.fail("no model call for bulk proposals"))
+    done, _ = triage.bulk(triage.propose_triage, ["p1", "c1"], "a", explain=False)
+    assert all(a["triage_proposal"]["summary"] == "" and a["status"] == "new" for a in done)
+    done, problems = triage.bulk(triage.approve_proposal, ["p1", "c1", "t1"], "boss")   # t1 has no proposal
+    assert [a["triage"]["via"] for a in done] == ["ai", "ai"] and problems[0]["alert_id"] == "t1"
+
+
+def test_candidates_are_untriaged_without_a_proposal(world):
+    alerts, _ = world
+    alerts.find = lambda q, projection=None: [dict(d) for d in alerts.docs.values()
+                                              if d["status"] == "new" and "triage_proposal" not in d
+                                              and (not q.get("host") or d["host"].lower() == "laptop-10")]
+    assert set(triage.triage_candidates(host="LAPTOP-10")) == {"c1", "p2", "t1"}
+
+
+def test_the_same_response_action_is_recorded_once(world):
+    alerts, ledger = world
+    triage.apply_triage("c1", "true_positive", "critical", "", ["isolate_host"], "triaged", "a")
+    out = triage.apply_triage("p2", "true_positive", "critical", "", ["isolate_host"], "triaged", "a")   # same host
+    assert [e["action_taken"] for e in ledger].count("NETWORK_ISOLATION_SIMULATED") == 1
+    assert out["triage"]["actions"][0]["already"] is True

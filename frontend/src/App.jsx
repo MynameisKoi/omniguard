@@ -5,7 +5,8 @@ import GraphCanvas from './GraphCanvas';
 import GraphExplorer from './GraphExplorer';
 import { timeAgo, exactTime } from './time';
 import { scopeIds } from './graphScope';
-import { label, humanize, MITRE_NAMES } from './labels';
+import { label, humanize, MITRE_NAMES, VERDICT_SHORT } from './labels';
+import TriageCell from './TriageCell';
 import { EvidencePanel, EvidenceGallery } from './Evidence';
 import AiMarkdown from './AiMarkdown';
 import AskAI from './AskAI';
@@ -124,6 +125,30 @@ function App({ user, onLogout, onUserChange }) {
     // adding the state for alerts
     const [alerts, setAlerts] = useState([])
 
+    // "Ask AI about this alert": a chat tied to the alert, its first question already
+    // asked. The reply runs on the server, and Ask AI opens the chat and follows it
+    // (however often the page mounts on the way there)
+    const [askingAbout, setAskingAbout] = useState(false)
+    async function askAboutAlert(a) {
+        setAskingAbout(true)
+        try {
+            const r = await api("/conversations", { method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: `${humanize(a.event_type)} on ${a.host}`.slice(0, 80), alert_id: a.alert_id }) })
+            if (!r.ok) throw new Error()
+            const chat = await r.json()
+            const ctrl = new AbortController()
+            await api(`/conversations/${chat.conversation_id}/messages`, { method: "POST", signal: ctrl.signal,
+                headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "Tell me about this alert" }) })
+            ctrl.abort()   // started: Ask AI re-attaches to it
+            try { localStorage.setItem("og_ask_convo", chat.conversation_id) } catch { /* private mode */ }
+            setSelectedId(null); setPage("ask")
+        } catch {
+            setError("Couldn't start the chat about this alert")
+        } finally {
+            setAskingAbout(false)
+        }
+    }
+
     // Ask AI replies running in the background / finished while you were elsewhere
     const askActivity = useAskActivity({ poll: true })
 
@@ -182,6 +207,12 @@ function App({ user, onLogout, onUserChange }) {
     const [statusFilter, setStatusFilter] = useState(null)    // null | "new" | "proposal" | "triaged" | "resolved"
     const [verdictFilter, setVerdictFilter] = useState(null)  // null | a verdict id | "none"
     const [sortBy, setSortBy] = useState("newest")            // "newest" | "oldest" | "severity"
+    // several alerts at once: the ticked rows, and what the bar is doing
+    const [picked, setPicked] = useState(() => new Set())
+    const [bulkVerdict, setBulkVerdict] = useState("")
+    const [bulkStatus, setBulkStatus] = useState("triaged")
+    const [bulkBusy, setBulkBusy] = useState(null)            // "ai" | "approve" | "mark"
+    const [bulkNote, setBulkNote] = useState(null)
     const [searchKind, setSearchKind] = useState(() => { try { return localStorage.getItem("og_searchKind") || "search" } catch { return "search" } }) // "search" (typed) | "filter" (chart click)
     const [recentSearches, setRecentSearches] = useState(() => {
         try { return JSON.parse(localStorage.getItem("og_recent_searches") || "[]") } catch { return [] }
@@ -415,6 +446,25 @@ function App({ user, onLogout, onUserChange }) {
         .sort((x, y) => sortBy === "severity"
             ? (SEV_RANK[x.severity] - SEV_RANK[y.severity]) || (new Date(y.timestamp) - new Date(x.timestamp))
             : (new Date(y.timestamp) - new Date(x.timestamp)) * (sortBy === "oldest" ? -1 : 1));
+    const togglePick = (id) => setPicked(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
+    const pickedAlerts = alerts.filter(a => picked.has(a.alert_id))
+    const pickedProposals = pickedAlerts.filter(a => a.triage_proposal)
+    async function runBulk(kind, path, body, done) {
+        setBulkBusy(kind); setBulkNote(null)
+        try {
+            const r = await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+            const out = await r.json().catch(() => ({}))
+            if (!r.ok) throw new Error(out.detail || `the server answered ${r.status}`)
+            const changed = new Map(out.alerts.map(a => [a.alert_id, a]))
+            setAlerts(prev => prev.map(a => changed.get(a.alert_id) || a))
+            setBulkNote(done(out.alerts.length) + (out.problems.length ? ` ${out.problems.length} couldn't be done: ${out.problems[0].error}` : ""))
+            setPicked(new Set())
+        } catch (e) {
+            setBulkNote(`Couldn't do that: ${e.message}`)
+        } finally {
+            setBulkBusy(null)
+        }
+    }
     const anyAlertFilter = !!(filter || srcFilter || dateFilter || statusFilter || verdictFilter || alertQuery.trim())
     const clearAlertFilters = () => { setFilter(null); setSrcFilter(null); setDateFilter(null); setDateFrom(""); setDateTo("");
                                       setStatusFilter(null); setVerdictFilter(null); setAlertQuery("") }
@@ -972,6 +1022,51 @@ function App({ user, onLogout, onUserChange }) {
                                     ))}
                                 </div>
 
+                                {(picked.size > 0 || bulkNote) && (
+                                    <div className="bulk-bar">
+                                        {picked.size > 0 ? <>
+                                            <b>{picked.size} selected</b>
+                                            <button className="btn sm primary" disabled={!!bulkBusy}
+                                                onClick={() => runBulk("ai", "/alerts/triage/ai/bulk", { alert_ids: [...picked] }, n => {
+                                                    setStatusFilter("proposal"); setVerdictFilter(null)
+                                                    return `The AI proposed a triage for ${n} alert${n === 1 ? "" : "s"}: review them here, then approve or reject.`
+                                                })}>
+                                                {bulkBusy === "ai" ? <span className="btn-spinner" /> : <Sparkles />} Triage with AI
+                                            </button>
+                                            {pickedProposals.length > 0 && (
+                                                <button className="btn sm" disabled={!!bulkBusy}
+                                                    onClick={() => runBulk("approve", "/alerts/triage/ai/approve/bulk", { alert_ids: pickedProposals.map(a => a.alert_id) },
+                                                        n => `Approved the AI's triage for ${n} alert${n === 1 ? "" : "s"}.`)}>
+                                                    {bulkBusy === "approve" ? <span className="btn-spinner" /> : <Check />} Approve {pickedProposals.length} AI proposal{pickedProposals.length === 1 ? "" : "s"}
+                                                </button>
+                                            )}
+                                            <span className="filterbar-sep" />
+                                            <span className="bulk-label">Mark as</span>
+                                            <select className="chip-select" value={bulkVerdict} onChange={e => setBulkVerdict(e.target.value)} aria-label="Verdict for the selected alerts">
+                                                <option value="">verdict…</option>
+                                                <option value="true_positive">True positive</option>
+                                                <option value="false_positive">False positive</option>
+                                                <option value="benign">Benign / expected</option>
+                                                <option value="escalate">Needs escalation</option>
+                                            </select>
+                                            <select className="chip-select" value={bulkStatus} onChange={e => setBulkStatus(e.target.value)} aria-label="Status for the selected alerts">
+                                                <option value="triaged">triaged</option>
+                                                <option value="resolved">resolved</option>
+                                            </select>
+                                            <button className="btn sm" disabled={!bulkVerdict || !!bulkBusy}
+                                                onClick={() => runBulk("mark", "/alerts/triage/bulk",
+                                                    { alert_ids: [...picked], verdict: bulkVerdict, status: bulkStatus, notes: "Triaged together with other alerts." },
+                                                    n => `Marked ${n} alert${n === 1 ? "" : "s"} ${bulkStatus}: ${VERDICT_SHORT[bulkVerdict].toLowerCase()}.`)}>
+                                                {bulkBusy === "mark" ? <span className="btn-spinner" /> : <Check />} Apply
+                                            </button>
+                                            <button className="link bulk-clear" onClick={() => { setPicked(new Set()); setBulkNote(null) }}>Clear selection</button>
+                                        </> : <>
+                                            <span className="bulk-note">{bulkNote}</span>
+                                            <button className="link bulk-clear" onClick={() => setBulkNote(null)}>Dismiss</button>
+                                        </>}
+                                    </div>
+                                )}
+
                                 {visible.length === 0 ? (
                                     <div className="empty">
                                         {alerts.length === 0
@@ -982,6 +1077,11 @@ function App({ user, onLogout, onUserChange }) {
                                     <table className="table alerts-table">
                                         <thead>
                                             <tr>
+                                                <th className="td-pick">
+                                                    <input type="checkbox" aria-label="Select every alert shown"
+                                                        checked={visible.length > 0 && visible.every(a => picked.has(a.alert_id))}
+                                                        onChange={e => setPicked(e.target.checked ? new Set([...picked, ...visible.map(a => a.alert_id)]) : new Set())} />
+                                                </th>
                                                 <th>Alert</th>
                                                 <th>Severity</th>
                                                 <th>Host</th>
@@ -992,7 +1092,11 @@ function App({ user, onLogout, onUserChange }) {
                                         </thead>
                                         <tbody>
                                             {visible.map(a => (
-                                                <tr key={a.alert_id} onClick={() => openAlert(a.alert_id)} className={a.status === "resolved" ? "row-done" : ""}>
+                                                <tr key={a.alert_id} onClick={() => openAlert(a.alert_id)}
+                                                    className={`${a.status === "resolved" ? "row-done" : ""} ${picked.has(a.alert_id) ? "row-picked" : ""}`}>
+                                                    <td className="td-pick" onClick={e => { e.stopPropagation(); togglePick(a.alert_id) }}>
+                                                        <input type="checkbox" checked={picked.has(a.alert_id)} onChange={() => {}} aria-label="Select this alert" />
+                                                    </td>
                                                     <td>
                                                         <span className="cell">
                                                             <span className={`cell-mark ${a.severity}`} />
@@ -1033,6 +1137,9 @@ function App({ user, onLogout, onUserChange }) {
                                 <span className="tag">{selected.source}</span>
                                 <span className="tag">{selected.status}</span>
                                 <span className="when" title={new Date(selected.timestamp).toLocaleString()}>{exactTime(selected.timestamp)} · {timeAgo(selected.timestamp)}</span>
+                                <button className="btn sm detail-ask" disabled={askingAbout} onClick={() => askAboutAlert(selected)}>
+                                    {askingAbout ? <span className="btn-spinner" /> : <Sparkles />} Ask AI about this alert
+                                </button>
                             </div>
 
                             <div className="split">
@@ -1282,7 +1389,7 @@ function App({ user, onLogout, onUserChange }) {
                                             <thead>
                                                 <tr>
                                                     <th>Time</th><th>Severity</th><th>Type</th>
-                                                    <th>Host</th><th className="td-wide">Description</th>
+                                                    <th>Host</th><th className="td-wide">Description</th><th>Triage</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -1293,6 +1400,7 @@ function App({ user, onLogout, onUserChange }) {
                                                         <td className="td-mono">{a.event_type}</td>
                                                         <td className="td-mono td-dim">{a.host}</td>
                                                         <td className="td-wide td-dim td-clip">{a.description || "—"}</td>
+                                                        <td><TriageCell a={a} compact /></td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -2742,7 +2850,7 @@ function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph, asEntity 
                         <thead>
                             <tr>
                                 <th>Time</th><th>Severity</th><th>Type</th><th>Host</th>
-                                <th>User</th><th className="td-wide">Domain / description</th><th>Engine</th>
+                                <th>User</th><th className="td-wide">Domain / description</th><th>Engine</th><th>Triage</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -2755,6 +2863,7 @@ function ScopedDashboard({ alerts, term, onOpen, onFilter, onSeeGraph, asEntity 
                                     <td className="td-mono td-dim">{a.user || "—"}</td>
                                     <td className="td-wide td-dim td-clip">{a.domain || a.description || "—"}</td>
                                     <td className="td-mono td-dim">{a.source}</td>
+                                    <td><TriageCell a={a} compact /></td>
                                 </tr>
                             ))}
                         </tbody>
@@ -2998,24 +3107,6 @@ function RankList({ data }) {
 
 // highlight where the search text appears in a value
 const ENGINE_NAME = { verifyeye: "VerifyEye", spectrac2: "SpectraC2", manual: "Manual" }
-const VERDICT_SHORT = { true_positive: "True positive", false_positive: "False positive", benign: "Benign", escalate: "Escalate" }
-
-// where an alert is in triage, for the Alerts table
-function TriageCell({ a }) {
-    if (a.triage_proposal) return (
-        <span className="triage-pill proposal" title="The AI proposed a triage: open the alert to approve or reject it">
-            <Bot /> AI proposal
-        </span>
-    )
-    if (a.status === "new" || !a.status) return <span className="triage-pill new"><span className="dot" />Untriaged</span>
-    const v = a.triage?.verdict
-    return (
-        <span className="cell-main">
-            <span className={`triage-pill ${a.status}`}><Check />{a.status === "resolved" ? "Resolved" : "Triaged"}</span>
-            {v && <span className={`cell-sub verdict-${v}`}>{VERDICT_SHORT[v] || v}{a.triage?.via === "ai" ? " · AI" : ""}</span>}
-        </span>
-    )
-}
 
 function Hl({ text, q }) {
     const t = (q || "").trim();

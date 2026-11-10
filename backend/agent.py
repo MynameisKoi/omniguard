@@ -22,7 +22,7 @@ import httpx
 
 from config import OLLAMA_URL, OLLAMA_MODEL
 from conversations import append_message, get_conversation, update_message
-from tools import TOOLS, closest_entity, mentioned_entities, run_tool, tool_specs
+from tools import TOOLS, alert_context, alerts_collection, closest_entity, mentioned_entities, run_tool, tool_specs
 
 MAX_ROUNDS = 5        # tool rounds per message, so a small model can't loop forever
 HISTORY = 12          # past messages the model sees (older ones still show on the page)
@@ -155,7 +155,8 @@ ALERTS_WORD = re.compile(r"\b([\w.-]+) alerts\b", re.I)
 # words before "alerts" that aren't a search term
 NOT_A_TERM = {"the", "all", "my", "our", "these", "those", "any", "new", "open", "recent", "latest", "critical", "high",
               "medium", "low", "phishing", "c2", "untriaged", "resolved", "triaged", "me", "of", "many", "some", "more",
-              "other", "same", "today's", "verifyeye", "spectrac2", "beacon", "beaconing", "much", "unresolved"}
+              "other", "same", "today's", "verifyeye", "spectrac2", "beacon", "beaconing", "much", "unresolved",
+              "which", "what", "how", "are", "were", "there", "many", "show", "list", "see", "get", "find"}
 WHOLE_VIEW = re.compile(r"dashboard|overview|everything|all (the )?alerts|break ?down", re.I)
 
 
@@ -176,7 +177,16 @@ def _focus(convo, kind=None):
             named = [e for e in mentioned_entities(m["content"]) if fits(e)]
             if named:
                 return named[-1]
+    a = _chat_alert(convo)   # a chat about an alert: "it" is that alert's host (or user)
+    for value, label in ((a or {}).get("host"), "host"), ((a or {}).get("user"), "user"):
+        if value and (kind is None or kind == label):
+            return (value, label)
     return None
+
+
+def _chat_alert(convo):
+    aid = (convo or {}).get("alert_id")
+    return alerts_collection.find_one({"alert_id": aid}, {"_id": 0, "alert_id": 1, "host": 1, "user": 1}) if aid else None
 
 
 def _filters(text):
@@ -297,10 +307,33 @@ def _not_again(plan, text, convo):
 VIEW_TOOLS = {"show_dashboard", "show_graph", "show_screenshots", "show_ledger", "compare_entities"}
 
 
+# asking the AI to triage (not "which alerts are triaged?")
+TRIAGE_ASK = re.compile(r"^\W*(please |can you |could you |go ahead and |now )*(auto-?)?triage\b"
+                        r"|\btriage (this|it|that|these|those|them|all|the|its|his|her|their)\b", re.I)
+ALERT_REF = re.compile(r"\b(this|the|that) alert\b", re.I)
+
+
 def _route(text, convo=None):
     """The tool calls a plain request obviously needs, as [(tool, args)], or None
     to let the model choose (actions, open questions, general knowledge)."""
     text = text or ""
+    a = _chat_alert(convo)
+    if TRIAGE_ASK.search(text):
+        # "triage this alert" / "triage LAPTOP-10's alerts": propose, never apply
+        ids = UUID.findall(text)
+        hosts = [v for v, k in mentioned_entities(text) if k == "host"]
+        if ids:
+            return [("triage_alerts", {"alert_id": ids[0]})]
+        if hosts:
+            return [("triage_alerts", {"host": hosts[0]})]
+        if a:
+            return [("triage_alerts", {"alert_id": a["alert_id"]})]
+        focus = _focus(convo, kind="host")
+        if focus and REFERS.search(text):
+            return [("triage_alerts", {"host": focus[0]})]
+    if a and ALERT_REF.search(text) and not _views(text) and not ACTION_ASK.search(text):
+        # "tell me about this alert": the alert, then its host
+        return [("get_alert", {"alert_id": a["alert_id"]})] + ([("entity_summary", {"name": a["host"]})] if a.get("host") else [])
     if ACTION_ASK.search(text):
         return None          # actions go through the model + the approval card
     named = [(v, k) for v, k in mentioned_entities(text, limit=6) if k != "detection engine"]
@@ -551,7 +584,7 @@ def _tidy(answer):
 
 # when a view is asked for, the smaller tool it replaces is hidden
 SUPERSEDED = {"show_screenshots": "get_evidence", "show_graph": "get_host_graph", "show_ledger": "ledger_lookup"}
-VIEW_RENDERS = {"dashboard", "graph_explorer", "screenshots", "ledger_view", "compare"}
+VIEW_RENDERS = {"dashboard", "graph_explorer", "screenshots", "ledger_view", "compare", "triage"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
@@ -663,6 +696,8 @@ def run_turn(owner, conversation_id, text, context=None):
         yield _event("error", message="Conversation not found")
         return
     append_message(owner, conversation_id, "user", text)
+    if not context and convo.get("alert_id"):
+        context = alert_context(convo["alert_id"])   # current status/verdict, every turn
 
     history = _history(convo)
     general = _general(text)

@@ -24,6 +24,7 @@ import httpx
 
 from config import OLLAMA_MODEL, OLLAMA_URL
 from db import database
+from events import manager
 from evidence import list_evidence
 from ledger import append_ledger_entry, get_ledger_for_entity
 
@@ -43,6 +44,18 @@ LOCAL = re.compile(r"^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.
 
 class TriageError(Exception):
     """Bad input the analyst should see (unknown verdict, action that doesn't fit)."""
+
+
+def _changed(alert_id):
+    """The alert as it is now, sent to every open dashboard: triage can start from
+    the alert page, the Alerts list or an Ask AI chat, and all of them should see it."""
+    a = _alert(alert_id)
+    try:
+        from models import Alert
+        manager.broadcast_from_thread({"type": "alert_updated", "alert": Alert(**a).model_dump(mode="json")})
+    except Exception as e:      # a live update is nice to have, never worth failing the triage over
+        print(f"alert_updated broadcast failed for {alert_id}: {e}")
+    return a
 
 
 def _alert(alert_id):
@@ -73,8 +86,10 @@ def _isolated(host):
 
 def apply_triage(alert_id, verdict, severity, notes, actions, status, analyst, proposal=None):
     """Save a triage decision and record it (and each response action) in the ledger.
-    proposal: the AI proposal this came from, if any (who proposed it is recorded)."""
+    proposal: the AI proposal this came from, if any (who proposed it is recorded).
+    severity None keeps the alert's own (bulk triage)."""
     a = _alert(alert_id)
+    severity = severity or a.get("severity")
     if verdict not in VERDICTS:
         raise TriageError(f"verdict must be one of {', '.join(VERDICTS)}")
     if severity not in SEVERITIES:
@@ -95,9 +110,6 @@ def apply_triage(alert_id, verdict, severity, notes, actions, status, analyst, p
         "proposed_verdict": (proposal or {}).get("verdict"),
         "ai_summary": (proposal or {}).get("summary") or None,
     }
-    alerts_collection.update_one({"alert_id": alert_id},
-                                 {"$set": {"status": status, "severity": severity, "triage": record},
-                                  "$unset": {"triage_proposal": ""}})
 
     who = f"AI proposed, approved by {analyst}" if proposal else f"by {analyst}"
     changed = f"; severity {a.get('severity')} -> {severity}" if severity != a.get("severity") else ""
@@ -113,6 +125,9 @@ def apply_triage(alert_id, verdict, severity, notes, actions, status, analyst, p
     )
     for x in actions:
         act = allowed[x]
+        if _already(x, act["target"]):
+            act["already"] = True        # e.g. the same host from several alerts: recorded once
+            continue
         why = f"Response to alert {alert_id} ({a.get('event_type')}), {VERDICTS[verdict].lower()}"
         if x == "isolate_host":
             append_ledger_entry(entity_type="HOST", entity_id=act["target"], stage="EDR_CONTAINMENT",
@@ -129,7 +144,19 @@ def apply_triage(alert_id, verdict, severity, notes, actions, status, analyst, p
                                 action_taken="DOMAIN_BLOCK_SIMULATED", analyst_user=analyst,
                                 reasoning_output=f"Block requested for '{act['target']}' at the firewall / DNS: "
                                                  f"{why}. Simulated for now.")
-    return _alert(alert_id)
+    alerts_collection.update_one({"alert_id": alert_id},
+                                 {"$set": {"status": status, "severity": severity, "triage": record},
+                                  "$unset": {"triage_proposal": ""}})
+    return _changed(alert_id)
+
+
+ACTION_CODE = {"isolate_host": "NETWORK_ISOLATION", "reset_password": "PASSWORD_RESET", "block_domain": "DOMAIN_BLOCK"}
+
+
+def _already(action, target):
+    """This response action is already recorded for this host / user / domain."""
+    code = ACTION_CODE[action]
+    return any(code in str(r.get("action_taken", "")).upper() for r in get_ledger_for_entity(target)[:20])
 
 
 # ── the AI's proposal ───────────────────────────────────────────────────────
@@ -252,12 +279,14 @@ def _explain(a, verdict, reasons):
     return " ".join(keep).strip()
 
 
-def propose_triage(alert_id, requested_by):
+def propose_triage(alert_id, requested_by, explain=True):
     """The AI's triage of an alert, stored on it as a pending proposal. Nothing
-    changes on the alert (or anywhere) until an analyst approves it."""
+    changes on the alert (or anywhere) until an analyst approves it.
+    explain=False skips the model's explanation (the reasons stay): for many
+    alerts at once, where a few seconds each adds up."""
     a = _alert(alert_id)
     verdict, severity, status, actions, reasons = _decide(a)
-    summary = _explain(a, verdict, reasons)
+    summary = _explain(a, verdict, reasons) if explain else ""
     proposal = {
         "verdict": verdict, "severity": severity, "status": status, "actions": actions,
         "reasons": reasons, "summary": summary,
@@ -265,7 +294,7 @@ def propose_triage(alert_id, requested_by):
         "proposed_at": datetime.now(timezone.utc), "requested_by": requested_by, "model": OLLAMA_MODEL,
     }
     alerts_collection.update_one({"alert_id": alert_id}, {"$set": {"triage_proposal": proposal}})
-    return _alert(alert_id)
+    return _changed(alert_id)
 
 
 def approve_proposal(alert_id, analyst, verdict=None, severity=None, notes=None, actions=None, status=None):
@@ -289,4 +318,32 @@ def reject_proposal(alert_id, analyst, reason=None):
                         action_taken="AI_TRIAGE_REJECTED", analyst_user=analyst,
                         reasoning_output=f"AI proposed {VERDICTS.get(p['verdict'], p['verdict'])}; rejected by {analyst}"
                                          + (f": {reason}" if reason else "."))
-    return _alert(alert_id)
+    return _changed(alert_id)
+
+
+# ── many at once ────────────────────────────────────────────────────────────
+
+MAX_BULK = 50
+
+
+def bulk(fn, alert_ids, *args, **kwargs):
+    """Run one triage step over several alerts. Returns (changed alerts, problems):
+    one alert that can't be done doesn't stop the rest."""
+    done, problems = [], []
+    for aid in list(dict.fromkeys(alert_ids))[:MAX_BULK]:
+        try:
+            done.append(fn(aid, *args, **kwargs))
+        except (LookupError, TriageError) as e:
+            problems.append({"alert_id": aid, "error": str(e)})
+    return done, problems
+
+
+def triage_candidates(host=None, limit=8):
+    """Untriaged alerts with no proposal yet, worst and newest first."""
+    q = {"status": "new", "triage_proposal": {"$exists": False}}
+    if host:
+        q["host"] = {"$regex": f"^{re.escape(host)}$", "$options": "i"}
+    rows = list(alerts_collection.find(q, {"_id": 0, "alert_id": 1, "severity": 1, "timestamp": 1}))
+    rows.sort(key=lambda a: (SEVERITIES.index(a.get("severity")) if a.get("severity") in SEVERITIES else 9,
+                             -(a.get("timestamp") or datetime.min.replace(tzinfo=timezone.utc)).timestamp()))
+    return [a["alert_id"] for a in rows[:limit]]

@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
     Sparkles, Plus, Send, MessageSquare, Trash2, Pencil, Check, X, ArrowRight,
-    ShieldAlert, ShieldCheck, ShieldOff, CircleAlert, Wrench, Maximize2, Link2, Lock, LockOpen,
+    ShieldAlert, ShieldCheck, ShieldOff, CircleAlert, Wrench, Maximize2, Link2, Lock, LockOpen, Flag,
 } from 'lucide-react'
 import { api } from './api'
 import AiMarkdown from './AiMarkdown'
 import GraphCanvas from './GraphCanvas'
 import { EvidenceList } from './Evidence'
 import { timeAgo, exactTime } from './time'
-import { label, humanize, MITRE_NAMES } from './labels'
+import { label, humanize, MITRE_NAMES, VERDICT_LABEL, VERDICT_TONE } from './labels'
 import { scopeIds } from './graphScope'
+import TriageCell from './TriageCell'
 import { useAskActivity, markRunning, markDone, syncRunning, setViewing, forget } from './askActivity'
 
 /* Ask AI (#1, #23, #19): the SOC agent. Saved conversations on the left; on
@@ -56,8 +57,10 @@ function dayGroup(ts) {
 
 // ── what tools return, drawn with dashboard pieces ───────────────────────
 
-function AlertsBlock({ data, onOpenAlert }) {
-    const rows = data.alerts || []
+function AlertsBlock({ data, onOpenAlert, views }) {
+    // the live alert where we have it: its triage may have changed since the reply
+    const live = new Map((views?.alerts || []).map(a => [a.alert_id, a]))
+    const rows = (data.alerts || []).map(a => live.get(a.alert_id) || a)
     if (!rows.length) return <div className="ask-block ask-empty">No alerts matched.</div>
     return (
         <div className="ask-block">
@@ -70,6 +73,7 @@ function AlertsBlock({ data, onOpenAlert }) {
                             <td className="td-mono td-dim">{a.host}</td>
                             <td className="td-mono td-faint td-clip">{a.domain || a.user || "—"}</td>
                             <td className="td-faint" title={exactTime(a.timestamp)}>{timeAgo(a.timestamp)}</td>
+                            <td><TriageCell a={a} compact /></td>
                         </tr>
                     ))}
                 </tbody>
@@ -340,11 +344,88 @@ function CompareView({ data, onFilter }) {
     )
 }
 
+// "triage these alerts" in the chat: the AI's proposals, approved or rejected
+// right here (the same proposal the alert page shows). Follows the live alerts,
+// so a proposal decided on the alert page shows as decided here too.
+const ACTION_WORD = { isolate_host: "isolate the host", reset_password: "reset the password", block_domain: "block the domain" }
+
+function TriageProposals({ data, views, onOpenAlert }) {
+    const [busy, setBusy] = useState(null)      // alert id, or "all"
+    const [error, setError] = useState(null)
+    const byId = new Map((views?.alerts || []).map(a => [a.alert_id, a]))
+    const rows = (data.alert_ids || []).map(id => byId.get(id)).filter(Boolean)
+    const pending = rows.filter(a => a.triage_proposal)
+
+    async function post(path, body, key) {
+        setBusy(key); setError(null)
+        try {
+            const r = await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `the server answered ${r.status}`)
+        } catch (e) {
+            setError(e.message)
+        } finally {
+            setBusy(null)   // the alerts update live (websocket), and these cards with them
+        }
+    }
+
+    return (
+        <div className="ask-block ask-triage">
+            <div className="ask-triage-head">
+                <span><Sparkles /> Triage {rows.length === 1 ? "proposal" : `proposals · ${rows.length}`}</span>
+                {pending.length > 1 && (
+                    <button className="btn sm primary" disabled={!!busy}
+                        onClick={() => post("/alerts/triage/ai/approve/bulk", { alert_ids: pending.map(a => a.alert_id) }, "all")}>
+                        {busy === "all" ? <span className="btn-spinner" /> : <Check />} Approve all {pending.length}
+                    </button>
+                )}
+            </div>
+            {error && <div className="login-error">{error}</div>}
+            {rows.map(a => {
+                const p = a.triage_proposal, t = a.triage
+                return (
+                    <div key={a.alert_id} className={`ask-triage-row ${p ? "pending" : t ? "done" : "dropped"}`}>
+                        <div className="ask-triage-what">
+                            <span className={`sev ${a.severity}`}>{a.severity}</span>
+                            <b>{humanize(a.event_type)}</b> <span className="td-dim">on {a.host}{a.domain ? ` · ${a.domain}` : ""}</span>
+                        </div>
+                        {p ? (
+                            <>
+                                <div className="ask-triage-verdict">
+                                    <span className={`triage-chip on ${VERDICT_TONE[p.verdict]}`}>{VERDICT_LABEL[p.verdict]}</span>
+                                    {p.severity !== a.severity && <span className="td-dim">severity → {p.severity}</span>}
+                                    <span className="td-dim">· mark {p.status}</span>
+                                    {p.actions?.length > 0 && <span className="td-dim">· {p.actions.map(x => ACTION_WORD[x] || x).join(", ")}</span>}
+                                </div>
+                                {p.summary && <p className="ask-triage-why">{p.summary}</p>}
+                                <ul className="ask-triage-reasons">{(p.reasons || []).slice(0, 3).map((r, i) => <li key={i}>{r}</li>)}</ul>
+                                <div className="ask-triage-buttons">
+                                    <button className="btn sm primary" disabled={!!busy}
+                                        onClick={() => post(`/alerts/${a.alert_id}/triage/ai/approve`, {}, a.alert_id)}>
+                                        {busy === a.alert_id ? <span className="btn-spinner" /> : <Check />} Approve
+                                    </button>
+                                    <button className="btn sm" disabled={!!busy}
+                                        onClick={() => post(`/alerts/${a.alert_id}/triage/ai/reject`, {}, a.alert_id)}><X /> Reject</button>
+                                    <button className="btn sm" onClick={() => onOpenAlert(a.alert_id)}>Edit on the alert page <ArrowRight /></button>
+                                </div>
+                            </>
+                        ) : t ? (
+                            <div className="ask-triage-decided"><Check /> {t.via === "ai" ? "Approved" : "Triaged"}: {VERDICT_LABEL[t.verdict]} · {a.status}, by {t.by}</div>
+                        ) : (
+                            <div className="ask-triage-decided dim"><X /> Rejected: the alert wasn't changed</div>
+                        )}
+                    </div>
+                )
+            })}
+        </div>
+    )
+}
+
 function Block({ block, onOpenAlert, onFilter, views }) {
     const d = block.data || {}
     switch (block.render) {
-        case "alerts": return <AlertsBlock data={d} onOpenAlert={onOpenAlert} />
-        case "alert": return <AlertsBlock data={{ alerts: [d.alert], total: 1 }} onOpenAlert={onOpenAlert} />
+        case "alerts": return <AlertsBlock data={d} onOpenAlert={onOpenAlert} views={views} />
+        case "alert": return <AlertsBlock data={{ alerts: [d.alert], total: 1 }} onOpenAlert={onOpenAlert} views={views} />
+        case "triage": return <TriageProposals data={d} views={views} onOpenAlert={onOpenAlert} />
         case "entity": return <EntityBlock data={d} onFilter={onFilter} />
         case "graph": return (
             <div className="ask-block ask-graph">
@@ -423,7 +504,7 @@ function Steps({ steps, live }) {
     )
 }
 
-const WIDE = new Set(["dashboard", "graph_explorer", "screenshots", "compare"])
+const WIDE = new Set(["dashboard", "graph_explorer", "screenshots", "compare", "triage"])
 
 // "Did you mean ...?": each close name re-asks the question with that name
 function Choices({ data, onAsk, disabled }) {
@@ -493,6 +574,25 @@ function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views,
 // uid: the same Message stays mounted when the live reply becomes the saved one
 const emptyReply = () => ({ role: "assistant", content: "", steps: [], blocks: [], approvals: [], live: true,
                             uid: Math.random().toString(36).slice(2) })
+
+// "Ask AI about this alert": the strip at the top of a chat that's about one alert
+function AlertStrip({ alert, onOpen }) {
+    if (!alert) return null
+    const t = alert.triage
+    return (
+        <div className="ask-alert-strip">
+            <Flag />
+            <span className="ask-alert-what">
+                <b>{humanize(alert.event_type)}</b> on {alert.host}{alert.user ? ` · ${alert.user}` : ""}{alert.domain ? ` · ${alert.domain}` : ""}
+            </span>
+            <span className={`sev ${alert.severity}`}>{alert.severity}</span>
+            <span className="ask-alert-triage">
+                {alert.triage_proposal ? "AI proposal waiting" : t ? `${alert.status === "resolved" ? "Resolved" : "Triaged"} · ${VERDICT_LABEL[t.verdict] || t.verdict}` : "Untriaged"}
+            </span>
+            <button className="ask-link" onClick={() => onOpen(alert.alert_id)}>Open alert <ArrowRight /></button>
+        </div>
+    )
+}
 
 export default function AskAI({ onOpenAlert, onFilter, views }) {
     const [convos, setConvos] = useState([])
@@ -564,6 +664,8 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
         setActiveId(id)
     }
 
+    const chatAlertId = convos.find(c => c.conversation_id === activeId)?.alert_id
+    const chatAlert = chatAlertId ? (views?.alerts || []).find(a => a.alert_id === chatAlertId) : null
     const reply = activeId && loadedId === activeId ? live[activeId] : null
     const shown = reply ? [...messages, reply] : messages
     const busy = !!reply
@@ -650,16 +752,19 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
         }
     }
 
-    async function send(text) {
+    async function send(text, newChat = null) {
         text = text.trim()
-        let id = activeId
+        let id = newChat ? null : activeId
         if (!text || (id && liveRef.current[id])) return   // this chat is still replying: keep the draft
         setDraft(""); setError(null)
         const ctrl = new AbortController()
         try {
             if (!id) {
-                const r = await api("/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
-                id = (await r.json()).conversation_id
+                const r = await api("/conversations", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                         body: JSON.stringify(newChat || {}) })
+                const made = await r.json()
+                id = made.conversation_id
+                if (made.alert_id) setConvos(cs => [made, ...cs])   // the strip shows straight away
                 justCreated.current = id
                 setMessages([]); setLoadedId(id); setActiveId(id)
             }
@@ -742,7 +847,7 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
                                     ) : (
                                         <>
                                             <button className="ask-item-main" onClick={() => openChat(c.conversation_id)} title={c.title}>
-                                                <MessageSquare /><span>{c.title}</span>
+                                                {c.alert_id ? <Flag /> : <MessageSquare />}<span>{c.title}</span>
                                                 {live[c.conversation_id] || activity.running.has(c.conversation_id)
                                                     ? <span className="btn-spinner ask-item-busy" aria-label="Replying" />
                                                     : activity.unread.has(c.conversation_id) && c.conversation_id !== activeId
@@ -764,6 +869,7 @@ export default function AskAI({ onOpenAlert, onFilter, views }) {
 
             <section className="ask-main">
                 <div className="ask-log" ref={logRef}>
+                    {chatAlert && <AlertStrip alert={chatAlert} onOpen={onOpenAlert} />}
                     {loadingChat ? <div className="content-spinner"><div className="spinner" /></div>
                         : shown.length === 0 ? (
                             <div className="ask-welcome">

@@ -327,3 +327,24 @@ def test_phishing_direction(sentence, wrong):
 def test_tool_calls_written_as_text_are_never_shown():
     c = agent._Cleaner()
     assert (c.feed('{"name": "c2_investigation", "parameters": {"hostname":"LAPTOP-10"}}\n') + c.finish()).strip() == ""
+
+
+@pytest.mark.parametrize("text, plan", [
+    ("triage LAPTOP-10", [("triage_alerts", {"host": "LAPTOP-10"})]),
+    ("please triage the untriaged alerts on BUILD-SRV-02", [("triage_alerts", {"host": "BUILD-SRV-02"})]),
+    ("which alerts are triaged?", [("search_alerts", {"status": "triaged"})]),   # a question, not a request
+])
+def test_triage_requests_only_propose(known_names, monkeypatch, text, plan):
+    monkeypatch.setattr(agent, "_chat_alert", lambda convo: None)
+    assert agent._route(text) == plan
+
+
+def test_a_chat_about_an_alert(known_names, monkeypatch):
+    monkeypatch.setattr(agent, "_chat_alert",
+                        lambda convo: {"alert_id": "a1", "host": "LAPTOP-10", "user": "maharjan"} if convo else None)
+    convo = {"alert_id": "a1", "messages": []}
+    assert agent._route("Tell me about this alert", convo) == [("get_alert", {"alert_id": "a1"}),
+                                                                ("entity_summary", {"name": "LAPTOP-10"})]
+    assert agent._route("triage this alert", convo) == [("triage_alerts", {"alert_id": "a1"})]
+    assert agent._focus(convo) == ("LAPTOP-10", "host")              # "it" is the alert's host
+    assert agent._focus(convo, kind="user") == ("maharjan", "user")
