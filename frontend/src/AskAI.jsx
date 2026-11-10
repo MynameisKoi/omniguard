@@ -444,9 +444,15 @@ function useTypewriter(text, animate) {
     const typing = animate && n < text.length
     useEffect(() => {
         if (!typing) return
-        const id = requestAnimationFrame(() =>
-            setN(k => Math.min(text.length, k + Math.max(2, Math.ceil((text.length - k) / 40)))))
-        return () => cancelAnimationFrame(id)
+        // a plain timer, not requestAnimationFrame: browsers stop animation frames in
+        // a background tab, and the reply would stay hidden. A timer that fires late
+        // means the tab is in the background (timers are slowed there): show it all
+        const asked = performance.now()
+        const id = setTimeout(() => {
+            const late = document.hidden || performance.now() - asked > 150
+            setN(k => late ? text.length : Math.min(text.length, k + Math.max(2, Math.ceil((text.length - k) / 40))))
+        }, 16)
+        return () => clearTimeout(id)
     }, [typing, n, text])
     if (!animate) return { shown: text, typing: false }
     let shown = text.slice(0, n)
