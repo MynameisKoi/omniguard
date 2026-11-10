@@ -123,72 +123,74 @@ export default function TriagePanel({ alert, onUpdated }) {
         }
     }
 
+    const state = proposal ? "proposal" : mode === "manual" ? "editing" : busy === "ai" ? "working" : done ? "done" : "open"
+    const tone = state === "done" ? verdictOf(done.verdict).tone : state === "open" ? "open" : "ai"
+    const Icon = state === "proposal" ? Bot : state === "working" ? Sparkles : state === "done" ? Check : ClipboardCheck
+
     return (
-        <div className="panel triage">
-            <div className="panel-head">
-                <span className="panel-title"><ClipboardCheck /> Triage</span>
-                {!proposal && mode !== "manual" && (
-                    <span className="triage-start">
-                        <button className="btn" onClick={() => setMode("manual")} disabled={!!busy}>
-                            <ClipboardCheck /> {done ? "Triage again" : "Triage"}
-                        </button>
-                        <button className="btn primary" onClick={() => call("/triage/ai", null, "ai")} disabled={!!busy}>
-                            {busy === "ai" ? <span className="btn-spinner" /> : <Sparkles />} Triage with AI
-                        </button>
-                    </span>
-                )}
-            </div>
-            <div className="triage-body">
-                {error && <div className="login-error">{error}</div>}
-
-                {busy === "ai" && (
-                    <div className="ai-loading triage-working">
-                        <span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />
-                        Checking the host, user, domain and related alerts…
-                    </div>
-                )}
-
-                {proposal && (
-                    <>
-                        <div className="triage-proposal-head">
-                            <Bot /> <b>AI proposal</b> · {verdictOf(proposal.verdict).label}
-                            <span className="triage-muted">· nothing is applied until you approve</span>
-                        </div>
-                        {proposal.summary && <p className="triage-summary">{proposal.summary}</p>}
-                        <ul className="triage-reasons">{proposal.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
-                        <TriageForm key={proposal.proposed_at} alert={alert} initial={proposal} ai busy={busy === "save"}
-                            onSubmit={edits => call("/triage/ai/approve", edits, "save")}
-                            onReject={() => call("/triage/ai/reject", {}, "save")} />
-                    </>
-                )}
-
-                {!proposal && mode === "manual" && (
-                    <TriageForm alert={alert} initial={done ? { ...done, actions: [] } : {}} busy={busy === "save"}
-                        onSubmit={body => call("/triage", body, "save")} onCancel={() => setMode(null)} />
-                )}
-
-                {!proposal && mode !== "manual" && busy !== "ai" && (done ? (
-                    <div className="triage-done">
-                        <div className="triage-done-head">
-                            <span className={`triage-chip on ${verdictOf(done.verdict).tone}`}>{verdictOf(done.verdict).label}</span>
-                            <span className={`sev ${done.severity}`}>{done.severity}</span>
-                            <span className="tag">{done.status}</span>
-                        </div>
-                        <div className="triage-muted" title={exactTime(done.at)}>
-                            {done.via === "ai" ? <><Bot /> Proposed by AI, approved by {done.by}</> : <><UserCheck /> Triaged by {done.by}</>}
+        <section className={`triage-card ${tone}`} aria-label="Triage">
+            <div className="triage-bar">
+                <span className="triage-icon"><Icon /></span>
+                <div className="triage-headline">
+                    {state === "open" && <><b>Not triaged yet</b>
+                        <span>Decide yourself, or let the AI propose a verdict for you to review.</span></>}
+                    {state === "working" && <><b>AI is triaging…</b>
+                        <span className="ai-loading"><span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />
+                            Checking the host, user, domain and related alerts</span></>}
+                    {state === "proposal" && <><b>AI proposal: {verdictOf(proposal.verdict).label}</b>
+                        <span>Review it below. Nothing is applied until you approve.</span></>}
+                    {state === "editing" && <><b>Triage this alert</b>
+                        <span>Pick a verdict and what to do about it.</span></>}
+                    {state === "done" && <><b>{verdictOf(done.verdict).label} <em>· {done.status}, {done.severity}</em></b>
+                        <span title={exactTime(done.at)}>
+                            {done.via === "ai" ? <><Bot /> AI proposed, approved by {done.by}</> : <><UserCheck /> {done.by}</>}
                             {" · "}{timeAgo(done.at)}
                             {done.via === "ai" && done.proposed_verdict && done.proposed_verdict !== done.verdict &&
-                                ` · changed from the AI's "${verdictOf(done.proposed_verdict).label}"`}
-                        </div>
-                        {done.actions?.length > 0 && (
-                            <ul className="triage-actions">{done.actions.map(a => <li key={a.id}><Check /> {a.label} <em>(simulated)</em></li>)}</ul>
+                                ` · changed from "${verdictOf(done.proposed_verdict).label}"`}
+                        </span></>}
+                </div>
+                {(state === "open" || state === "done") && (
+                    <div className="triage-start">
+                        <button className="btn sm" onClick={() => setMode("manual")}>
+                            <ClipboardCheck /> {done ? "Triage again" : "Triage"}
+                        </button>
+                        {state === "open" && (
+                            <button className="btn sm primary" onClick={() => call("/triage/ai", null, "ai")}>
+                                <Sparkles /> Triage with AI
+                            </button>
                         )}
-                        {done.notes && <p className="triage-notes">{done.notes}</p>}
                     </div>
-                ) : (
-                    <p className="triage-muted">Not triaged yet. Do it yourself, or let the AI propose a triage for you to review.</p>
-                ))}
+                )}
             </div>
-        </div>
+
+            {error && <div className="triage-body"><div className="login-error">{error}</div></div>}
+
+            {state === "proposal" && (
+                <div className="triage-body">
+                    {proposal.summary && <p className="triage-summary">{proposal.summary}</p>}
+                    <ul className="triage-reasons">{proposal.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                    <TriageForm key={proposal.proposed_at} alert={alert} initial={proposal} ai busy={busy === "save"}
+                        onSubmit={edits => call("/triage/ai/approve", edits, "save")}
+                        onReject={() => call("/triage/ai/reject", {}, "save")} />
+                </div>
+            )}
+
+            {state === "editing" && (
+                <div className="triage-body">
+                    <TriageForm alert={alert} initial={done ? { ...done, actions: [] } : {}} busy={busy === "save"}
+                        onSubmit={body => call("/triage", body, "save")} onCancel={() => setMode(null)} />
+                </div>
+            )}
+
+            {state === "done" && (done.actions?.length > 0 || done.notes || done.ai_summary) && (
+                <div className="triage-body">
+                    {done.actions?.length > 0 && (
+                        <ul className="triage-actions">{done.actions.map(a => <li key={a.id}><Check /> {a.label} <em>simulated</em></li>)}</ul>
+                    )}
+                    {done.ai_summary && <p className="triage-summary">{done.ai_summary}</p>}
+                    {done.notes && <p className="triage-notes">{done.notes}</p>}
+                </div>
+            )}
+        </section>
     )
 }

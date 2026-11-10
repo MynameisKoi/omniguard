@@ -93,6 +93,7 @@ def apply_triage(alert_id, verdict, severity, notes, actions, status, analyst, p
         "actions": [allowed[x] for x in actions], "by": analyst, "at": now,
         "via": "ai" if proposal else "manual",
         "proposed_verdict": (proposal or {}).get("verdict"),
+        "ai_summary": (proposal or {}).get("summary") or None,
     }
     alerts_collection.update_one({"alert_id": alert_id},
                                  {"$set": {"status": status, "severity": severity, "triage": record},
@@ -260,7 +261,7 @@ def propose_triage(alert_id, requested_by):
     proposal = {
         "verdict": verdict, "severity": severity, "status": status, "actions": actions,
         "reasons": reasons, "summary": summary,
-        "notes": (summary + "\n\n" if summary else "") + "\n".join(f"- {r}" for r in reasons),
+        "notes": "\n".join(f"- {r}" for r in reasons),     # the explanation is shown (and kept) separately
         "proposed_at": datetime.now(timezone.utc), "requested_by": requested_by, "model": OLLAMA_MODEL,
     }
     alerts_collection.update_one({"alert_id": alert_id}, {"$set": {"triage_proposal": proposal}})
