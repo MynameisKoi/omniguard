@@ -19,9 +19,8 @@ NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 # ollama for AI 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
-# Optional GPU layer offload override (unset by default to let Ollama auto-detect GPU/Metal)
-_gpu_env = os.getenv("OLLAMA_NUM_GPU")
-OLLAMA_NUM_GPU = int(_gpu_env) if _gpu_env is not None and _gpu_env.strip() != "" else None
+# num_gpu: 0 prevents Vulkan buffer allocation faults on AMD integrated graphics (Radeon iGPU)
+OLLAMA_NUM_GPU = int(os.getenv("OLLAMA_NUM_GPU", "0"))
 
 # no default - a password should never fall back to anything, least of all
 # neo4j's factory default. fail loudly at startup instead.

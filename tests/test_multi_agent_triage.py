@@ -127,6 +127,8 @@ def test_api_pipeline_endpoint():
         }
 
         client = TestClient(app)
+        # endpoints need a signed-in analyst (session tokens): sign the test client in
+        app.dependency_overrides[backend_main.current_user] = lambda: {"email": "test@omniguard.io", "name": "Test"}
 
         with patch.object(backend_main.alerts_collection, "find") as mock_find:
             mock_find.return_value = [

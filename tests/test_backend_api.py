@@ -23,11 +23,19 @@ with patch("neo4j.GraphDatabase.driver") as mock_driver, \
 from fastapi.testclient import TestClient
 
 # Override current_user dependency so tests default to authenticated analyst
-app.dependency_overrides[backend_main.current_user] = lambda: {
-    "email": "analyst@omniguard.io",
-    "name": "SOC Analyst",
-    "role": "analyst",
-}
+@pytest.fixture(autouse=True)
+def override_current_user():
+    app.dependency_overrides[backend_main.current_user] = lambda: {
+        "email": "analyst@omniguard.io",
+        "name": "SOC Analyst",
+        "role": "analyst",
+    }
+    yield
+    app.dependency_overrides[backend_main.current_user] = lambda: {
+        "email": "analyst@omniguard.io",
+        "name": "SOC Analyst",
+        "role": "analyst",
+    }
 
 client = TestClient(app)
 

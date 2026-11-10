@@ -36,3 +36,8 @@ export const MITRE_NAMES = {
     T1021: "Remote services",
     T1056: "Input capture",
 }
+
+// triage verdicts (triage.py), short and long, and their tone
+export const VERDICT_SHORT = { true_positive: "True positive", false_positive: "False positive", benign: "Benign", escalate: "Escalate" }
+export const VERDICT_LABEL = { true_positive: "True positive", false_positive: "False positive", benign: "Benign / expected", escalate: "Needs escalation" }
+export const VERDICT_TONE = { true_positive: "bad", false_positive: "good", benign: "good", escalate: "warn" }

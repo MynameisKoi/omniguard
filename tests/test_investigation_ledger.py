@@ -97,6 +97,8 @@ def test_api_ledger_endpoints():
         }
 
         client = TestClient(app)
+        # endpoints need a signed-in analyst (session tokens): sign the test client in
+        app.dependency_overrides[backend_main.current_user] = lambda: {"email": "test@omniguard.io", "name": "Test"}
 
         mock_entries = [
             {
@@ -133,3 +135,6 @@ def test_api_ledger_endpoints():
             assert res3.json()["valid"] is True
             assert res3.json()["status"] == "verified"
 
+            # and without a session, the API refuses
+            app.dependency_overrides.pop(backend_main.current_user, None)
+            assert client.get("/investigations/ledger").status_code == 401
