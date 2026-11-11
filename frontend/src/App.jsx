@@ -261,7 +261,7 @@ function App({ user, onLogout, onUserChange }) {
     useEffect(() => {
         api(`/containment`)
         .then(res => res.json())
-        .then(list => setContainment(Object.fromEntries((list || []).map(s => [s.host, s]))))
+        .then(list => setContainment(Object.fromEntries((list || []).map(s => [(s.host || "").toLowerCase(), s]))))
         .catch(() => {})
     }, []);
 
@@ -272,7 +272,8 @@ function App({ user, onLogout, onUserChange }) {
             const res = await api(`/hosts/${encodeURIComponent(host)}/${action}`, { method: "POST" })
             const state = await res.json().catch(() => ({}))
             if (!res.ok) throw new Error(state.detail || res.status)
-            setContainment(prev => ({ ...prev, [host]: { ...(prev[host] || {}), ...state } }))
+            const k = host.toLowerCase()
+            setContainment(prev => ({ ...prev, [k]: { ...(prev[k] || {}), ...state } }))
         } catch (e) {
             setError(`Couldn't ${action} ${host}: ${e.message}`)
         } finally {
@@ -325,7 +326,8 @@ function App({ user, onLogout, onUserChange }) {
                     setAlerts(prev => prev.map(a => a.alert_id === msg.alert.alert_id ? msg.alert : a))
                 } else if (msg.type === "containment_updated") {
                     // a host was isolated / released here, on another screen, or by its agent
-                    setContainment(prev => ({ ...prev, [msg.host]: { ...(prev[msg.host] || {}), host: msg.host, state: msg.state } }))
+                    const k = (msg.host || "").toLowerCase()
+                    setContainment(prev => ({ ...prev, [k]: { ...(prev[k] || {}), host: msg.host, state: msg.state } }))
                 } else {
                     setAlerts(prev => [msg, ...prev])
                 }
@@ -1180,7 +1182,7 @@ function App({ user, onLogout, onUserChange }) {
 
                                     {selected.host && (
                                         <ContainmentPanel host={selected.host}
-                                            state={containment[selected.host]}
+                                            state={containment[selected.host.toLowerCase()]}
                                             busy={containBusy === selected.host}
                                             onIsolate={() => containHost(selected.host, "isolate")}
                                             onRelease={() => containHost(selected.host, "release")} />
@@ -2674,6 +2676,7 @@ function ContainmentPanel({ host, state, busy, onIsolate, onRelease }) {
                     {pending && <span className="ai-loading"><span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" /></span>}
                 </div>
             </div>
+            {pending && <div className="triage-body" style={{ paddingTop: 0 }}><div className="loading-bar" /></div>}
             {!online && !isolated && !pending && (
                 <div className="triage-body"><p className="triage-notes">
                     No containment agent is reporting from {host}. Isolation will apply once the agent is running there (<code>demo/containment_agent.py</code>).

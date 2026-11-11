@@ -2182,6 +2182,23 @@ button { font: inherit; color: inherit; }
 .ai-dot:nth-child(3) { animation-delay: 0.36s; margin-right: 8px; }
 @keyframes ai-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 
+/* indeterminate progress — a clearly moving stripe for any "working" state,
+   so "Isolating…" / "Thinking…" / "Writing the summary…" obviously show motion */
+.loading-bar {
+  position: relative; height: 3px; width: 100%; margin-top: 10px;
+  border-radius: 99px; overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.loading-bar::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: -38%; width: 38%;
+  border-radius: 99px; background: var(--accent);
+  animation: loading-slide 1.15s cubic-bezier(.65,.15,.35,.85) infinite;
+}
+@keyframes loading-slide { 0% { left: -38%; } 100% { left: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .loading-bar::before { animation-duration: 2.6s; }
+}
+
 /* rendered briefing */
 .ai-md { font-size: 14.5px; line-height: 1.65; color: var(--text); }
 .ai-md .ai-h {
@@ -4315,7 +4332,8 @@ mark.hl-match { background: var(--accent-wash); color: var(--accent-text); borde
 @keyframes nav-ask-pulse { 50% { opacity: .35; } }
 
 /* what an Ask AI reply is doing while it's still coming in */
-.ask-working { margin-top: 10px; }
+.ask-working-wrap { margin-top: 10px; }
+.ask-working { margin-top: 0; }
 
 /* ─── triage (alert page): a slim bar that opens up when there's a form ─── */
 .btn.primary { color: #fff; background: var(--accent-deep); border-color: transparent; }
