@@ -61,7 +61,30 @@ Each victim laptop sets its own name, the same string in both files:
 They must match exactly (same spelling and case) or the two alerts will not
 correlate to the same machine.
 
-## 5. Check they can reach each other
+## 5. Containment agent (for real isolate/release)
+
+To let the analyst actually cut a host off the network, run the containment
+agent on the victim laptop. It needs admin, because it changes routes.
+
+- Set the same `ANALYST_IP` and `HOST` at the top of `demo/containment_agent.py`
+  (the `HOST` must match the extension/beacon host exactly).
+- Run it as admin:
+  - Windows (open PowerShell as Administrator):
+    ```
+    python demo\containment_agent.py
+    ```
+  - Mac/Linux:
+    ```
+    sudo python3 demo/containment_agent.py
+    ```
+
+Now on the analyst dashboard, open an alert for that host and use
+Isolate / Release. The victim really loses internet on isolate and gets it back
+on release. It also auto-releases after a timeout and on closing the agent, so
+the machine can't get stuck offline. The SOC must be on the SAME subnet as the
+victim (it is, on the demo WiFi) so the control channel survives isolation.
+
+## 6. Check they can reach each other
 
 From the victim laptop:
 
