@@ -124,6 +124,9 @@ function App({ user, onLogout, onUserChange }) {
 
     // adding the state for alerts
     const [alerts, setAlerts] = useState([])
+    // host containment state, keyed by host name (released / isolating / isolated / releasing)
+    const [containment, setContainment] = useState({})
+    const [containBusy, setContainBusy] = useState(null)   // host currently being acted on
 
     // "Ask AI about this alert": a chat tied to the alert, its first question already
     // asked. The reply runs on the server, and Ask AI opens the chat and follows it
@@ -254,6 +257,29 @@ function App({ user, onLogout, onUserChange }) {
         .catch(err => setError(err.message))
     }, []);
 
+    // current containment state for every host we've touched
+    useEffect(() => {
+        api(`/containment`)
+        .then(res => res.json())
+        .then(list => setContainment(Object.fromEntries((list || []).map(s => [s.host, s]))))
+        .catch(() => {})
+    }, []);
+
+    // isolate / release a host: ask the backend, which queues it for the host's agent
+    async function containHost(host, action) {
+        setContainBusy(host)
+        try {
+            const res = await api(`/hosts/${encodeURIComponent(host)}/${action}`, { method: "POST" })
+            const state = await res.json().catch(() => ({}))
+            if (!res.ok) throw new Error(state.detail || res.status)
+            setContainment(prev => ({ ...prev, [host]: { ...(prev[host] || {}), ...state } }))
+        } catch (e) {
+            setError(`Couldn't ${action} ${host}: ${e.message}`)
+        } finally {
+            setContainBusy(null)
+        }
+    }
+
     // poll /status so the system panel shows real health. runs now and every 10s.
     useEffect(() => {
         let alive = true
@@ -297,6 +323,9 @@ function App({ user, onLogout, onUserChange }) {
                 } else if (msg.type === "alert_updated") {
                     // triaged (or an AI proposal added) here or on another analyst's screen
                     setAlerts(prev => prev.map(a => a.alert_id === msg.alert.alert_id ? msg.alert : a))
+                } else if (msg.type === "containment_updated") {
+                    // a host was isolated / released here, on another screen, or by its agent
+                    setContainment(prev => ({ ...prev, [msg.host]: { ...(prev[msg.host] || {}), host: msg.host, state: msg.state } }))
                 } else {
                     setAlerts(prev => [msg, ...prev])
                 }
@@ -1148,6 +1177,14 @@ function App({ user, onLogout, onUserChange }) {
 
                                     <TriagePanel alert={selected}
                                         onUpdated={updated => setAlerts(prev => prev.map(a => a.alert_id === updated.alert_id ? updated : a))} />
+
+                                    {selected.host && (
+                                        <ContainmentPanel host={selected.host}
+                                            state={containment[selected.host]}
+                                            busy={containBusy === selected.host}
+                                            onIsolate={() => containHost(selected.host, "isolate")}
+                                            onRelease={() => containHost(selected.host, "release")} />
+                                    )}
 
                                     {/* what VerifyEye's agent saw at this page (#3) */}
                                     {selected.target_url && <EvidencePanel alert={selected} />}
@@ -2587,6 +2624,65 @@ function CardEmpty({ glyph: Glyph, text, cta, onCta }) {
 }
 
 /* collapsible panel — the whole header is the hit target */
+// Real host containment: isolate a compromised host from the network (and release
+// it). The analyst decides; the host's containment agent actually applies it.
+function ContainmentPanel({ host, state, busy, onIsolate, onRelease }) {
+    const [confirming, setConfirming] = useState(false)
+    const s = state?.state || "released"
+    const online = state?.agent_online
+    const isolated = s === "isolated"
+    const pending = s === "isolating" || s === "releasing"
+    const tone = isolated ? "done bad" : pending ? "ai" : "open"
+    const headline = {
+        released: "Not contained", isolating: "Isolating…",
+        isolated: "Isolated from the network", releasing: "Releasing…",
+        error: "Containment error",
+    }[s] || s
+
+    return (
+        <section className={`triage-card ${tone}`} aria-label="Containment">
+            <div className="triage-bar">
+                <span className="triage-icon">{isolated ? <ShieldOff /> : <ShieldCheck />}</span>
+                <div className="triage-headline">
+                    <b>{headline}</b>
+                    <span>
+                        {isolated ? `${host} is cut off from the network.`
+                            : pending ? `Waiting for the containment agent on ${host}…`
+                            : `Cut ${host} off the network to contain it.`}
+                        {"  ·  agent "}
+                        <em style={{ color: online ? "var(--good, #4ade80)" : "var(--muted, #9aa)" }}>
+                            {online ? "online" : "not reporting"}
+                        </em>
+                    </span>
+                </div>
+                <div className="triage-start">
+                    {!isolated && !pending && (confirming ? (
+                        <>
+                            <button className="btn sm bad" disabled={busy} onClick={() => { setConfirming(false); onIsolate() }}>
+                                {busy ? <span className="btn-spinner" /> : <ShieldOff />} Confirm isolate
+                            </button>
+                            <button className="btn sm" disabled={busy} onClick={() => setConfirming(false)}><X /> Cancel</button>
+                        </>
+                    ) : (
+                        <button className="btn sm" onClick={() => setConfirming(true)}><ShieldOff /> Isolate host</button>
+                    ))}
+                    {isolated && (
+                        <button className="btn sm primary" disabled={busy} onClick={onRelease}>
+                            {busy ? <span className="btn-spinner" /> : <ShieldCheck />} Release
+                        </button>
+                    )}
+                    {pending && <span className="ai-loading"><span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" /></span>}
+                </div>
+            </div>
+            {!online && !isolated && !pending && (
+                <div className="triage-body"><p className="triage-notes">
+                    No containment agent is reporting from {host}. Isolation will apply once the agent is running there (<code>demo/containment_agent.py</code>).
+                </p></div>
+            )}
+        </section>
+    )
+}
+
 function Panel({ title, note, children, flush = false, action, onAction, actionIcon: ActionIcon = ArrowRight, wide = false }) {
     return (
         <section className={`panel ${wide ? "panel-wide" : ""}`}>

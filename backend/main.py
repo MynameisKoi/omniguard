@@ -26,6 +26,7 @@ from ledger import (
     get_ledger_for_entity,
     get_recent_ledger,
 )
+import containment
 from agents import MultiAgentInvestigationPipeline
 from ocsf import alert_to_ocsf, export_alerts_to_ocsf
 
@@ -564,12 +565,45 @@ async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
 
 @app.post("/hosts/{hostname}/isolate", status_code=202)
 async def isolate_host(hostname: str, me: dict = Depends(current_user)):
-    """Host containment (DEMO STUB): recorded in the ledger, no real network
-    action yet. Same code the AI agent's approved isolate_host runs (tools.py)."""
-    out = await run_in_threadpool(run_tool, "isolate_host", {"hostname": hostname}, me["email"], True)
-    if not out["ok"]:
-        raise HTTPException(status_code=400, detail=out["summary"])
-    return {**out["data"], "action": "network_isolation"}
+    """Ask the host's containment agent to cut it off the network. The agent
+    confirms back when it's really applied (see containment.py)."""
+    return await run_in_threadpool(containment.request_isolation, hostname, me["email"])
+
+
+@app.post("/hosts/{hostname}/release", status_code=202)
+async def release_host(hostname: str, me: dict = Depends(current_user)):
+    """Ask the host's containment agent to bring it back online."""
+    return await run_in_threadpool(containment.request_release, hostname, me["email"])
+
+
+@app.get("/hosts/{hostname}/containment", dependencies=AUTH)
+async def host_containment(hostname: str):
+    return await run_in_threadpool(containment.get_state, hostname)
+
+
+@app.get("/containment", dependencies=AUTH)
+async def all_containment():
+    return await run_in_threadpool(containment.list_states)
+
+
+# ── Containment agent channel (unauthenticated, LAN only, like /alerts) ──
+# The agent on each host polls for a command and acks when it's applied. No
+# login token (it's a headless script), so these are open on the LAN.
+class AgentAck(BaseModel):
+    host: str
+    action: Literal["isolate", "release"]
+    ok: bool = True
+    message: str | None = None
+
+@app.get("/agent/containment/poll")
+async def agent_containment_poll(host: str):
+    return await run_in_threadpool(containment.agent_poll, host)
+
+@app.post("/agent/containment/ack")
+async def agent_containment_ack(payload: AgentAck):
+    return await run_in_threadpool(
+        containment.agent_ack, payload.host, payload.action, payload.ok, payload.message
+    )
 
 
 # ── Decision Ledger Audit Endpoints ─────────────────────────────────
