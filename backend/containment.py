@@ -28,6 +28,13 @@ def _now():
     return datetime.now(timezone.utc)
 
 
+def _key(host):
+    """Host names reach us from the extension, the beacon and the agent with
+    different capitalisation ('Lenovo-10' vs 'lenovo-10'). Match them all to one
+    key so a request and its agent can never miss each other over a capital."""
+    return (host or "").strip().lower()
+
+
 def _broadcast(host, state):
     manager.broadcast_from_thread({
         "type": "containment_updated", "host": host, "state": state,
@@ -35,7 +42,7 @@ def _broadcast(host, state):
 
 
 def _doc(host):
-    return containment_collection.find_one({"_id": host}, {"_id": 0})
+    return containment_collection.find_one({"_id": _key(host)}, {"_id": 0})
 
 
 def get_state(host):
@@ -57,7 +64,7 @@ def request_isolation(host, by="unknown"):
     """Analyst asks to cut this host off. Queues the command for its agent."""
     now = _now()
     containment_collection.update_one(
-        {"_id": host},
+        {"_id": _key(host)},
         {"$set": {"state": "isolating", "requested_action": "isolate",
                   "requested_at": now, "requested_by": by, "message": None}},
         upsert=True,
@@ -77,7 +84,7 @@ def request_release(host, by="unknown"):
     """Analyst asks to bring this host back online. Queues the command."""
     now = _now()
     containment_collection.update_one(
-        {"_id": host},
+        {"_id": _key(host)},
         {"$set": {"state": "releasing", "requested_action": "release",
                   "requested_at": now, "requested_by": by, "message": None}},
         upsert=True,
@@ -97,7 +104,7 @@ def agent_poll(host):
     """Called by the host's agent. Records that it's alive and returns the one
     action it should take now (or none)."""
     containment_collection.update_one(
-        {"_id": host}, {"$set": {"agent_seen_at": _now()}}, upsert=True,
+        {"_id": _key(host)}, {"$set": {"agent_seen_at": _now()}}, upsert=True,
     )
     d = _doc(host) or {}
     state = d.get("state", "released")
@@ -126,7 +133,7 @@ def agent_ack(host, action, ok=True, message=None):
         return get_state(host)
 
     containment_collection.update_one(
-        {"_id": host},
+        {"_id": _key(host)},
         {"$set": {"state": state, "applied_at": now, "message": message,
                   "agent_seen_at": now}},
         upsert=True,
