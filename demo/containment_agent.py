@@ -108,56 +108,80 @@ def has_internet():
     return False
 
 
+FW_RULE = "OmniGuard-Isolate"          # IPv4 rule name
+FW_RULE6 = "OmniGuard-Isolate-v6"      # IPv6 rule name
+
+
+def _soc_block_ranges():
+    """IPv4 ranges covering everything EXCEPT the SOC's /24, so we block the
+    internet but keep the SOC (and gateway) reachable for the release command."""
+    import ipaddress
+    a, b, c, _ = ANALYST_IP.split(".")
+    net = ipaddress.ip_network(f"{a}.{b}.{c}.0/24")
+    first, last = int(net.network_address), int(net.broadcast_address)
+    ranges = []
+    if first > 0:
+        ranges.append(f"0.0.0.0-{ipaddress.ip_address(first - 1)}")
+    if last < 2**32 - 1:
+        ranges.append(f"{ipaddress.ip_address(last + 1)}-255.255.255.255")
+    return ",".join(ranges)
+
+
 def cut_network():
-    """Remove the default route(s) -> internet is cut, LAN/SOC still reachable.
-    VERIFIES the cut actually worked instead of trusting the command."""
+    """Cut the host off the internet, keeping the SOC subnet reachable so the
+    analyst can still release it. VERIFIES the cut actually worked.
+
+    Windows: a firewall rule (reliable; route delete gets auto-undone by Windows).
+    Mac/Linux: remove the default route."""
     if not is_admin():
-        return False, ("not running as admin -- route changes need elevation. "
+        return False, ("not running as admin -- this needs elevation. "
                        "Windows: reopen PowerShell as Administrator. Mac/Linux: use sudo.")
-    gws = current_gateways()
-    if not gws:
-        return False, "no default gateway found (already offline?)"
-    _state["gateways"] = gws
 
     errs = []
     if IS_WIN:
-        for cmd in ([["route", "delete", "0.0.0.0"]]
-                    + [["route", "delete", "0.0.0.0", "mask", "0.0.0.0", gw] for gw in gws]):
-            r = _run(cmd)
+        # clear any leftover rules from a previous run so they don't stack
+        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE}"])
+        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE6}"])
+        block = _soc_block_ranges()
+        r1 = _run(["netsh", "advfirewall", "firewall", "add", "rule",
+                   f"name={FW_RULE}", "dir=out", "action=block",
+                   f"remoteip={block}", "enable=yes"])
+        # also block all IPv6 outbound so sites can't sneak out over v6
+        r2 = _run(["netsh", "advfirewall", "firewall", "add", "rule",
+                   f"name={FW_RULE6}", "dir=out", "action=block",
+                   "remoteip=::/0", "enable=yes"])
+        for r in (r1, r2):
             if r.returncode != 0 and (r.stderr or r.stdout).strip():
                 errs.append((r.stderr or r.stdout).strip())
     else:
+        gws = current_gateways()
+        _state["gateways"] = gws
         r = _run(["route", "delete", "default"])
         if r.returncode != 0 and (r.stderr or r.stdout).strip():
             errs.append((r.stderr or r.stdout).strip())
 
-    time.sleep(1.2)  # let the routing table settle / any auto re-add happen
+    time.sleep(1.5)  # let the firewall / routing table settle
 
-    # the real test: did we actually lose the internet?
-    if has_internet() or current_gateways():
-        detail = "default route still active after delete"
-        if current_gateways():
-            detail += f" (gateway still: {', '.join(current_gateways())})"
+    if has_internet():
+        detail = "internet is still reachable after applying the block"
         if errs:
             detail += f"; command said: {' | '.join(errs)}"
+        restore_network()  # don't leave a half-applied state
         return False, detail
-    return True, f"internet cut (removed default route via {', '.join(gws)}); SOC still on-subnet"
+    return True, "internet cut; SOC subnet still reachable"
 
 
 def restore_network():
-    """Re-add the saved default route -> internet back. Verifies it returned."""
-    gws = _state.get("gateways") or current_gateways()
-    if not gws:
-        return False, "no saved gateway to restore"
-    for gw in gws:
-        if IS_WIN:
-            _run(["route", "add", "0.0.0.0", "mask", "0.0.0.0", gw])
-        else:
+    """Undo the cut -> internet back. Verifies connectivity returned."""
+    if IS_WIN:
+        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE}"])
+        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE6}"])
+    else:
+        for gw in (_state.get("gateways") or current_gateways()):
             _run(["route", "add", "default", gw])
-    time.sleep(1.2)
+    time.sleep(1.5)
     back = has_internet()
-    msg = f"default route restored via {', '.join(gws)}"
-    return back, (msg if back else msg + " -- but internet not confirmed back yet")
+    return back, ("internet restored" if back else "block removed -- internet not confirmed back yet")
 
 
 # ── SOC channel ──────────────────────────────────────────────────────────────

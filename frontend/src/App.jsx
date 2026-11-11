@@ -1903,7 +1903,6 @@ function ProfilePage({ user, onSaved }) {
 function AlertActions({ alert }) {
     const [busy, setBusy] = useState(null)
     const [investigation, setInvestigation] = useState(null)
-    const [isolation, setIsolation] = useState(null)
     const [ocsf, setOcsf] = useState(null)
     const [err, setErr] = useState(null)
 
@@ -1923,7 +1922,6 @@ function AlertActions({ alert }) {
     const isolate = () => run("isolate", async () => {
         const res = await api(`/hosts/${encodeURIComponent(alert.host)}/isolate`, { method: "POST" })
         if (!res.ok) throw new Error()
-        setIsolation(await res.json())
     })
     const exportOcsf = () => run("ocsf", async () => {
         const res = await api(`/alerts/${alert.alert_id}/ocsf`)
@@ -1940,17 +1938,8 @@ function AlertActions({ alert }) {
                 <button className="btn" onClick={exportOcsf} disabled={busy}>
                     {busy === "ocsf" ? "Exporting…" : "Export OCSF"}
                 </button>
-                <button className="btn danger" onClick={isolate} disabled={busy}>
-                    {busy === "isolate" ? "Isolating…" : "Isolate host"}
-                </button>
             </div>
             {err && <div className="login-error" style={{ marginTop: 8 }}>{err}</div>}
-            {isolation && (
-                <div className="action-result">
-                    <strong>Containment</strong> — {isolation.message}
-                    {isolation.simulated && <span className="tag">simulated</span>}
-                </div>
-            )}
             {investigation && (
                 <Modal onClose={() => setInvestigation(null)}>
                     <InvestigationResult
