@@ -21,6 +21,7 @@ import uuid
 import httpx
 
 from config import OLLAMA_URL, OLLAMA_MODEL
+from ai_transparency import AITraceContext
 from conversations import append_message, get_conversation, update_message
 from tools import TOOLS, alert_context, alerts_collection, closest_entity, mentioned_entities, run_tool, tool_specs
 
@@ -641,9 +642,11 @@ def _chat(messages, tools):
     Text that starts like JSON is held back: it's usually a tool call written as
     text, which gets recovered as a real call instead of shown to the analyst."""
     content, calls, held = "", [], None
+    metrics = {"prompt": 0, "completion": 0, "duration_ms": 0.0}
+    options = {"temperature": 0.2, "num_ctx": 8192, "num_predict": 500, "repeat_penalty": 1.15}
     with httpx.stream("POST", f"{OLLAMA_URL}/api/chat", timeout=120.0, json={
         "model": OLLAMA_MODEL, "messages": messages, "tools": tools, "stream": True, "keep_alive": "30m",
-        "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 500, "repeat_penalty": 1.15},
+        "options": options,
     }) as r:
         r.raise_for_status()
         for line in r.iter_lines():
@@ -660,6 +663,11 @@ def _chat(messages, tools):
                 if not calls and held is False:
                     yield "token", msg["content"]
             if chunk.get("done"):
+                metrics["prompt"] = chunk.get("prompt_eval_count", 0)
+                metrics["completion"] = chunk.get("eval_count", 0)
+                metrics["total"] = metrics["prompt"] + metrics["completion"]
+                if chunk.get("total_duration"):
+                    metrics["duration_ms"] = round(chunk["total_duration"] / 1e6, 2)
                 break
     if held and not calls:
         recovered = _text_tool_call(content)
@@ -667,7 +675,7 @@ def _chat(messages, tools):
             calls, content = recovered, ""
         else:
             yield "token", content
-    yield "done", {"role": "assistant", "content": content, "tool_calls": calls}
+    yield "done", {"role": "assistant", "content": content, "tool_calls": calls, "metrics": metrics}
 
 
 def _event(kind, **data):
@@ -745,6 +753,15 @@ def run_turn(owner, conversation_id, text, context=None):
     nexts = []         # next steps written from the data, shown last
     reference = text   # everything this turn's results say, for the grounding check
 
+    trace = AITraceContext(
+        caller="soc_agent",
+        model=OLLAMA_MODEL,
+        analyst=owner,
+        prompt_data={"text": text, "context": context, "conversation_id": conversation_id},
+        metadata={"conversation_id": conversation_id},
+    )
+    trace.__enter__()
+
     def say(piece):
         if piece:
             shown.append(piece)
@@ -768,6 +785,11 @@ def run_turn(owner, conversation_id, text, context=None):
         ev = say(cleaner.finish())
         if ev:
             yield ev
+        if reply and reply.get("metrics"):
+            m = reply["metrics"]
+            trace.tokens["prompt"] += m.get("prompt", 0)
+            trace.tokens["completion"] += m.get("completion", 0)
+            trace.tokens["total"] = trace.tokens["prompt"] + trace.tokens["completion"]
         yield ("reply", reply)
 
     try:
@@ -809,6 +831,7 @@ def run_turn(owner, conversation_id, text, context=None):
                 step = {"tool": name, "args": result.get("args", args), "ok": result["ok"], "summary": result["summary"],
                         "proposed": bool(result.get("needs_approval"))}
                 steps.append(step)
+                trace.tool_calls.append(step)
                 yield _event("step", **step, status="done")
 
                 if result.get("did_you_mean"):
@@ -878,7 +901,11 @@ def run_turn(owner, conversation_id, text, context=None):
         else:
             yield say("\n\n(I stopped after several steps — ask me to continue if you need more.)")
     except httpx.HTTPError as e:
+        trace.record_error(e, error_type="connection_error")
         yield say(f"\n\nI couldn't reach the local AI model ({type(e).__name__}). Is Ollama running?")
+    except Exception as e:
+        trace.record_error(e, error_type="execution_error")
+        yield say(f"\n\nInternal agent execution error: {type(e).__name__}. See AI transparency trace {trace.trace_id} for details.")
 
     if not "".join(shown).strip():
         # the model's whole reply was filtered out (or it said nothing): be useful anyway
@@ -904,8 +931,11 @@ def run_turn(owner, conversation_id, text, context=None):
 
     # the saved reply is exactly what streamed: nothing changes when it finishes
     answer = re.sub(r"\n{3,}", "\n\n", "".join(shown)).strip()
+    trace.set_result(content=answer, tool_calls=steps, tokens=trace.tokens)
+    trace.__exit__(None, None, None)
     message = append_message(owner, conversation_id, "assistant", answer,
                              steps=steps, blocks=blocks, approvals=approvals)
+    yield _event("telemetry", trace_id=trace.trace_id, model=OLLAMA_MODEL, tokens=trace.tokens)
     yield _event("done", message_id=message["message_id"] if message else None, content=answer)
 
 
