@@ -1177,9 +1177,6 @@ function App({ user, onLogout, onUserChange }) {
                                 <div>
                                     {selected.description && <p className="note">{selected.description}</p>}
 
-                                    <TriagePanel alert={selected}
-                                        onUpdated={updated => setAlerts(prev => prev.map(a => a.alert_id === updated.alert_id ? updated : a))} />
-
                                     {selected.host && (
                                         <ContainmentPanel host={selected.host}
                                             state={containment[selected.host.toLowerCase()]}
@@ -1187,6 +1184,9 @@ function App({ user, onLogout, onUserChange }) {
                                             onIsolate={() => containHost(selected.host, "isolate")}
                                             onRelease={() => containHost(selected.host, "release")} />
                                     )}
+
+                                    <TriagePanel alert={selected}
+                                        onUpdated={updated => setAlerts(prev => prev.map(a => a.alert_id === updated.alert_id ? updated : a))} />
 
                                     {/* what VerifyEye's agent saw at this page (#3) */}
                                     {selected.target_url && <EvidencePanel alert={selected} />}
