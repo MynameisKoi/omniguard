@@ -95,38 +95,69 @@ def current_gateways():
     return uniq
 
 
+def has_internet():
+    """True if we can actually reach the public internet (no DNS needed)."""
+    import socket
+    for ip in ("8.8.8.8", "1.1.1.1"):
+        try:
+            s = socket.create_connection((ip, 53), timeout=2)
+            s.close()
+            return True
+        except Exception:
+            continue
+    return False
+
+
 def cut_network():
-    """Remove the default route -> internet is cut, LAN/SOC still reachable."""
+    """Remove the default route(s) -> internet is cut, LAN/SOC still reachable.
+    VERIFIES the cut actually worked instead of trusting the command."""
+    if not is_admin():
+        return False, ("not running as admin -- route changes need elevation. "
+                       "Windows: reopen PowerShell as Administrator. Mac/Linux: use sudo.")
     gws = current_gateways()
     if not gws:
         return False, "no default gateway found (already offline?)"
     _state["gateways"] = gws
-    try:
-        if IS_WIN:
-            _run(["route", "delete", "0.0.0.0"])
-        else:
-            _run(["route", "delete", "default"])
-        return True, f"default route removed (saved gateway {', '.join(gws)})"
-    except Exception as e:
-        return False, str(e)
+
+    errs = []
+    if IS_WIN:
+        for cmd in ([["route", "delete", "0.0.0.0"]]
+                    + [["route", "delete", "0.0.0.0", "mask", "0.0.0.0", gw] for gw in gws]):
+            r = _run(cmd)
+            if r.returncode != 0 and (r.stderr or r.stdout).strip():
+                errs.append((r.stderr or r.stdout).strip())
+    else:
+        r = _run(["route", "delete", "default"])
+        if r.returncode != 0 and (r.stderr or r.stdout).strip():
+            errs.append((r.stderr or r.stdout).strip())
+
+    time.sleep(1.2)  # let the routing table settle / any auto re-add happen
+
+    # the real test: did we actually lose the internet?
+    if has_internet() or current_gateways():
+        detail = "default route still active after delete"
+        if current_gateways():
+            detail += f" (gateway still: {', '.join(current_gateways())})"
+        if errs:
+            detail += f"; command said: {' | '.join(errs)}"
+        return False, detail
+    return True, f"internet cut (removed default route via {', '.join(gws)}); SOC still on-subnet"
 
 
 def restore_network():
-    """Re-add the saved default route -> internet back."""
+    """Re-add the saved default route -> internet back. Verifies it returned."""
     gws = _state.get("gateways") or current_gateways()
     if not gws:
         return False, "no saved gateway to restore"
-    ok = True
     for gw in gws:
-        try:
-            if IS_WIN:
-                _run(["route", "add", "0.0.0.0", "mask", "0.0.0.0", gw])
-            else:
-                _run(["route", "add", "default", gw])
-        except Exception as e:
-            ok = False
-            print(f"  ! restore of gateway {gw} failed: {e}")
-    return ok, f"default route restored via {', '.join(gws)}"
+        if IS_WIN:
+            _run(["route", "add", "0.0.0.0", "mask", "0.0.0.0", gw])
+        else:
+            _run(["route", "add", "default", gw])
+    time.sleep(1.2)
+    back = has_internet()
+    msg = f"default route restored via {', '.join(gws)}"
+    return back, (msg if back else msg + " -- but internet not confirmed back yet")
 
 
 # ── SOC channel ──────────────────────────────────────────────────────────────
