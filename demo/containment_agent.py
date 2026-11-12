@@ -143,8 +143,9 @@ def flush_connections():
             break
 
 
-FW_RULE = "OmniGuard-Isolate"          # IPv4 rule name
-FW_RULE6 = "OmniGuard-Isolate-v6"      # IPv6 rule name
+FW_RULE = "OmniGuard-Isolate"          # old IPv4 remoteip rule (cleaned up)
+FW_RULE6 = "OmniGuard-Isolate-v6"      # old IPv6 rule (cleaned up)
+FW_ALLOW = "OmniGuard-AllowSOC"        # allow-local rule used with the block policy
 
 
 def _soc_block_ranges():
@@ -178,8 +179,8 @@ def print_diagnostics(tag=""):
             t = line.strip()
             if t and ("Profile Settings" in t or t.startswith("State")):
                 print(f"    firewall: {t}")
-        rule = (_run(["netsh", "advfirewall", "firewall", "show", "rule", f"name={FW_RULE}"]).stdout or "")
-        print(f"    block rule present: {'No rules match' not in rule}")
+        rule = (_run(["netsh", "advfirewall", "firewall", "show", "rule", f"name={FW_ALLOW}"]).stdout or "")
+        print(f"    cut applied (allow-SOC rule present): {'No rules match' not in rule}")
     print(f"    can reach internet (8.8.8.8): {has_internet()}")
     print(f"    can reach SOC ({ANALYST_IP}): {can_reach_soc()}")
     print(f"  --- end diagnostics ---")
@@ -198,17 +199,18 @@ def cut_network():
     errs = []
     if IS_WIN:
         ensure_firewall_on()   # the block does nothing if the firewall is off
-        # clear any leftover rules from a previous run so they don't stack
+        # clean up any rules from older versions
         _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE}"])
         _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE6}"])
-        block = _soc_block_ranges()
+        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_ALLOW}"])
+        # Block ALL outbound (IPv4 AND IPv6) by policy, then allow only the local
+        # subnet -- so the SOC stays reachable but nothing can leak to the internet
+        # over v6 (which is how YouTube/Google were getting through).
         r1 = _run(["netsh", "advfirewall", "firewall", "add", "rule",
-                   f"name={FW_RULE}", "dir=out", "action=block",
-                   f"remoteip={block}", "enable=yes"])
-        # also block all IPv6 outbound so sites can't sneak out over v6
-        r2 = _run(["netsh", "advfirewall", "firewall", "add", "rule",
-                   f"name={FW_RULE6}", "dir=out", "action=block",
-                   "remoteip=::/0", "enable=yes"])
+                   f"name={FW_ALLOW}", "dir=out", "action=allow",
+                   "remoteip=LocalSubnet", "enable=yes"])
+        r2 = _run(["netsh", "advfirewall", "set", "allprofiles",
+                   "firewallpolicy", "blockinbound,blockoutbound"])
         for r in (r1, r2):
             if r.returncode != 0 and (r.stderr or r.stdout).strip():
                 errs.append((r.stderr or r.stdout).strip())
@@ -237,12 +239,16 @@ def cut_network():
 def restore_network():
     """Undo the cut -> internet back. Verifies connectivity returned."""
     if IS_WIN:
+        # restore the normal default (outbound allowed) and remove our rules
+        _run(["netsh", "advfirewall", "set", "allprofiles",
+              "firewallpolicy", "blockinbound,allowoutbound"])
+        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_ALLOW}"])
         _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE}"])
         _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE6}"])
     else:
         for gw in (_state.get("gateways") or current_gateways()):
             _run(["route", "add", "default", gw])
-    time.sleep(1.5)
+    time.sleep(1.0)
     back = has_internet()
     return back, ("internet restored" if back else "block removed -- internet not confirmed back yet")
 
