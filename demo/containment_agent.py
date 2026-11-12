@@ -266,9 +266,15 @@ def restore_network():
 
 
 # ── SOC channel ──────────────────────────────────────────────────────────────
+# Talk to the SOC DIRECTLY, never through a system/WPAD proxy: a proxy sits on the
+# internet, which is blocked during isolation, so a proxied request would fail even
+# though the SOC itself is reachable. This is what kept Release from arriving.
+_direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def poll():
     url = f"{CORE}/agent/containment/poll?host={urllib.parse.quote(HOST)}"
-    with urllib.request.urlopen(url, timeout=5) as r:
+    with _direct.open(url, timeout=5) as r:
         return json.loads(r.read().decode())
 
 
@@ -279,7 +285,7 @@ def ack(action, ok, message=None):
                                  headers={"Content-Type": "application/json"},
                                  method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=5) as r:
+        with _direct.open(req, timeout=5) as r:
             r.read(1)
     except Exception as e:
         print(f"  ! could not ack to SOC: {e}")
