@@ -1,0 +1,242 @@
+"""Unit and integration tests for OmniGuard Backend API endpoints."""
+
+import os
+import sys
+import pytest
+from unittest.mock import MagicMock, patch
+
+# Ensure NEO4J_PASSWORD is set before importing backend modules
+os.environ.setdefault("NEO4J_PASSWORD", "test_password_secret")
+
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+backend_dir = os.path.join(repo_root, "backend")
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+# Mock graph and database before importing app to isolate unit test
+with patch("neo4j.GraphDatabase.driver") as mock_driver, \
+     patch("pymongo.MongoClient") as mock_mongo:
+    from models import AlertCreate, AlertStatusUpdate, Alert
+    import main as backend_main
+    from main import app
+
+from fastapi.testclient import TestClient
+
+# Override current_user dependency so tests default to authenticated analyst
+@pytest.fixture(autouse=True)
+def override_current_user():
+    app.dependency_overrides[backend_main.current_user] = lambda: {
+        "email": "analyst@omniguard.io",
+        "name": "SOC Analyst",
+        "role": "analyst",
+    }
+    yield
+    app.dependency_overrides[backend_main.current_user] = lambda: {
+        "email": "analyst@omniguard.io",
+        "name": "SOC Analyst",
+        "role": "analyst",
+    }
+
+client = TestClient(app)
+
+
+def test_backend_health():
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_isolate_host():
+    response = client.post("/hosts/WORKSTATION-CORP-99/isolate")
+    assert response.status_code == 202
+    data = response.json()
+    assert data["status"] == "isolation_requested"
+    assert data["simulated"] is True
+    assert data["host"] == "WORKSTATION-CORP-99"
+    assert data["action"] == "network_isolation"
+    assert "Containment requested for 'WORKSTATION-CORP-99'" in data["message"]
+
+
+def test_create_and_patch_alert():
+    # Mock alerts_collection and graph update
+    fake_alert_id = "test-alert-uuid-1234"
+    mock_doc = {
+        "alert_id": fake_alert_id,
+        "source": "verifyeye",
+        "event_type": "phishing_page_detected",
+        "severity": "critical",
+        "host": "WORKSTATION-CORP-99",
+        "status": "new",
+        "description": "Suspicious login form detected",
+        "timestamp": "2026-09-30T12:00:00Z",
+    }
+
+    with patch.object(backend_main.alerts_collection, "insert_one") as mock_insert, \
+         patch("main.ingest_alert") as mock_ingest, \
+         patch.object(backend_main.alerts_collection, "find_one_and_update") as mock_update, \
+         patch("main.update_graph_alert_status") as mock_update_status:
+
+        mock_update.return_value = {**mock_doc, "status": "triaged"}
+
+        # Test POST /alerts
+        payload = {
+            "source": "verifyeye",
+            "event_type": "phishing_page_detected",
+            "severity": "critical",
+            "host": "WORKSTATION-CORP-99",
+            "description": "Suspicious login form detected",
+        }
+        res_post = client.post("/alerts", json=payload)
+        assert res_post.status_code == 201
+        created = res_post.json()
+        assert created["source"] == "verifyeye"
+        assert created["host"] == "WORKSTATION-CORP-99"
+        assert "alert_id" in created
+        assert "timestamp" in created
+
+        # Test PATCH /alerts/{id}
+        res_patch = client.patch(
+            f"/alerts/{fake_alert_id}",
+            json={"status": "triaged"},
+        )
+        assert res_patch.status_code == 200
+        patched = res_patch.json()
+        assert patched["alert_id"] == fake_alert_id
+        assert patched["status"] == "triaged"
+        mock_update_status.assert_called_with(fake_alert_id, "triaged")
+
+
+def test_patch_alert_not_found():
+    with patch.object(backend_main.alerts_collection, "find_one_and_update") as mock_update:
+        mock_update.return_value = None
+        res_patch = client.patch(
+            "/alerts/non-existent-alert-id",
+            json={"status": "triaged"},
+        )
+        assert res_patch.status_code == 404
+        assert "not found" in res_patch.json()["detail"]
+
+
+def test_websocket_alerts_feed():
+    with patch("main.session_user", return_value={"email": "analyst@omniguard.io", "name": "SOC Analyst"}):
+        with client.websocket_connect("/ws/alerts?token=mock_session_token") as websocket:
+            # Verify connection succeeds and manager registered connection
+            assert len(backend_main.ws_manager.active_connections) >= 1
+
+
+def test_get_brands():
+    with patch.object(backend_main.brands_collection, "find") as mock_find:
+        mock_find.return_value = [{"name": "Google", "domains": ["google.com"]}]
+        res = client.get("/brands")
+        assert res.status_code == 200
+        assert res.json() == [{"name": "Google", "domains": ["google.com"]}]
+
+
+def test_get_status():
+    with patch("main.check_mongo", return_value=True), \
+         patch("main.check_neo4j", return_value=True), \
+         patch("main.check_ollama", return_value=True), \
+         patch.object(backend_main.alerts_collection, "estimated_document_count", return_value=5):
+        res = client.get("/status")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["backend"] is True
+        assert data["mongo"] is True
+        assert data["neo4j"] is True
+        assert data["ollama"] is True
+        assert data["ingestion"] is True
+
+
+def test_ai_summary():
+    with patch.object(backend_main.alerts_collection, "find") as mock_find, \
+         patch("main.run_triage", return_value="Summary: Phishing surge detected.\nNext steps: Isolate host."):
+        mock_cursor = MagicMock()
+        mock_cursor.sort.return_value = mock_cursor
+        mock_cursor.limit.return_value = [
+            {"alert_id": "a-1", "severity": "high", "source": "verifyeye", "event_type": "phishing"}
+        ]
+        mock_find.return_value = mock_cursor
+
+        res = client.get("/ai/summary")
+        assert res.status_code == 200
+        data = res.json()
+        assert "triage" in data
+        assert "Phishing surge detected" in data["triage"]
+        assert data["alert_count"] == 1
+
+
+def test_auth_login_success():
+    with patch("main.check_login", return_value={"email": "analyst@omniguard.io", "name": "SOC Analyst"}):
+        res = client.post("/auth/login", json={"email": "analyst@omniguard.io", "password": "valid_password"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["email"] == "analyst@omniguard.io"
+        assert data["name"] == "SOC Analyst"
+        assert "token" in data
+        assert "expires_at" in data
+
+
+def test_auth_login_invalid_credentials():
+    with patch("main.check_login", return_value=None):
+        res = client.post("/auth/login", json={"email": "analyst@omniguard.io", "password": "wrong_password"})
+        assert res.status_code == 401
+        assert res.json()["detail"] == "Invalid email or password"
+
+
+def test_auth_profile_update_success():
+    with patch("main.update_user", return_value={"email": "analyst@omniguard.io", "name": "Senior Analyst"}):
+        res = client.post(
+            "/auth/profile",
+            json={
+                "email": "analyst@omniguard.io",
+                "current_password": "current_pass",
+                "name": "Senior Analyst",
+                "new_password": "new_secret_password_123",
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["name"] == "Senior Analyst"
+
+
+def test_auth_profile_update_wrong_password():
+    with patch("main.update_user", return_value=None):
+        res = client.post(
+            "/auth/profile",
+            json={
+                "email": "analyst@omniguard.io",
+                "current_password": "wrong_current_pass",
+                "name": "Senior Analyst",
+            },
+        )
+        assert res.status_code == 401
+        assert "Current password is incorrect" in res.json()["detail"]
+
+
+def test_ai_chat():
+    with patch.object(backend_main.alerts_collection, "find") as mock_find, \
+         patch("main.answer_question", return_value="The most affected host is LAPTOP-10 with 5 alerts."):
+        mock_cursor = MagicMock()
+        mock_cursor.sort.return_value = mock_cursor
+        mock_cursor.limit.return_value = [{"alert_id": "a-1", "host": "LAPTOP-10"}]
+        mock_find.return_value = mock_cursor
+
+        payload = {
+            "question": "Which host has the most alerts?",
+            "history": [{"role": "user", "text": "Hello"}],
+        }
+        res = client.post("/ai/chat", json=payload)
+        assert res.status_code == 200
+        data = res.json()
+        assert "answer" in data
+        assert "LAPTOP-10" in data["answer"]
+
+
+def test_seed_default_user_logic():
+    with patch("auth.users_collection.estimated_document_count", return_value=0), \
+         patch("auth.create_user") as mock_create:
+        from auth import seed_default_user
+        result = seed_default_user()
+        assert result is True
+        mock_create.assert_called_once()
+
+

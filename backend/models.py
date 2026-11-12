@@ -147,3 +147,9 @@ class Alert(AlertCreate):
         None,
         description="64-bit Simhash fingerprint hex string used for perceptual deduplication",
     )
+
+class AlertStatusUpdate(BaseModel):
+    status: Literal["new", "triaged", "resolved"] = Field(
+        description="Updated triage state for the alert",
+        examples=["triaged"],
+    )

@@ -330,6 +330,19 @@ def get_host_graph(hostname):
     with driver.session() as session: 
         return session.execute_read(_read_host, hostname)
 
+def update_alert_status(alert_id: str, status: str) -> None:
+    """Updates the status property of an Alert node in Neo4j."""
+    with driver.session() as session:
+        session.run(
+            """
+            MATCH (a:Alert {alert_id: $alert_id})
+            SET a.status = $status
+            """,
+            alert_id=alert_id,
+            status=status,
+        )
+
+
 
 
 

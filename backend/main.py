@@ -1,17 +1,18 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from neo4j.exceptions import ServiceUnavailable
 from starlette.concurrency import run_in_threadpool
 from events import manager
-from models import Alert, AlertCreate
+from models import Alert, AlertCreate, AlertStatusUpdate
 from db import database, brands_collection
 from ai import run_triage, answer_question
-from auth import check_login, update_user, create_session, session_user, end_session
+from auth import check_login, check_badge_login, update_user, create_session, session_user, end_session, seed_default_user
 from status import check_mongo, check_neo4j, check_ollama
 from datetime import datetime, timezone, timedelta
 from typing import Literal
 from pydantic import BaseModel, Field
-from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_view
+from graph import ingest_alert, get_overview_graph, get_host_graph, get_graph_view, update_alert_status as update_graph_alert_status
 from tools import tool_specs, run_tool
 from triage import apply_triage, propose_triage, approve_proposal, reject_proposal, bulk, TriageError
 from conversations import (create_conversation, list_conversations, get_conversation,
@@ -28,16 +29,28 @@ from ledger import (
 )
 from agents import MultiAgentInvestigationPipeline
 from ocsf import alert_to_ocsf, export_alerts_to_ocsf
+from ai_transparency import get_transparency_logs, get_transparency_trace
 
 from config import CORS_ORIGINS
 
 from fastapi.middleware.cors import CORSMiddleware
 
+ws_manager = manager
+
 # getting the collection
 alerts_collection = database["alerts"]
 
 
-app = FastAPI(title="OmniGuard SOC API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        await run_in_threadpool(seed_default_user)
+    except Exception as e:
+        print(f"[startup] Notice: {e}")
+    yield
+
+
+app = FastAPI(title="OmniGuard SOC API", lifespan=lifespan)
 
 # graph endpoints while Neo4j is down: a clear 503, not a hang or a bare 500
 @app.exception_handler(ServiceUnavailable)
@@ -85,6 +98,37 @@ async def login(payload: LoginRequest):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token, expires = await run_in_threadpool(create_session, user)
+    return {**user, "token": token, "expires_at": expires}
+
+class BadgeLoginRequest(BaseModel):
+    badge_uid: str = Field(min_length=1, max_length=100)
+
+@app.post("/auth/badge-login")
+async def badge_login(payload: BadgeLoginRequest):
+    """
+    Physical authentication endpoint for Flipper Zero or RFID/NFC smart badges.
+    Signs the analyst in and commits an immutable entry to the investigation ledger.
+    """
+    user = await run_in_threadpool(check_badge_login, payload.badge_uid)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unrecognized RFID/NFC badge UID or Flipper Zero key")
+    token, expires = await run_in_threadpool(create_session, user)
+
+    # Immutably record physical hardware authentication to the decision ledger
+    try:
+        await run_in_threadpool(
+            append_ledger_entry,
+            entity_type="ANALYST_BADGE",
+            entity_id=user["email"],
+            stage="PHYSICAL_AUTHENTICATION",
+            action_taken="BADGE_TAP_LOGIN",
+            reasoning_output=f"Analyst authenticated via Flipper Zero hardware key / badge tap (UID: {payload.badge_uid})",
+            analyst_user=user["email"],
+            input_context={"badge_uid": payload.badge_uid},
+        )
+    except Exception as e:
+        print(f"[ledger] Badge login audit notice: {e}")
+
     return {**user, "token": token, "expires_at": expires}
 
 @app.post("/auth/logout", status_code=204)
@@ -366,6 +410,28 @@ async def update_alert_status(alert_id: str, payload: AlertStatus, me: dict = De
         raise HTTPException(status_code=404 if "no alert" in out["summary"] else 400, detail=out["summary"])
     return out["data"]
 
+@app.patch("/alerts/{alert_id}", response_model=Alert)
+async def patch_alert_status(alert_id: str, payload: AlertStatusUpdate) -> Alert:
+    """Updates triage status for an alert in MongoDB and Neo4j, then broadcasts to active dashboards."""
+    res = alerts_collection.find_one_and_update(
+        {"alert_id": alert_id},
+        {"$set": {"status": payload.status}},
+        return_document=True,
+    )
+    if not res:
+        raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found")
+
+    try:
+        update_graph_alert_status(alert_id, payload.status)
+    except Exception as e:
+        print(f"Graph status update failed: {e}")
+
+    res.pop("_id", None)
+    alert = Alert(**res)
+
+    await manager.broadcast({"type": "alert_updated", "alert": alert.model_dump(mode="json")})
+    return alert
+
 # ── triage: by hand, or proposed by the AI and approved by an analyst ──
 class TriageIn(BaseModel):
     verdict: Literal["true_positive", "false_positive", "benign", "escalate"]
@@ -494,8 +560,11 @@ def get_brands():
 @app.get("/ai/summary", dependencies=AUTH)
 async def ai_summary():
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(50))
-    triage = await run_in_threadpool(run_triage, alerts)
-    return {"triage": triage, "alert_count": len(alerts)}
+    try:
+        triage = await run_in_threadpool(run_triage, alerts)
+        return {"triage": triage, "alert_count": len(alerts)}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"AI triage unavailable: {e}")
 
 # live health of every piece the dashboard shows in its status panel. the checks
 # block (they talk to mongo/neo4j/ollama over the network) so we run them off the
@@ -601,3 +670,32 @@ async def verify_ledger():
         "records_checked": total,
         "status": "verified" if is_valid else "tamper_detected",
     }
+
+
+# ── AI Transparency & Observability Endpoints ───────────────────────
+
+@app.get("/ai/transparency/logs", dependencies=AUTH)
+async def read_ai_transparency_logs(
+    limit: int = 50,
+    status: str | None = None,
+    caller: str | None = None,
+):
+    """
+    Retrieves chronological AI execution traces including latency, token usage,
+    and failure diagnostics.
+    """
+    traces = await run_in_threadpool(get_transparency_logs, limit, status, caller)
+    return {"traces": traces, "count": len(traces)}
+
+
+@app.get("/ai/transparency/logs/{trace_id}", dependencies=AUTH)
+async def read_ai_transparency_trace(trace_id: str):
+    """
+    Retrieves full un-truncated AI trace including complete prompt context,
+    tool execution records, and formatted exception traceback if failed.
+    """
+    trace = await run_in_threadpool(get_transparency_trace, trace_id)
+    if not trace:
+        raise HTTPException(status_code=404, detail=f"AI trace '{trace_id}' not found")
+    return trace
+

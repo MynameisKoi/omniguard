@@ -2,6 +2,7 @@ from collections import Counter
 
 import httpx
 from config import OLLAMA_URL, OLLAMA_MODEL
+from ai_transparency import AITraceContext
 
 # writing the alert lines 
 def alert_line(a):
@@ -28,16 +29,42 @@ def build_prompt(alerts):
         "2. Next steps — a short prioritized list."
     )
 
-def run_triage(alerts):
-    # posting to our ai
-    resp = httpx.post(
-        f"{OLLAMA_URL}/api/generate",
-        json={"model": OLLAMA_MODEL, "prompt": build_prompt(alerts), "stream": False},
-        timeout=120.0
-    )
+def _base_options(extra=None):
+    opts = {"temperature": 0.2, "num_ctx": 8192, "num_predict": 400}
+    if extra:
+        opts.update(extra)
+    return opts
 
-    resp.raise_for_status()
-    return resp.json()["response"].strip()
+def run_triage(alerts, analyst="system"):
+    # posting to our ai with transparency tracing and traceback capture
+    prompt = build_prompt(alerts)
+    with AITraceContext(
+        caller="triage_summary",
+        model=OLLAMA_MODEL,
+        analyst=analyst,
+        prompt_data=prompt,
+        metadata={"alert_count": len(alerts)},
+    ) as trace:
+        resp = httpx.post(
+            f"{OLLAMA_URL}/api/generate",
+            json={
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": _base_options(),
+            },
+            timeout=120.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        response_text = data.get("response", "").strip()
+        tokens = {
+            "prompt": data.get("prompt_eval_count", 0),
+            "completion": data.get("eval_count", 0),
+            "total": (data.get("prompt_eval_count", 0) + data.get("eval_count", 0)),
+        }
+        trace.set_result(content=response_text, tokens=tokens)
+        return response_text
 
 
 # ── chat ────────────────────────────────────────────────────────────
@@ -120,25 +147,41 @@ def build_chat_messages(question, alerts, history=(), recent=50):
     return [{"role": "system", "content": context}, *turns, {"role": "user", "content": question}]
 
 
-def answer_question(question, alerts, history=()):
-    resp = httpx.post(
-        f"{OLLAMA_URL}/api/chat",
-        json={
-            "model": OLLAMA_MODEL,
-            "messages": build_chat_messages(question, alerts, history),
-            "stream": False,
-            # keep the model in memory between questions (default unloads after 5 min,
-            # and reloading makes the next answer take ~20s)
-            "keep_alive": "30m",
-            # low temperature: fewer made-up facts.
-            # num_ctx: Ollama defaults to 4096 tokens and silently drops the
-            # START of a longer prompt, which is where the rules and counts are.
-            # num_predict caps the reply (~300 words): small models can loop and
-            # write forever, which looks like a hang. repeat_penalty discourages that loop.
-            "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 400, "repeat_penalty": 1.15},
-        },
-        timeout=120.0
-    )
+def answer_question(question, alerts, history=(), analyst="system"):
+    messages = build_chat_messages(question, alerts, history)
+    with AITraceContext(
+        caller="chat_analyst",
+        model=OLLAMA_MODEL,
+        analyst=analyst,
+        prompt_data=messages,
+        metadata={"question": question, "alert_count": len(alerts)},
+    ) as trace:
+        resp = httpx.post(
+            f"{OLLAMA_URL}/api/chat",
+            json={
+                "model": OLLAMA_MODEL,
+                "messages": messages,
+                "stream": False,
+                # keep the model in memory between questions (default unloads after 5 min,
+                # and reloading makes the next answer take ~20s)
+                "keep_alive": "30m",
+                # low temperature: fewer made-up facts.
+                # num_ctx: Ollama defaults to 4096 tokens and silently drops the
+                # START of a longer prompt, which is where the rules and counts are.
+                # num_predict caps the reply (~300 words): small models can loop and
+                # write forever, which looks like a hang. repeat_penalty discourages that loop.
+                "options": _base_options({"repeat_penalty": 1.15}),
+            },
+            timeout=120.0,
+        )
 
-    resp.raise_for_status()
-    return resp.json()["message"]["content"].strip()
+        resp.raise_for_status()
+        data = resp.json()
+        content = data.get("message", {}).get("content", "").strip()
+        tokens = {
+            "prompt": data.get("prompt_eval_count", 0),
+            "completion": data.get("eval_count", 0),
+            "total": (data.get("prompt_eval_count", 0) + data.get("eval_count", 0)),
+        }
+        trace.set_result(content=content, tokens=tokens)
+        return content
