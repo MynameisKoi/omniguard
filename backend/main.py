@@ -322,9 +322,15 @@ async def call_tool(name: str, payload: ToolCall, me: dict = Depends(current_use
     return await run_in_threadpool(run_tool, name, payload.args, me["email"], payload.approved)
 
 # ── saved AI conversations (#1): ChatGPT-style threads, per analyst ──
+class SeedMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=8000)
+
 class ConversationIn(BaseModel):
     title: str | None = Field(default=None, max_length=80)
     alert_id: str | None = Field(default=None, max_length=64)   # "Ask AI about this alert"
+    # prior turns to pre-load, e.g. continuing the corner chat in the full Ask AI
+    messages: list[SeedMessage] | None = Field(default=None, max_length=40)
 
 @app.get("/conversations")
 async def conversations_list(me: dict = Depends(current_user)):
@@ -338,7 +344,8 @@ async def conversations_list(me: dict = Depends(current_user)):
 async def conversations_create(payload: ConversationIn, me: dict = Depends(current_user)):
     if payload.alert_id and not await run_in_threadpool(alerts_collection.find_one, {"alert_id": payload.alert_id}, {"_id": 1}):
         raise HTTPException(status_code=404, detail="Alert not found")
-    return await run_in_threadpool(create_conversation, me["email"], payload.title, payload.alert_id)
+    seed = [m.model_dump() for m in payload.messages] if payload.messages else None
+    return await run_in_threadpool(create_conversation, me["email"], payload.title, payload.alert_id, seed)
 
 @app.get("/conversations/{conversation_id}")
 async def conversations_get(conversation_id: str, me: dict = Depends(current_user)):

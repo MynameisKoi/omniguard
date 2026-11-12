@@ -713,24 +713,23 @@ function App({ user, onLogout, onUserChange }) {
         }
     }
 
-    // hand the corner chat off to the full Ask AI (with tools), seeded with the
-    // last thing the analyst asked here
+    // hand the corner chat off to the full Ask AI (with tools), carrying the WHOLE
+    // conversation so the agent keeps all the memory, not just the last message
     async function continueInAskAI() {
-        const lastUser = [...chatMessages].reverse().find(m => m.role === "user")
-        const seed = (lastUser?.text || "Continue our chat.").slice(0, 400)
+        if (!chatMessages.length) { setPage("ask"); return }
+        // map the pop-up roles (user/ai) to the conversation roles (user/assistant)
+        const seed = chatMessages
+            .filter(m => (m.text || "").trim())
+            .map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }))
+            .slice(-40)
+        const title = ([...chatMessages].find(m => m.role === "user")?.text || "Continued chat").slice(0, 60)
         try {
             const r = await api("/conversations", {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: seed.slice(0, 60) }),
+                body: JSON.stringify({ title, messages: seed }),
             })
             if (!r.ok) throw new Error()
             const chat = await r.json()
-            const ctrl = new AbortController()
-            await api(`/conversations/${chat.conversation_id}/messages`, {
-                method: "POST", signal: ctrl.signal,
-                headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: seed }),
-            })
-            ctrl.abort()
             try { localStorage.setItem("og_ask_convo", chat.conversation_id) } catch { /* private mode */ }
             setSelectedId(null); setPage("ask")
         } catch { /* stay put if it fails */ }
