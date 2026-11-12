@@ -163,6 +163,8 @@ export default function TriagePanel({ alert, onUpdated }) {
                 )}
             </div>
 
+            {state === "working" && <div className="triage-body" style={{ paddingTop: 0 }}><div className="loading-bar" /></div>}
+
             {error && <div className="triage-body"><div className="login-error">{error}</div></div>}
 
             {state === "proposal" && (

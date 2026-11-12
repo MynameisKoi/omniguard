@@ -560,9 +560,12 @@ function Message({ m, live, onOpenAlert, onFilter, onDecide, onAsk, busy, views,
                 {(m.approvals || []).map(a => <ApprovalCard key={a.approval_id} approval={a} onDecide={(ap, ok) => onDecide(m, ap, ok)} />)}
                 {text ? <AiMarkdown text={text} /> : null}
                 {working && (
-                    <div className="ai-loading ask-working" role="status">
-                        <span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />
-                        {m.status || "Thinking…"}
+                    <div className="ask-working-wrap" role="status">
+                        <div className="ai-loading ask-working">
+                            <span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" />
+                            {m.status || "Thinking…"}
+                        </div>
+                        <div className="loading-bar" style={{ maxWidth: 240 }} />
                     </div>
                 )}
                 {(m.blocks || []).filter(b => b.render === "choices").map((b, i) => <Choices key={i} data={b.data || {}} onAsk={onAsk} disabled={busy} />)}

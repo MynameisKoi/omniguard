@@ -803,13 +803,17 @@ def triage_alerts(alert_id=None, host=None, user=None, analyst="unknown"):
 # ── action tools: only run after an analyst approves ─────────────────────
 
 def isolate_host(hostname, reason=None, analyst="unknown"):
-    msg = (f"Containment requested for '{hostname}'"
-           + (f": {reason}" if _given(reason) else "")
-           + ". Simulated for now — no real network action is taken yet.")
-    append_ledger_entry(entity_type="HOST", entity_id=hostname, stage="EDR_CONTAINMENT",
-                        action_taken="NETWORK_ISOLATION_SIMULATED", reasoning_output=msg, analyst_user=analyst)
-    return {"summary": f"{hostname} isolation recorded (simulated) and written to the audit ledger.",
-            "data": {"status": "isolation_requested", "simulated": True, "host": hostname, "message": msg}}
+    import containment
+    state = containment.request_isolation(hostname, analyst)
+    online = state.get("agent_online")
+    tail = ("Its containment agent will cut it off and confirm back."
+            if online else
+            "No containment agent is currently reporting in from that host, so it "
+            "will be cut off as soon as the agent connects.")
+    return {"summary": f"Network isolation requested for {hostname}. {tail} "
+                       f"Recorded in the audit ledger.",
+            "data": {"status": "isolation_requested", "host": hostname,
+                     "agent_online": online, "state": state.get("state")}}
 
 
 def set_alert_status(alert_id, status, note=None, analyst="unknown"):
