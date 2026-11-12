@@ -46,9 +46,12 @@ HOST       = "lenovo-10"       # this machine's name -- MATCH the extension /
                                # beacon host exactly, so isolate targets it.
 POLL_SECONDS        = 2        # how often to check the SOC for a command
 AUTO_RELEASE_MINUTES = 10      # safety net: auto-restore after this long isolated
-HARD_CUT            = True     # also drop already-open connections (Windows): a
-                               # brief adapter reset so even open tabs die, not
-                               # just new connections. Set False for a gentler cut.
+HARD_CUT            = False    # the firewall block alone (reliable) cuts all NEW
+                               # connections; prove it with `ping 8.8.8.8` (times
+                               # out) or a fresh Incognito tab. Set True to also
+                               # bounce the adapter so already-open tabs drop too
+                               # -- more dramatic, but can disrupt the adapter on
+                               # some machines, so it's off by default.
 
 CORE = f"http://{ANALYST_IP}:8000"
 # ─────────────────────────────────────────────────────────────────────────────
