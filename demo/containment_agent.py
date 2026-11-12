@@ -46,6 +46,9 @@ HOST       = "lenovo-10"       # this machine's name -- MATCH the extension /
                                # beacon host exactly, so isolate targets it.
 POLL_SECONDS        = 2        # how often to check the SOC for a command
 AUTO_RELEASE_MINUTES = 10      # safety net: auto-restore after this long isolated
+HARD_CUT            = True     # also drop already-open connections (Windows): a
+                               # brief adapter reset so even open tabs die, not
+                               # just new connections. Set False for a gentler cut.
 
 CORE = f"http://{ANALYST_IP}:8000"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -108,6 +111,35 @@ def has_internet():
     return False
 
 
+def can_reach_soc():
+    import socket
+    try:
+        s = socket.create_connection((ANALYST_IP, 8000), timeout=2)
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
+def flush_connections():
+    """Hard cut (Windows): drop connections that are ALREADY open, so even tabs
+    loaded before isolation die -- not just new connections. Briefly bounces the
+    active network adapter; the firewall rule stays in place across it, and the
+    SOC (same subnet) comes back reachable so we can still be released."""
+    if not (IS_WIN and HARD_CUT):
+        return
+    ps = ("$a = Get-NetAdapter -Physical | Where-Object {$_.Status -eq 'Up'} | "
+          "Select-Object -First 1 -ExpandProperty Name; "
+          "if ($a) { Disable-NetAdapter -Name $a -Confirm:$false; Start-Sleep -Seconds 2; "
+          "Enable-NetAdapter -Name $a -Confirm:$false }")
+    _run(["powershell", "-NoProfile", "-Command", ps])
+    # wait for the adapter / DHCP to come back so we can still reach the SOC to ack
+    for _ in range(25):
+        time.sleep(1)
+        if can_reach_soc():
+            break
+
+
 FW_RULE = "OmniGuard-Isolate"          # IPv4 rule name
 FW_RULE6 = "OmniGuard-Isolate-v6"      # IPv6 rule name
 
@@ -153,6 +185,10 @@ def cut_network():
         for r in (r1, r2):
             if r.returncode != 0 and (r.stderr or r.stdout).strip():
                 errs.append((r.stderr or r.stdout).strip())
+        # hard cut: also drop connections that are already open
+        if HARD_CUT:
+            print("     dropping open connections (brief network reset)...")
+            flush_connections()
     else:
         gws = current_gateways()
         _state["gateways"] = gws
@@ -214,6 +250,7 @@ def _cancel_timer():
 
 def do_isolate():
     if _state["isolated"]:
+        print("  (already isolated — ignoring duplicate isolate command)")
         return
     print("\n  >> ISOLATE requested by the SOC")
     ok, msg = cut_network()
@@ -235,6 +272,7 @@ def do_isolate():
 
 def do_release(reason="analyst"):
     if not _state["isolated"]:
+        print(f"  (not isolated — ignoring release [{reason}])")
         return
     print(f"\n  << RELEASE ({reason})")
     _cancel_timer()
@@ -286,6 +324,8 @@ def main():
     while True:
         try:
             cmd = poll().get("action")
+            if cmd:
+                print(f"  (SOC command received: {cmd})")
             if cmd == "isolate":
                 do_isolate()
             elif cmd == "release":
