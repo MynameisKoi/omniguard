@@ -23,6 +23,17 @@ sessions_collection.create_index("token_hash", unique=True)
 # from the environment instead of a password: API_SERVICE_TOKENS=tok1,tok2
 SERVICE_TOKENS = {t.strip() for t in os.getenv("API_SERVICE_TOKENS", "").split(",") if t.strip()}
 
+# ingestion clients (the VerifyEye extension, the beacon simulator, detection
+# engines) post alerts/evidence with a shared key instead of logging in:
+# INGEST_API_KEYS=key1,key2. If none are set, ingestion stays open (demo default).
+INGEST_KEYS = {k.strip() for k in os.getenv("INGEST_API_KEYS", "").split(",") if k.strip()}
+
+
+def ingest_key_ok(key: str | None) -> bool:
+    if not INGEST_KEYS:
+        return True   # not configured -> open, so the demo works out of the box
+    return key is not None and any(hmac.compare_digest(key, k) for k in INGEST_KEYS)
+
 def hash_password(password):
     salt = os.urandom(16)
     digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
