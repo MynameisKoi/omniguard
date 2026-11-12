@@ -253,7 +253,9 @@ def _cancel_timer():
 
 def do_isolate():
     if _state["isolated"]:
-        print("  (already isolated — ignoring duplicate isolate command)")
+        # already in the target state — confirm it so the SOC stops re-sending
+        print("  (already isolated — confirming to SOC)")
+        ack("isolate", True, "already isolated")
         return
     print("\n  >> ISOLATE requested by the SOC")
     ok, msg = cut_network()
@@ -275,7 +277,9 @@ def do_isolate():
 
 def do_release(reason="analyst"):
     if not _state["isolated"]:
-        print(f"  (not isolated — ignoring release [{reason}])")
+        # already released — confirm it so the SOC stops re-sending the command
+        print(f"  (not isolated — confirming released to SOC [{reason}])")
+        ack("release", True, "already released")
         return
     print(f"\n  << RELEASE ({reason})")
     _cancel_timer()
