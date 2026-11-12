@@ -591,13 +591,17 @@ class ChatTurn(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     history: list[ChatTurn] = Field(default_factory=list, max_length=10)
+    # a short summary of the page the analyst is on, so the helper answers in context
+    context: str | None = Field(default=None, max_length=4000)
 
 @app.post("/ai/chat", dependencies=AUTH)
 async def ai_chat(payload: ChatRequest):
     # newest first; counts use all of them, the prompt only lists the newest 50
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(2000))
     history = [t.model_dump() for t in payload.history]
-    answer = await run_in_threadpool(answer_question, payload.question, alerts, history)
+    answer = await run_in_threadpool(
+        answer_question, payload.question, alerts, history, "system", payload.context
+    )
 
     # Record to replayable decision ledger
     try:

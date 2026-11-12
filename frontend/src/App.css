@@ -2420,6 +2420,17 @@ button { font: inherit; color: inherit; }
 .ai-chat-clear:hover { color: var(--text); border-color: var(--accent); }
 .ai-chat-clear:disabled { opacity: 0.6; cursor: default; }
 
+.ai-chat-continue { display: flex; justify-content: center; padding: 2px 0 8px; }
+.ai-chat-continue button {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: 0; cursor: pointer;
+  font: inherit; font-size: var(--t-xs); color: var(--accent-text);
+}
+.ai-chat-continue button:hover { text-decoration: underline; }
+.ai-chat-continue button:disabled { opacity: 0.6; cursor: default; }
+.ai-chat-continue svg { width: 13px; height: 13px; }
+.ai-chat-continue em { color: var(--faint); font-style: normal; }
+
 .ai-chat-input { display: flex; align-items: flex-end; gap: 8px; }
 /* wraps onto new lines and grows with the text (JS sets height), up to ~5 lines */
 .ai-chat-input textarea {
