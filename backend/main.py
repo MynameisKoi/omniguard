@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request
+from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request, Header
 from fastapi.responses import JSONResponse, StreamingResponse
 from neo4j.exceptions import ServiceUnavailable
 from starlette.concurrency import run_in_threadpool
@@ -7,7 +7,7 @@ from events import manager
 from models import Alert, AlertCreate, AlertStatusUpdate
 from db import database, brands_collection
 from ai import run_triage, answer_question
-from auth import check_login, check_badge_login, update_user, create_session, session_user, end_session, seed_default_user
+from auth import check_login, check_badge_login, update_user, create_session, session_user, end_session, seed_default_user, ingest_key_ok
 from status import check_mongo, check_neo4j, check_ollama
 from datetime import datetime, timezone, timedelta
 from typing import Literal
@@ -82,6 +82,15 @@ def current_user(request: Request):
     return user
 
 AUTH = [Depends(current_user)]
+
+
+def require_ingest_key(x_ingest_key: str | None = Header(default=None)):
+    """Gate for ingestion endpoints. Open if no INGEST_API_KEYS are configured,
+    otherwise the client must send a matching X-Ingest-Key header."""
+    if not ingest_key_ok(x_ingest_key):
+        raise HTTPException(status_code=401, detail="invalid or missing ingest key")
+
+INGEST = [Depends(require_ingest_key)]
 
 @app.get("/health")
 def get_health():
@@ -159,7 +168,7 @@ async def update_profile(payload: ProfileUpdate, request: Request, me: dict = De
 
 # This is coming from our security system
 # They store the event here
-@app.post("/alerts", response_model=Alert, status_code=201)
+@app.post("/alerts", response_model=Alert, status_code=201, dependencies=INGEST)
 async def create_alert(payload: AlertCreate) -> Alert:
     now = datetime.now(timezone.utc)
     sim_val, sim_hex = compute_alert_simhash(payload.model_dump())

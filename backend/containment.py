@@ -51,8 +51,9 @@ def get_state(host):
     if not d:
         return {"host": host, "state": "released", "agent_online": False}
     seen = d.get("agent_seen_at")
-    online = bool(seen and (_now() - seen).total_seconds() <= AGENT_STALE_SECONDS)
-    return {**d, "host": host, "agent_online": online}
+    online = (isinstance(seen, datetime)
+              and (_now() - seen).total_seconds() <= AGENT_STALE_SECONDS)
+    return {**d, "host": host, "agent_online": bool(online)}
 
 
 def list_states():
@@ -77,7 +78,9 @@ def request_isolation(host, by="unknown"):
         analyst_user=by,
     )
     _broadcast(host, "isolating")
-    return get_state(host)
+    return {"host": host, "state": "isolating", "requested_action": "isolate",
+            "requested_by": by, "requested_at": now,
+            "agent_online": get_state(host)["agent_online"]}
 
 
 def request_release(host, by="unknown"):
@@ -97,7 +100,9 @@ def request_release(host, by="unknown"):
         analyst_user=by,
     )
     _broadcast(host, "releasing")
-    return get_state(host)
+    return {"host": host, "state": "releasing", "requested_action": "release",
+            "requested_by": by, "requested_at": now,
+            "agent_online": get_state(host)["agent_online"]}
 
 
 def agent_poll(host):

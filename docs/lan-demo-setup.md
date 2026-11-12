@@ -49,7 +49,19 @@ On the **victim** laptop, change the ANALYST IP in two files:
   ANALYST_IP = "192.168.1.234"
   ```
 
-Use the new IP from step 1. Do not commit these lines — they are per-machine.
+- `demo/containment_agent.py` (top of the file):
+  ```
+  ANALYST_IP = "192.168.1.234"
+  ```
+
+- Realistic fake domains (optional) — just re-run the script with the new IP
+  (it replaces the old entries automatically), as admin:
+  ```
+  python demo/setup_demo_hosts.py 192.168.1.234
+  ```
+
+Use the new IP from step 1 everywhere. Do not commit the edited script lines —
+they are per-machine.
 
 ## 4. Host name
 
