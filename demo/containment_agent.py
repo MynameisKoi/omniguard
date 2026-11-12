@@ -44,7 +44,7 @@ import urllib.parse
 ANALYST_IP = "192.168.1.234"   # the SOC machine
 HOST       = "lenovo-10"       # this machine's name -- MATCH the extension /
                                # beacon host exactly, so isolate targets it.
-POLL_SECONDS        = 2        # how often to check the SOC for a command
+POLL_SECONDS        = 1        # how often to check the SOC for a command
 AUTO_RELEASE_MINUTES = 10      # safety net: auto-restore after this long isolated
 HARD_CUT            = False    # the firewall block alone (reliable) cuts all NEW
                                # connections; prove it with `ping 8.8.8.8` (times
@@ -106,7 +106,7 @@ def has_internet():
     import socket
     for ip in ("8.8.8.8", "1.1.1.1"):
         try:
-            s = socket.create_connection((ip, 53), timeout=2)
+            s = socket.create_connection((ip, 53), timeout=1)
             s.close()
             return True
         except Exception:
@@ -199,7 +199,7 @@ def cut_network():
         if r.returncode != 0 and (r.stderr or r.stdout).strip():
             errs.append((r.stderr or r.stdout).strip())
 
-    time.sleep(1.5)  # let the firewall / routing table settle
+    time.sleep(0.8)  # let the firewall / routing table settle
 
     if has_internet():
         detail = "internet is still reachable after applying the block"

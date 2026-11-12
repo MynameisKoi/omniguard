@@ -271,6 +271,22 @@ function App({ user, onLogout, onUserChange }) {
         .catch(() => {})
     }, []);
 
+    // while a host is isolating/releasing, poll its state so the dashboard updates
+    // fast and accurately even if the live push is missed (and to pick up "stalled")
+    const pendingHosts = Object.entries(containment)
+        .filter(([, v]) => v?.state === "isolating" || v?.state === "releasing")
+        .map(([k]) => k).sort().join(",")
+    useEffect(() => {
+        if (!pendingHosts) return
+        const hosts = pendingHosts.split(",")
+        const pull = () => hosts.forEach(k =>
+            api(`/hosts/${encodeURIComponent(k)}/containment`).then(r => r.ok ? r.json() : null)
+                .then(st => { if (st) setContainment(prev => ({ ...prev, [k]: { ...(prev[k] || {}), ...st } })) })
+                .catch(() => {}))
+        const id = setInterval(pull, 2500)
+        return () => clearInterval(id)
+    }, [pendingHosts]);
+
     // isolate / release a host: ask the backend, which queues it for the host's agent
     async function containHost(host, action) {
         setContainBusy(host)
@@ -2686,12 +2702,13 @@ function ContainmentPanel({ host, state, busy, onIsolate, onRelease, onReset }) 
     const online = state?.agent_online
     const isolated = s === "isolated"
     const pending = s === "isolating" || s === "releasing"
-    const stalled = pending && (timedOut || state?.stalled)
-    // if a request sits waiting too long, surface "agent didn't respond"
+    // the backend flags "stalled" accurately (request pending + no agent polling);
+    // the local timer is a longer fallback in case polling and the live push fail
+    const stalled = pending && (state?.stalled || timedOut)
     useEffect(() => {
         setTimedOut(false)
         if (!pending) return
-        const t = setTimeout(() => setTimedOut(true), 25000)
+        const t = setTimeout(() => setTimedOut(true), 40000)
         return () => clearTimeout(t)
     }, [pending, s])
     const tone = stalled || isolated ? "done bad" : pending ? "ai" : "open"
