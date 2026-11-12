@@ -162,6 +162,29 @@ def _soc_block_ranges():
     return ",".join(ranges)
 
 
+def ensure_firewall_on():
+    """The whole cut depends on Windows Firewall being ON. Turn it on if it's off
+    (the block rules do nothing while it's disabled)."""
+    if IS_WIN:
+        _run(["netsh", "advfirewall", "set", "allprofiles", "state", "on"])
+
+
+def print_diagnostics(tag=""):
+    """Print what's actually true right now, so there's no guessing."""
+    print(f"  --- diagnostics ({tag}) ---")
+    if IS_WIN:
+        st = (_run(["netsh", "advfirewall", "show", "allprofiles", "state"]).stdout or "")
+        for line in st.splitlines():
+            t = line.strip()
+            if t and ("Profile Settings" in t or t.startswith("State")):
+                print(f"    firewall: {t}")
+        rule = (_run(["netsh", "advfirewall", "firewall", "show", "rule", f"name={FW_RULE}"]).stdout or "")
+        print(f"    block rule present: {'No rules match' not in rule}")
+    print(f"    can reach internet (8.8.8.8): {has_internet()}")
+    print(f"    can reach SOC ({ANALYST_IP}): {can_reach_soc()}")
+    print(f"  --- end diagnostics ---")
+
+
 def cut_network():
     """Cut the host off the internet, keeping the SOC subnet reachable so the
     analyst can still release it. VERIFIES the cut actually worked.
@@ -174,6 +197,7 @@ def cut_network():
 
     errs = []
     if IS_WIN:
+        ensure_firewall_on()   # the block does nothing if the firewall is off
         # clear any leftover rules from a previous run so they don't stack
         _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE}"])
         _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE6}"])
@@ -273,6 +297,7 @@ def do_isolate():
     else:
         print(f"  !! could not isolate: {msg}")
         ack("isolate", False, msg)
+    print_diagnostics("after isolate")
 
 
 def do_release(reason="analyst"):
@@ -287,6 +312,7 @@ def do_release(reason="analyst"):
     _state["isolated"] = False
     print(f"  << {'RESTORED' if ok else 'RESTORE HAD ISSUES'}  ({msg})")
     ack("release", ok, f"{reason}: {msg}")
+    print_diagnostics("after release")
 
 
 def auto_release():
@@ -319,6 +345,7 @@ def main():
 
     gws = current_gateways()
     print(f"  current default gateway: {', '.join(gws) if gws else 'none found'}")
+    print_diagnostics("startup")
     print("  waiting for commands from the SOC... (Ctrl+C to quit safely)\n")
 
     atexit.register(_cleanup)
