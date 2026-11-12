@@ -160,7 +160,13 @@ function App({ user, onLogout, onUserChange }) {
     const [aiLoading, setAiLoading] = useState(false)
     const [aiError, setAiError] = useState(null)
 
-    const [chatMessages, setChatMessages] = useState([])
+    const [chatMessages, setChatMessages] = useState(() => {
+        try { return JSON.parse(localStorage.getItem("og_chat_msgs") || "[]") } catch { return [] }
+    })
+    // keep the corner chat across reloads (short memory); cap what we store
+    useEffect(() => {
+        try { localStorage.setItem("og_chat_msgs", JSON.stringify(chatMessages.slice(-30))) } catch { /* private mode */ }
+    }, [chatMessages])
     const [chatLoading, setChatLoading] = useState(false)
 
     // live service health for the status panel (starts from the initial rows)
@@ -661,6 +667,31 @@ function App({ user, onLogout, onUserChange }) {
         }
     }
 
+    // a short summary of what the analyst is currently looking at, so the corner
+    // helper answers in context ("is this real?" works on an alert's page)
+    function pageContext() {
+        const parts = [`Page: ${pageLabel}`]
+        if (page === "alert-detail" && selected) {
+            const a = selected
+            parts.push(
+                `Open alert: ${humanize(a.event_type)} on host ${a.host}` +
+                (a.user ? ` (user ${a.user})` : "") +
+                `, severity ${a.severity}, engine ${a.source}, status ${a.status}.` +
+                (a.domain ? ` Domain ${a.domain}.` : "") +
+                (a.dst_ip ? ` Destination IP ${a.dst_ip}.` : "") +
+                (a.brand_target ? ` Impersonates ${a.brand_target}.` : "") +
+                (a.triage ? ` Triaged as ${a.triage.verdict}.` : " Not triaged yet.")
+            )
+            if (a.description) parts.push(`Alert description: ${a.description}`)
+        } else if ((page === "search" || searchKind) && searchTerm) {
+            parts.push(`Filtered/searching for: ${searchTerm}.`)
+        }
+        const crit = alerts.filter(a => a.severity === "critical").length
+        const untriaged = alerts.filter(a => a.status === "new").length
+        parts.push(`Queue overall: ${alerts.length} alerts, ${crit} critical, ${untriaged} untriaged.`)
+        return parts.join("\n")
+    }
+
     async function sendChat(question) {
         // earlier turns go along so follow-ups ("what about that host?") have context
         const history = chatMessages.slice(-6)
@@ -670,7 +701,7 @@ function App({ user, onLogout, onUserChange }) {
             const res = await api(`/ai/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question, history }),
+                body: JSON.stringify({ question, history, context: pageContext() }),
             })
             if (!res.ok) throw new Error(res.status)
             const data = await res.json()
@@ -680,6 +711,28 @@ function App({ user, onLogout, onUserChange }) {
         } finally {
             setChatLoading(false)
         }
+    }
+
+    // hand the corner chat off to the full Ask AI (with tools), carrying the WHOLE
+    // conversation so the agent keeps all the memory, not just the last message
+    async function continueInAskAI() {
+        if (!chatMessages.length) { setPage("ask"); return }
+        // map the pop-up roles (user/ai) to the conversation roles (user/assistant)
+        const seed = chatMessages
+            .filter(m => (m.text || "").trim())
+            .map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }))
+            .slice(-40)
+        const title = ([...chatMessages].find(m => m.role === "user")?.text || "Continued chat").slice(0, 60)
+        try {
+            const r = await api("/conversations", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title, messages: seed }),
+            })
+            if (!r.ok) throw new Error()
+            const chat = await r.json()
+            try { localStorage.setItem("og_ask_convo", chat.conversation_id) } catch { /* private mode */ }
+            setSelectedId(null); setPage("ask")
+        } catch { /* stay put if it fails */ }
     }
 
     return (
@@ -1818,6 +1871,7 @@ function App({ user, onLogout, onUserChange }) {
                     loading={chatLoading}
                     onSend={sendChat}
                     onClear={() => setChatMessages([])}
+                    onContinue={continueInAskAI}
                 />
             )}
         </div>
@@ -2484,7 +2538,7 @@ function AiTriage({ text, loading, error, onRun }) {
 
 /* floating chat widget, bottom-right. Closed = round launcher button,
    open = pop-up window. Messages live in App so closing doesn't lose them. */
-function AiChat({ messages, loading, onSend, onClear }) {
+function AiChat({ messages, loading, onSend, onClear, onContinue }) {
     const [open, setOpen] = useState(false);
     const [q, setQ] = useState("");
     const logRef = useRef(null);
@@ -2528,7 +2582,7 @@ function AiChat({ messages, loading, onSend, onClear }) {
                 <span className="ai-icon"><Bot /></span>
                 <div className="ai-titles">
                     <span className="ai-title">Ask the analyst</span>
-                    <span className="ai-sub">llama3.2:3b · answers from your alerts</span>
+                    <span className="ai-sub">llama3.2:3b · knows the page you're on</span>
                 </div>
                 {messages.length > 0 && (
                     <button className="ai-chat-clear" onClick={onClear} disabled={loading}>
@@ -2547,7 +2601,7 @@ function AiChat({ messages, loading, onSend, onClear }) {
                 <div className="ai-chat-log" ref={logRef}>
                     {messages.length === 0 && !loading && (
                         <div className="ai-note ai-empty">
-                            Ask about your alerts — e.g. &ldquo;which hosts are beaconing?&rdquo;
+                            Ask about what you&rsquo;re looking at — e.g. &ldquo;is this alert real?&rdquo; or &ldquo;which hosts are beaconing?&rdquo;
                         </div>
                     )}
                     {messages.map((m, i) => (
@@ -2563,6 +2617,13 @@ function AiChat({ messages, loading, onSend, onClear }) {
                         </div>
                     )}
                 </div>
+                {messages.length > 0 && onContinue && (
+                    <div className="ai-chat-continue">
+                        <button type="button" onClick={onContinue} disabled={loading}>
+                            <Sparkles /> Continue in Ask AI <em>for the full tools</em>
+                        </button>
+                    </div>
+                )}
                 <form className="ai-chat-input" onSubmit={submit}>
                     <textarea
                         ref={inputRef}

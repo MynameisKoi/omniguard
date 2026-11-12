@@ -33,10 +33,18 @@ def title_from(text):
     return (title + ("…" if len(words) > TITLE_WORDS else ""))[:MAX_TITLE] or "New chat"
 
 
-def create_conversation(owner, title=None, alert_id=None):
+def create_conversation(owner, title=None, alert_id=None, seed_messages=None):
     """alert_id: a chat about one alert ("Ask AI about this alert"); every message
-    in it is answered with that alert in mind."""
+    in it is answered with that alert in mind.
+    seed_messages: prior turns to pre-load (e.g. handing the corner chat off to the
+    full Ask AI), so the agent keeps the whole memory, not just the last message."""
     now = _now()
+    seeded = [
+        {"message_id": str(uuid.uuid4()), "role": m["role"],
+         "content": (m.get("content") or "").strip(), "created_at": now}
+        for m in (seed_messages or [])
+        if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
+    ]
     doc = {
         "conversation_id": str(uuid.uuid4()),
         "owner": owner,
@@ -45,7 +53,7 @@ def create_conversation(owner, title=None, alert_id=None):
         "titled": bool((title or "").strip()),   # false: take the title from the first question
         "created_at": now,
         "updated_at": now,
-        "messages": [],
+        "messages": seeded,
     }
     conversations_collection.insert_one(dict(doc))
     doc.pop("_id", None)

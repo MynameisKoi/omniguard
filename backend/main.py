@@ -331,9 +331,15 @@ async def call_tool(name: str, payload: ToolCall, me: dict = Depends(current_use
     return await run_in_threadpool(run_tool, name, payload.args, me["email"], payload.approved)
 
 # ── saved AI conversations (#1): ChatGPT-style threads, per analyst ──
+class SeedMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=8000)
+
 class ConversationIn(BaseModel):
     title: str | None = Field(default=None, max_length=80)
     alert_id: str | None = Field(default=None, max_length=64)   # "Ask AI about this alert"
+    # prior turns to pre-load, e.g. continuing the corner chat in the full Ask AI
+    messages: list[SeedMessage] | None = Field(default=None, max_length=40)
 
 @app.get("/conversations")
 async def conversations_list(me: dict = Depends(current_user)):
@@ -347,7 +353,8 @@ async def conversations_list(me: dict = Depends(current_user)):
 async def conversations_create(payload: ConversationIn, me: dict = Depends(current_user)):
     if payload.alert_id and not await run_in_threadpool(alerts_collection.find_one, {"alert_id": payload.alert_id}, {"_id": 1}):
         raise HTTPException(status_code=404, detail="Alert not found")
-    return await run_in_threadpool(create_conversation, me["email"], payload.title, payload.alert_id)
+    seed = [m.model_dump() for m in payload.messages] if payload.messages else None
+    return await run_in_threadpool(create_conversation, me["email"], payload.title, payload.alert_id, seed)
 
 @app.get("/conversations/{conversation_id}")
 async def conversations_get(conversation_id: str, me: dict = Depends(current_user)):
@@ -600,13 +607,17 @@ class ChatTurn(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     history: list[ChatTurn] = Field(default_factory=list, max_length=10)
+    # a short summary of the page the analyst is on, so the helper answers in context
+    context: str | None = Field(default=None, max_length=4000)
 
 @app.post("/ai/chat", dependencies=AUTH)
 async def ai_chat(payload: ChatRequest):
     # newest first; counts use all of them, the prompt only lists the newest 50
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(2000))
     history = [t.model_dump() for t in payload.history]
-    answer = await run_in_threadpool(answer_question, payload.question, alerts, history)
+    answer = await run_in_threadpool(
+        answer_question, payload.question, alerts, history, "system", payload.context
+    )
 
     # Record to replayable decision ledger
     try:
