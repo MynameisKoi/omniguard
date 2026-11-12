@@ -22,6 +22,8 @@ containment_collection = database["containment"]
 
 # how long with no poll before we call an agent offline (seconds)
 AGENT_STALE_SECONDS = 20
+# how long a request can sit waiting for the agent before we call it stalled
+STALL_SECONDS = 25
 
 
 def _now():
@@ -53,7 +55,29 @@ def get_state(host):
     seen = d.get("agent_seen_at")
     online = (isinstance(seen, datetime)
               and (_now() - seen).total_seconds() <= AGENT_STALE_SECONDS)
-    return {**d, "host": host, "agent_online": bool(online)}
+    # a request waiting too long with no agent to apply it = stalled (agent not
+    # running / unreachable), so the dashboard can say so instead of spinning
+    state = d.get("state", "released")
+    req = d.get("requested_at")
+    stalled = (state in ("isolating", "releasing") and not online
+               and isinstance(req, datetime)
+               and (_now() - req).total_seconds() > STALL_SECONDS)
+    return {**d, "host": host, "agent_online": bool(online), "stalled": bool(stalled)}
+
+
+def reset(host, by="unknown"):
+    """Clear a stuck request (the agent never answered). Returns to 'released' —
+    the host was never actually isolated, since no agent applied it."""
+    containment_collection.delete_one({"_id": _key(host)})
+    append_ledger_entry(
+        entity_type="HOST", entity_id=host, stage="EDR_CONTAINMENT",
+        action_taken="NETWORK_ISOLATION_RESET",
+        reasoning_output=f"Analyst {by} cleared a pending containment request for "
+                         f"{host} that the agent never answered.",
+        analyst_user=by,
+    )
+    _broadcast(host, "released")
+    return {"host": host, "state": "released", "agent_online": False, "stalled": False}
 
 
 def list_states():

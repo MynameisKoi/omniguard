@@ -1235,7 +1235,8 @@ function App({ user, onLogout, onUserChange }) {
                                             state={containment[selected.host.toLowerCase()]}
                                             busy={containBusy === selected.host}
                                             onIsolate={() => containHost(selected.host, "isolate")}
-                                            onRelease={() => containHost(selected.host, "release")} />
+                                            onRelease={() => containHost(selected.host, "release")}
+                                            onReset={() => containHost(selected.host, "containment/reset")} />
                                     )}
 
                                     <TriagePanel alert={selected}
@@ -2678,27 +2679,35 @@ function CardEmpty({ glyph: Glyph, text, cta, onCta }) {
 /* collapsible panel — the whole header is the hit target */
 // Real host containment: isolate a compromised host from the network (and release
 // it). The analyst decides; the host's containment agent actually applies it.
-function ContainmentPanel({ host, state, busy, onIsolate, onRelease }) {
+function ContainmentPanel({ host, state, busy, onIsolate, onRelease, onReset }) {
     const [confirming, setConfirming] = useState(false)
+    const [timedOut, setTimedOut] = useState(false)
     const s = state?.state || "released"
     const online = state?.agent_online
     const isolated = s === "isolated"
     const pending = s === "isolating" || s === "releasing"
-    const tone = isolated ? "done bad" : pending ? "ai" : "open"
-    const headline = {
-        released: "Not contained", isolating: "Isolating…",
-        isolated: "Isolated from the network", releasing: "Releasing…",
-        error: "Containment error",
-    }[s] || s
+    const stalled = pending && (timedOut || state?.stalled)
+    // if a request sits waiting too long, surface "agent didn't respond"
+    useEffect(() => {
+        setTimedOut(false)
+        if (!pending) return
+        const t = setTimeout(() => setTimedOut(true), 25000)
+        return () => clearTimeout(t)
+    }, [pending, s])
+    const tone = stalled || isolated ? "done bad" : pending ? "ai" : "open"
+    const headline = stalled ? (s === "releasing" ? "Release didn't reach the agent" : "Agent didn't respond")
+        : ({ released: "Not contained", isolating: "Isolating…", isolated: "Isolated from the network",
+            releasing: "Releasing…", error: "Containment error" }[s] || s)
 
     return (
         <section className={`triage-card ${tone}`} aria-label="Containment">
             <div className="triage-bar">
-                <span className="triage-icon">{isolated ? <ShieldOff /> : <ShieldCheck />}</span>
+                <span className="triage-icon">{stalled ? <TriangleAlert /> : isolated ? <ShieldOff /> : <ShieldCheck />}</span>
                 <div className="triage-headline">
                     <b>{headline}</b>
                     <span>
-                        {isolated ? `${host} is cut off from the network.`
+                        {stalled ? `No reply from the containment agent on ${host}.`
+                            : isolated ? `${host} is cut off from the network.`
                             : pending ? `Waiting for the containment agent on ${host}…`
                             : `Cut ${host} off the network to contain it.`}
                         {"  ·  agent "}
@@ -2708,25 +2717,34 @@ function ContainmentPanel({ host, state, busy, onIsolate, onRelease }) {
                     </span>
                 </div>
                 <div className="triage-start">
-                    {!isolated && !pending && (confirming ? (
-                        <>
-                            <button className="btn sm bad" disabled={busy} onClick={() => { setConfirming(false); onIsolate() }}>
-                                {busy ? <span className="btn-spinner" /> : <ShieldOff />} Confirm isolate
+                    {stalled ? (
+                        <button className="btn sm" disabled={busy} onClick={onReset}><X /> Cancel</button>
+                    ) : (<>
+                        {!isolated && !pending && (confirming ? (
+                            <>
+                                <button className="btn sm bad" disabled={busy} onClick={() => { setConfirming(false); onIsolate() }}>
+                                    {busy ? <span className="btn-spinner" /> : <ShieldOff />} Confirm isolate
+                                </button>
+                                <button className="btn sm" disabled={busy} onClick={() => setConfirming(false)}><X /> Cancel</button>
+                            </>
+                        ) : (
+                            <button className="btn sm" onClick={() => setConfirming(true)}><ShieldOff /> Isolate host</button>
+                        ))}
+                        {isolated && (
+                            <button className="btn sm primary" disabled={busy} onClick={onRelease}>
+                                {busy ? <span className="btn-spinner" /> : <ShieldCheck />} Release
                             </button>
-                            <button className="btn sm" disabled={busy} onClick={() => setConfirming(false)}><X /> Cancel</button>
-                        </>
-                    ) : (
-                        <button className="btn sm" onClick={() => setConfirming(true)}><ShieldOff /> Isolate host</button>
-                    ))}
-                    {isolated && (
-                        <button className="btn sm primary" disabled={busy} onClick={onRelease}>
-                            {busy ? <span className="btn-spinner" /> : <ShieldCheck />} Release
-                        </button>
-                    )}
-                    {pending && <span className="ai-loading"><span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" /></span>}
+                        )}
+                        {pending && <span className="ai-loading"><span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" /></span>}
+                    </>)}
                 </div>
             </div>
-            {pending && <div className="triage-body" style={{ paddingTop: 0 }}><div className="loading-bar" /></div>}
+            {pending && !stalled && <div className="triage-body" style={{ paddingTop: 0 }}><div className="loading-bar" /></div>}
+            {stalled && (
+                <div className="triage-body"><p className="triage-notes">
+                    The request was sent but no agent on {host} picked it up. Start <code>demo/containment_agent.py</code> there (as admin) and try again — or Cancel to clear it.
+                </p></div>
+            )}
             {!online && !isolated && !pending && (
                 <div className="triage-body"><p className="triage-notes">
                     No containment agent is reporting from {host}. Isolation will apply once the agent is running there (<code>demo/containment_agent.py</code>).

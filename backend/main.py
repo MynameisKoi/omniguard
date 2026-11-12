@@ -665,6 +665,12 @@ async def release_host(hostname: str, me: dict = Depends(current_user)):
     return await run_in_threadpool(containment.request_release, hostname, me["email"])
 
 
+@app.post("/hosts/{hostname}/containment/reset", status_code=202)
+async def reset_containment(hostname: str, me: dict = Depends(current_user)):
+    """Clear a pending request the agent never answered (back to 'released')."""
+    return await run_in_threadpool(containment.reset, hostname, me["email"])
+
+
 @app.get("/hosts/{hostname}/containment", dependencies=AUTH)
 async def host_containment(hostname: str):
     return await run_in_threadpool(containment.get_state, hostname)
