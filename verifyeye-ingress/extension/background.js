@@ -8,6 +8,8 @@
 // these two to that laptop's IP, e.g. "http://192.168.1.50:8000".
 const CORE = "http://localhost:8000";       // alerts + brands
 const VERIFY = "http://localhost:8100";      // visual verify agent
+// Only needed if the SOC sets INGEST_API_KEYS. Leave "" when it doesn't.
+const INGEST_KEY = "";
 
 function blockHost(url) {
     if (!url) return;
@@ -40,7 +42,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         fetch(`${CORE}/alerts`, {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
+            headers: {"Content-Type": "application/json", "X-Ingest-Key": INGEST_KEY},
             body: JSON.stringify(msg.alert),
         })
         .then(r => r.json())

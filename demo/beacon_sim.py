@@ -35,6 +35,7 @@ HOST       = "VICTIM-WIN-01"   # this machine's name -- MATCH the name your
                                # dashboard correlates them into one compromise.
 USER       = None              # optional account name, or leave as None
 DST_IP     = ANALYST_IP        # the "listener" this victim beacons to
+INGEST_KEY = ""                # only needed if the SOC sets INGEST_API_KEYS
 
 BEATS      = 20                # beacons to send (gives 40 packets; needs >= 3)
 INTERVAL   = 2.5               # seconds between beacons (the beacon period)
@@ -47,9 +48,10 @@ SPECTRA = f"http://{ANALYST_IP}:8001"   # SpectraC2 engine
 
 def _post(url, payload):
     data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
-    )
+    headers = {"Content-Type": "application/json"}
+    if INGEST_KEY:
+        headers["X-Ingest-Key"] = INGEST_KEY
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.loads(r.read().decode())
 
