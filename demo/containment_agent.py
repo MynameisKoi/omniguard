@@ -199,19 +199,21 @@ def cut_network():
     errs = []
     if IS_WIN:
         ensure_firewall_on()   # the block does nothing if the firewall is off
-        # clean up any rules from older versions
-        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE}"])
-        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE6}"])
-        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_ALLOW}"])
-        # Block ALL outbound (IPv4 AND IPv6) by policy, then allow only the local
-        # subnet -- so the SOC stays reachable but nothing can leak to the internet
-        # over v6 (which is how YouTube/Google were getting through).
+        a, b, c, _ = ANALYST_IP.split(".")
+        soc_net = f"{a}.{b}.{c}.0/24"   # the SOC's subnet -- must stay reachable
+        for rn in (FW_RULE, FW_RULE6, FW_ALLOW, f"{FW_ALLOW}-in"):
+            _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rn}"])
+        # keep the SOC subnet reachable BOTH ways (so the agent can still poll and
+        # be released), then block everything else outbound -- IPv4 AND IPv6.
         r1 = _run(["netsh", "advfirewall", "firewall", "add", "rule",
                    f"name={FW_ALLOW}", "dir=out", "action=allow",
-                   "remoteip=LocalSubnet", "enable=yes"])
+                   f"remoteip={soc_net},LocalSubnet", "enable=yes"])
+        rin = _run(["netsh", "advfirewall", "firewall", "add", "rule",
+                    f"name={FW_ALLOW}-in", "dir=in", "action=allow",
+                    f"remoteip={soc_net},LocalSubnet", "enable=yes"])
         r2 = _run(["netsh", "advfirewall", "set", "allprofiles",
                    "firewallpolicy", "blockinbound,blockoutbound"])
-        for r in (r1, r2):
+        for r in (r1, rin, r2):
             if r.returncode != 0 and (r.stderr or r.stdout).strip():
                 errs.append((r.stderr or r.stdout).strip())
         # hard cut: also drop connections that are already open
@@ -226,6 +228,17 @@ def cut_network():
             errs.append((r.stderr or r.stdout).strip())
 
     time.sleep(0.8)  # let the firewall / routing table settle
+
+    # SAFETY: if the cut also severed the SOC, the analyst could never release us
+    # remotely -- so undo it and report, rather than trapping the host.
+    if not can_reach_soc():
+        restore_network()
+        detail = (f"the SOC ({ANALYST_IP}) is NOT reachable after the cut, so a "
+                  f"remote release would be impossible -- not isolating. Check the "
+                  f"SOC IP and that it's on this machine's subnet.")
+        if errs:
+            detail += f" (command said: {' | '.join(errs)})"
+        return False, detail
 
     if has_internet():
         detail = "internet is still reachable after applying the block"
@@ -242,9 +255,8 @@ def restore_network():
         # restore the normal default (outbound allowed) and remove our rules
         _run(["netsh", "advfirewall", "set", "allprofiles",
               "firewallpolicy", "blockinbound,allowoutbound"])
-        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_ALLOW}"])
-        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE}"])
-        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_RULE6}"])
+        for rn in (FW_ALLOW, f"{FW_ALLOW}-in", FW_RULE, FW_RULE6):
+            _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rn}"])
     else:
         for gw in (_state.get("gateways") or current_gateways()):
             _run(["route", "add", "default", gw])
@@ -370,11 +382,17 @@ def main():
                 do_isolate()
             elif cmd == "release":
                 do_release("analyst")
-        except urllib.error.URLError:
-            # SOC unreachable -- stay quiet, keep trying; safety timers still hold
-            pass
+        except urllib.error.URLError as e:
+            # can't reach the SOC -- surface it (esp. while isolated: the channel
+            # must stay open or release can't arrive), but keep trying
+            _state["poll_fails"] = _state.get("poll_fails", 0) + 1
+            if _state["poll_fails"] % 5 == 1:
+                print(f"  ! cannot reach the SOC to get commands ({e.reason}) — "
+                      f"{'STILL ISOLATED, release cannot arrive' if _state['isolated'] else 'retrying'}")
         except Exception as e:
             print(f"  ! poll error: {e}")
+        else:
+            _state["poll_fails"] = 0
         time.sleep(POLL_SECONDS)
 
 
