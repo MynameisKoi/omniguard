@@ -41,3 +41,6 @@ export const MITRE_NAMES = {
 export const VERDICT_SHORT = { true_positive: "True positive", false_positive: "False positive", benign: "Benign", escalate: "Escalate" }
 export const VERDICT_LABEL = { true_positive: "True positive", false_positive: "False positive", benign: "Benign / expected", escalate: "Needs escalation" }
 export const VERDICT_TONE = { true_positive: "bad", false_positive: "good", benign: "good", escalate: "warn" }
+
+// triage response actions (triage.py), short wording for the notification bell / toasts
+export const ACTION_LABEL = { isolate_host: "isolate", reset_password: "reset password", block_domain: "block domain" }
