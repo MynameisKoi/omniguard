@@ -26,8 +26,10 @@ from db import database
 
 _HERE = Path(__file__).resolve().parent
 _KEY_FILE = _HERE / ".vapid_private.pem"
-# who the push service can contact about our pushes (VAPID requires a contact)
-VAPID_CONTACT = os.getenv("VAPID_CONTACT", "mailto:soc@omniguard.local")
+# who the push service can contact about our pushes (VAPID requires a contact).
+# Apple's Web Push rejects the token ("BadJwtToken") if this isn't a valid
+# mailto/https URL with a real TLD — '.local' is refused — so use a real domain.
+VAPID_CONTACT = os.getenv("VAPID_CONTACT", "mailto:soc@omniguard.io")
 
 subs_collection = database["push_subscriptions"]
 
