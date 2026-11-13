@@ -5,7 +5,7 @@ import GraphCanvas from './GraphCanvas';
 import GraphExplorer from './GraphExplorer';
 import { timeAgo, exactTime } from './time';
 import { scopeIds } from './graphScope';
-import { label, humanize, MITRE_NAMES, VERDICT_SHORT } from './labels';
+import { label, humanize, MITRE_NAMES, VERDICT_SHORT, ACTION_LABEL } from './labels';
 import TriageCell from './TriageCell';
 import { EvidencePanel, EvidenceGallery } from './Evidence';
 import AiMarkdown from './AiMarkdown';
@@ -249,6 +249,39 @@ function App({ user, onLogout, onUserChange }) {
         const id = setInterval(() => setNow(Date.now()), 60000)
         return () => clearInterval(id)
     }, [])
+
+    // ── notifications (the bell) ────────────────────────────────────────
+    // read/unread, not tied to triage: the badge counts notifications you
+    // haven't LOOKED at yet. Opening the bell marks the current ones seen, so
+    // the count clears once you've glanced at it (old behaviour never cleared).
+    const [seenNotifs, setSeenNotifs] = useState(() => {
+        try { return new Set(JSON.parse(localStorage.getItem("og_notif_seen") || "[]")) } catch { return new Set() }
+    })
+    const persistSeen = (set) => { try { localStorage.setItem("og_notif_seen", JSON.stringify([...set])) } catch {} }
+    // alerts the AI is reviewing right now (shows an "AI reviewing…" state)
+    const [reviewing, setReviewing] = useState(() => new Set())
+    // transient pop-ups ("Live AI flagged this — take a look")
+    const [toasts, setToasts] = useState([])
+    const dismissToast = (id) => setToasts(prev => prev.filter(t => t.id !== id))
+    const pushToast = (toast) => {
+        const id = toast.id || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        setToasts(prev => [{ ...toast, id }, ...prev].slice(0, 4))
+        setTimeout(() => dismissToast(id), toast.ttl || 9000)
+    }
+    // is Live AI (automatic review of new alerts) on?
+    const [liveAiOn, setLiveAiOn] = useState(true)
+    useEffect(() => {
+        api("/ai/live").then(r => r.json()).then(d => setLiveAiOn(!!d.enabled)).catch(() => {})
+    }, [])
+    const toggleLiveAi = async () => {
+        const next = !liveAiOn
+        setLiveAiOn(next)   // optimistic
+        try {
+            const r = await api("/ai/live", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: next }) })
+            const d = await r.json(); setLiveAiOn(!!d.enabled)
+        } catch { setLiveAiOn(!next) }
+    }
+
     // "See in network graph": entities to light up on the graph tab, and what they came from
     const [graphFocus, setGraphFocus] = useState(null)   // { label, ids: [...] } | null
     const [theme, setTheme] = useState(() => {
@@ -350,6 +383,30 @@ function App({ user, onLogout, onUserChange }) {
                     // a host was isolated / released here, on another screen, or by its agent
                     const k = (msg.host || "").toLowerCase()
                     setContainment(prev => ({ ...prev, [k]: { ...(prev[k] || {}), host: msg.host, state: msg.state } }))
+                } else if (msg.type === "ai_reviewing") {
+                    // Live AI started looking at this alert — show it on the card
+                    setReviewing(prev => new Set(prev).add(msg.alert_id))
+                } else if (msg.type === "ai_review_failed") {
+                    setReviewing(prev => { const n = new Set(prev); n.delete(msg.alert_id); return n })
+                } else if (msg.type === "ai_proposed") {
+                    // Live AI finished: fold the proposal into the alert and, if it
+                    // needs attention, pop a notification the analyst can act on
+                    const a = msg.alert
+                    setReviewing(prev => { const n = new Set(prev); n.delete(a.alert_id); return n })
+                    setAlerts(prev => prev.some(x => x.alert_id === a.alert_id)
+                        ? prev.map(x => x.alert_id === a.alert_id ? a : x)
+                        : [a, ...prev])
+                    if (msg.needs_attention) {
+                        const p = a.triage_proposal || {}
+                        pushToast({
+                            alert_id: a.alert_id,
+                            host: a.host,
+                            severity: p.severity || a.severity,
+                            verdict: p.verdict,
+                            summary: p.summary || (p.reasons && p.reasons[0]) || "",
+                            actions: p.actions || [],
+                        })
+                    }
                 } else {
                     setAlerts(prev => [msg, ...prev])
                 }
@@ -549,6 +606,33 @@ function App({ user, onLogout, onUserChange }) {
     const recent = byNewest.slice(0, 7);
     const criticals = byNewest.filter(a => a.severity === "critical").slice(0, 3);
     const untriaged = scoped.filter(a => a.status === "new").length;
+
+    // the bell's notifications: untriaged alerts, newest first, across all alerts
+    // (not the dashboard's current filter). The badge counts only UNSEEN ones.
+    const notifAlerts = [...alerts]
+        .filter(a => a.status === "new")
+        .sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp));
+    const unseenCount = notifAlerts.filter(a => !seenNotifs.has(a.alert_id)).length;
+    // keep the "seen" set from growing forever: drop ids that aren't pending anymore
+    useEffect(() => {
+        const live = new Set(alerts.filter(a => a.status === "new").map(a => a.alert_id));
+        setSeenNotifs(prev => {
+            const next = new Set([...prev].filter(id => live.has(id)));
+            if (next.size !== prev.size) { persistSeen(next); return next; }
+            return prev;
+        });
+    }, [alerts]);
+    // opening the bell marks everything currently shown as read → badge clears
+    const openBell = () => {
+        if (menu === "bell") { setMenu(null); return; }
+        setMenu("bell");
+        setSeenNotifs(prev => {
+            const next = new Set(prev);
+            for (const a of notifAlerts) next.add(a.alert_id);
+            persistSeen(next);
+            return next;
+        });
+    };
 
     // real alert volume over time, bucketed by severity
     const activity = buildActivity(alerts);
@@ -897,28 +981,37 @@ function App({ user, onLogout, onUserChange }) {
                     <span className="hasmenu">
                         <button
                             className={`icon-btn bell ${menu === "bell" ? "on" : ""}`}
-                            onClick={() => setMenu(menu === "bell" ? null : "bell")}
-                            title={`${untriaged} untriaged`}
+                            onClick={openBell}
+                            title={`${unseenCount} unseen notification${unseenCount === 1 ? "" : "s"}`}
                             aria-label="Notifications"
                         >
                             <Bell />
-                            {untriaged > 0 && <span className="bell-badge">{untriaged > 99 ? "99+" : untriaged}</span>}
+                            {unseenCount > 0 && <span className="bell-badge">{unseenCount > 99 ? "99+" : unseenCount}</span>}
                         </button>
                         {menu === "bell" && (
                             <div className="dropdown notif-dd">
                                 <div className="dropdown-head">
                                     Notifications
-                                    {untriaged > 0 && <span className="dropdown-head-count">{untriaged} new</span>}
+                                    {notifAlerts.length > 0 && <span className="dropdown-head-count">{notifAlerts.length} open</span>}
                                 </div>
+                                <button
+                                    className={`liveai-toggle ${liveAiOn ? "on" : ""}`}
+                                    onMouseDown={(e) => { e.preventDefault(); toggleLiveAi(); }}
+                                    title={liveAiOn ? "Live AI is reviewing new alerts automatically" : "Live AI is off"}
+                                >
+                                    <span className="liveai-left"><Sparkles /> Live AI review</span>
+                                    <span className={`liveai-switch ${liveAiOn ? "on" : ""}`}><span className="liveai-knob" /></span>
+                                </button>
                                 <div className="dropdown-hint">Untriaged alerts needing a look — click one to investigate.</div>
-                                {(() => {
-                                    const notifs = [...alerts]
-                                        .filter(a => a.status === "new")
-                                        .sort((x, y) => new Date(y.timestamp) - new Date(x.timestamp))
-                                        .slice(0, 7);
-                                    return notifs.length === 0 ? (
-                                        <div className="dropdown-empty"><Bell /><p>You're all caught up.</p></div>
-                                    ) : notifs.map(a => (
+                                {notifAlerts.length === 0 ? (
+                                    <div className="dropdown-empty"><Bell /><p>You're all caught up.</p></div>
+                                ) : notifAlerts.slice(0, 7).map(a => {
+                                    const p = a.triage_proposal;
+                                    const isReviewing = reviewing.has(a.alert_id);
+                                    const take = isReviewing ? "AI reviewing…"
+                                        : p ? `AI: ${VERDICT_SHORT[p.verdict] || p.verdict}${p.actions && p.actions.length ? ` · suggests ${ACTION_LABEL[p.actions[0]] || p.actions[0]}` : ""}`
+                                        : null;
+                                    return (
                                         <button
                                             key={a.alert_id}
                                             className="dropdown-item notif-item"
@@ -928,12 +1021,13 @@ function App({ user, onLogout, onUserChange }) {
                                             <span className="notif-main">
                                                 <span className="notif-title">{a.event_type}</span>
                                                 <span className="notif-sub">{a.host} · {timeAgo(a.timestamp)}</span>
+                                                {take && <span className={`notif-ai ${isReviewing ? "reviewing" : ""} ${p ? `verdict-${p.verdict}` : ""}`}>{take}</span>}
                                             </span>
                                             <span className={`sev ${a.severity}`}>{a.severity}</span>
                                         </button>
-                                    ));
-                                })()}
-                                {untriaged > 0 && (
+                                    );
+                                })}
+                                {notifAlerts.length > 0 && (
                                     <button className="dropdown-item notif-all" onMouseDown={() => { setFilter(null); setSrcFilter(null); setMenu(null); setPage("alerts"); }}>
                                         View all alerts →
                                     </button>
@@ -1890,6 +1984,34 @@ function App({ user, onLogout, onUserChange }) {
                     onClear={() => setChatMessages([])}
                     onContinue={continueInAskAI}
                 />
+            )}
+
+            {/* Live AI pop-ups: the model flagged something that needs a look */}
+            {toasts.length > 0 && (
+                <div className="toast-stack" role="status" aria-live="polite">
+                    {toasts.map(t => (
+                        <div key={t.id} className={`toast sev-${t.severity || "medium"}`}>
+                            <span className={`toast-bar sev-${t.severity || "medium"}`} />
+                            <button
+                                className="toast-body"
+                                onClick={() => { openAlert(t.alert_id); dismissToast(t.id); }}
+                            >
+                                <span className="toast-head">
+                                    <Sparkles className="toast-icon" />
+                                    <span className="toast-title">Live AI · {t.host}</span>
+                                    <span className={`sev ${t.severity || "medium"}`}>{t.severity || "medium"}</span>
+                                </span>
+                                <span className="toast-verdict">
+                                    {VERDICT_SHORT[t.verdict] || t.verdict}
+                                    {t.actions && t.actions.length ? ` — suggests ${ACTION_LABEL[t.actions[0]] || t.actions[0]}` : ""}
+                                </span>
+                                {t.summary && <span className="toast-sum">{t.summary}</span>}
+                                <span className="toast-cta">Click to investigate →</span>
+                            </button>
+                            <button className="toast-x" onClick={() => dismissToast(t.id)} aria-label="Dismiss"><X /></button>
+                        </div>
+                    ))}
+                </div>
             )}
         </div>
     )

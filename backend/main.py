@@ -28,6 +28,7 @@ from ledger import (
     get_recent_ledger,
 )
 import containment
+import live_ai
 from agents import MultiAgentInvestigationPipeline
 from ocsf import alert_to_ocsf, export_alerts_to_ocsf
 from ai_transparency import get_transparency_logs, get_transparency_trace
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI):
         await run_in_threadpool(seed_default_user)
     except Exception as e:
         print(f"[startup] Notice: {e}")
+    live_ai.start()   # background worker: the AI reviews each new alert as it lands
     yield
 
 
@@ -230,9 +232,28 @@ async def create_alert(payload: AlertCreate) -> Alert:
     # now broadcasting to all the websockets about the new alert
     await manager.broadcast(alert.model_dump(mode="json"))
 
+    # hand it to Live AI so the model reviews it and proposes a triage, live
+    # (proposal only — an analyst still approves). No-op if Live AI is off.
+    live_ai.enqueue(alert.alert_id, alert.host)
+
     return alert
 
-# This is for the frontend 
+# ── Live AI: the model reviews new alerts automatically ─────────────
+class LiveAIToggle(BaseModel):
+    enabled: bool
+
+@app.get("/ai/live")
+def get_live_ai():
+    """Whether Live AI (automatic review of new alerts) is on."""
+    return {"enabled": live_ai.is_enabled()}
+
+@app.post("/ai/live", dependencies=AUTH)
+def set_live_ai(payload: LiveAIToggle):
+    """Turn automatic AI review of new alerts on or off (useful during a demo)."""
+    return {"enabled": live_ai.set_enabled(payload.enabled)}
+
+
+# This is for the frontend
 @app.get("/alerts", response_model=list[Alert], dependencies=AUTH)
 def get_alerts() -> list[Alert]:
     alerts: list[Alert] = list(alerts_collection.find({}, {"_id": 0}))
