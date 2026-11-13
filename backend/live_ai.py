@@ -86,11 +86,28 @@ async def _review_one(alert_id: str, host: str | None) -> None:
         return
 
     proposal = (alert or {}).get("triage_proposal")
+    needs = _needs_attention(proposal)
     await manager.broadcast({
         "type": "ai_proposed",
         "alert": _serialize(alert),
-        "needs_attention": _needs_attention(proposal),
+        "needs_attention": needs,
     })
+
+    # push a contentless ping to subscribed phones so the analyst is told even
+    # when the dashboard is closed. No alert details leave the network — the
+    # notification just says "open the dashboard"; the app fetches the rest
+    # locally once tapped.
+    if needs:
+        try:
+            import push
+            await run_in_threadpool(
+                push.send_to_all,
+                "OmniGuard SOC",
+                "An alert needs your attention — open the dashboard.",
+                "/",
+            )
+        except Exception as e:
+            print(f"live-ai: push failed for {alert_id}: {e}")
 
 
 async def _worker() -> None:
