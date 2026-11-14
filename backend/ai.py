@@ -133,11 +133,17 @@ def alert_stats(alerts):
     ])
 
 
-def build_chat_messages(question, alerts, history=(), recent=50):
+def build_chat_messages(question, alerts, history=(), recent=50, page_context=None):
     # alerts arrive newest first: counts cover all of them, detail lines only the newest
     lines = "\n".join(alert_line(a) for a in alerts[:recent]) if alerts else "(no alerts)"
+    looking_at = (
+        f"WHAT THE ANALYST IS LOOKING AT RIGHT NOW (answer about this unless they "
+        f"clearly ask about something else):\n{page_context.strip()}\n\n"
+        if page_context and page_context.strip() else ""
+    )
     context = (
         f"{CHAT_RULES}\n\n"
+        f"{looking_at}"
         f"COUNTS (across all {len(alerts)} alerts):\n{alert_stats(alerts)}\n\n"
         f"RECENT ALERTS (newest {min(recent, len(alerts))}):\n{lines}"
     )
@@ -149,8 +155,8 @@ def build_chat_messages(question, alerts, history=(), recent=50):
     return [{"role": "system", "content": context}, *turns, {"role": "user", "content": question}]
 
 
-def answer_question(question, alerts, history=(), analyst="system"):
-    messages = build_chat_messages(question, alerts, history)
+def answer_question(question, alerts, history=(), analyst="system", page_context=None):
+    messages = build_chat_messages(question, alerts, history, page_context=page_context)
     with AITraceContext(
         caller="chat_analyst",
         model=OLLAMA_MODEL,

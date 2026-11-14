@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request
+from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request, Header
 from fastapi.responses import JSONResponse, StreamingResponse
 from neo4j.exceptions import ServiceUnavailable
 from starlette.concurrency import run_in_threadpool
@@ -7,7 +7,7 @@ from events import manager
 from models import Alert, AlertCreate, AlertStatusUpdate
 from db import database, brands_collection
 from ai import run_triage, answer_question
-from auth import check_login, check_badge_login, update_user, create_session, session_user, end_session, seed_default_user
+from auth import check_login, check_badge_login, update_user, create_session, session_user, end_session, seed_default_user, ingest_key_ok
 from status import check_mongo, check_neo4j, check_ollama
 from datetime import datetime, timezone, timedelta
 from typing import Literal
@@ -27,6 +27,7 @@ from ledger import (
     get_ledger_for_entity,
     get_recent_ledger,
 )
+import containment
 from agents import MultiAgentInvestigationPipeline
 from ocsf import alert_to_ocsf, export_alerts_to_ocsf
 from ai_transparency import get_transparency_logs, get_transparency_trace
@@ -81,6 +82,15 @@ def current_user(request: Request):
     return user
 
 AUTH = [Depends(current_user)]
+
+
+def require_ingest_key(x_ingest_key: str | None = Header(default=None)):
+    """Gate for ingestion endpoints. Open if no INGEST_API_KEYS are configured,
+    otherwise the client must send a matching X-Ingest-Key header."""
+    if not ingest_key_ok(x_ingest_key):
+        raise HTTPException(status_code=401, detail="invalid or missing ingest key")
+
+INGEST = [Depends(require_ingest_key)]
 
 @app.get("/health")
 def get_health():
@@ -158,7 +168,7 @@ async def update_profile(payload: ProfileUpdate, request: Request, me: dict = De
 
 # This is coming from our security system
 # They store the event here
-@app.post("/alerts", response_model=Alert, status_code=201)
+@app.post("/alerts", response_model=Alert, status_code=201, dependencies=INGEST)
 async def create_alert(payload: AlertCreate) -> Alert:
     now = datetime.now(timezone.utc)
     sim_val, sim_hex = compute_alert_simhash(payload.model_dump())
@@ -321,9 +331,15 @@ async def call_tool(name: str, payload: ToolCall, me: dict = Depends(current_use
     return await run_in_threadpool(run_tool, name, payload.args, me["email"], payload.approved)
 
 # ── saved AI conversations (#1): ChatGPT-style threads, per analyst ──
+class SeedMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=8000)
+
 class ConversationIn(BaseModel):
     title: str | None = Field(default=None, max_length=80)
     alert_id: str | None = Field(default=None, max_length=64)   # "Ask AI about this alert"
+    # prior turns to pre-load, e.g. continuing the corner chat in the full Ask AI
+    messages: list[SeedMessage] | None = Field(default=None, max_length=40)
 
 @app.get("/conversations")
 async def conversations_list(me: dict = Depends(current_user)):
@@ -337,7 +353,8 @@ async def conversations_list(me: dict = Depends(current_user)):
 async def conversations_create(payload: ConversationIn, me: dict = Depends(current_user)):
     if payload.alert_id and not await run_in_threadpool(alerts_collection.find_one, {"alert_id": payload.alert_id}, {"_id": 1}):
         raise HTTPException(status_code=404, detail="Alert not found")
-    return await run_in_threadpool(create_conversation, me["email"], payload.title, payload.alert_id)
+    seed = [m.model_dump() for m in payload.messages] if payload.messages else None
+    return await run_in_threadpool(create_conversation, me["email"], payload.title, payload.alert_id, seed)
 
 @app.get("/conversations/{conversation_id}")
 async def conversations_get(conversation_id: str, me: dict = Depends(current_user)):
@@ -590,13 +607,17 @@ class ChatTurn(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     history: list[ChatTurn] = Field(default_factory=list, max_length=10)
+    # a short summary of the page the analyst is on, so the helper answers in context
+    context: str | None = Field(default=None, max_length=4000)
 
 @app.post("/ai/chat", dependencies=AUTH)
 async def ai_chat(payload: ChatRequest):
     # newest first; counts use all of them, the prompt only lists the newest 50
     alerts = list(alerts_collection.find({}, {"_id": 0}).sort("timestamp", -1).limit(2000))
     history = [t.model_dump() for t in payload.history]
-    answer = await run_in_threadpool(answer_question, payload.question, alerts, history)
+    answer = await run_in_threadpool(
+        answer_question, payload.question, alerts, history, "system", payload.context
+    )
 
     # Record to replayable decision ledger
     try:
@@ -633,12 +654,51 @@ async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
 
 @app.post("/hosts/{hostname}/isolate", status_code=202)
 async def isolate_host(hostname: str, me: dict = Depends(current_user)):
-    """Host containment (DEMO STUB): recorded in the ledger, no real network
-    action yet. Same code the AI agent's approved isolate_host runs (tools.py)."""
-    out = await run_in_threadpool(run_tool, "isolate_host", {"hostname": hostname}, me["email"], True)
-    if not out["ok"]:
-        raise HTTPException(status_code=400, detail=out["summary"])
-    return {**out["data"], "action": "network_isolation"}
+    """Ask the host's containment agent to cut it off the network. The agent
+    confirms back when it's really applied (see containment.py)."""
+    return await run_in_threadpool(containment.request_isolation, hostname, me["email"])
+
+
+@app.post("/hosts/{hostname}/release", status_code=202)
+async def release_host(hostname: str, me: dict = Depends(current_user)):
+    """Ask the host's containment agent to bring it back online."""
+    return await run_in_threadpool(containment.request_release, hostname, me["email"])
+
+
+@app.post("/hosts/{hostname}/containment/reset", status_code=202)
+async def reset_containment(hostname: str, me: dict = Depends(current_user)):
+    """Clear a pending request the agent never answered (back to 'released')."""
+    return await run_in_threadpool(containment.reset, hostname, me["email"])
+
+
+@app.get("/hosts/{hostname}/containment", dependencies=AUTH)
+async def host_containment(hostname: str):
+    return await run_in_threadpool(containment.get_state, hostname)
+
+
+@app.get("/containment", dependencies=AUTH)
+async def all_containment():
+    return await run_in_threadpool(containment.list_states)
+
+
+# ── Containment agent channel (unauthenticated, LAN only, like /alerts) ──
+# The agent on each host polls for a command and acks when it's applied. No
+# login token (it's a headless script), so these are open on the LAN.
+class AgentAck(BaseModel):
+    host: str
+    action: Literal["isolate", "release"]
+    ok: bool = True
+    message: str | None = None
+
+@app.get("/agent/containment/poll")
+async def agent_containment_poll(host: str):
+    return await run_in_threadpool(containment.agent_poll, host)
+
+@app.post("/agent/containment/ack")
+async def agent_containment_ack(payload: AgentAck):
+    return await run_in_threadpool(
+        containment.agent_ack, payload.host, payload.action, payload.ok, payload.message
+    )
 
 
 # ── Decision Ledger Audit Endpoints ─────────────────────────────────

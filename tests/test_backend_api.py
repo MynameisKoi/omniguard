@@ -47,14 +47,24 @@ def test_backend_health():
 
 
 def test_isolate_host():
+    # real containment: requesting isolation queues the command for the host's
+    # agent and reports the new state (nothing is "simulated" anymore).
     response = client.post("/hosts/WORKSTATION-CORP-99/isolate")
     assert response.status_code == 202
     data = response.json()
-    assert data["status"] == "isolation_requested"
-    assert data["simulated"] is True
     assert data["host"] == "WORKSTATION-CORP-99"
-    assert data["action"] == "network_isolation"
-    assert "Containment requested for 'WORKSTATION-CORP-99'" in data["message"]
+    assert data["state"] == "isolating"
+    assert data["requested_action"] == "isolate"
+
+
+def test_release_host():
+    client.post("/hosts/WORKSTATION-CORP-99/isolate")
+    response = client.post("/hosts/WORKSTATION-CORP-99/release")
+    assert response.status_code == 202
+    data = response.json()
+    assert data["host"] == "WORKSTATION-CORP-99"
+    assert data["state"] == "releasing"
+    assert data["requested_action"] == "release"
 
 
 def test_create_and_patch_alert():

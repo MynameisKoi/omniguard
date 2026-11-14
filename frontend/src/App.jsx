@@ -124,6 +124,9 @@ function App({ user, onLogout, onUserChange }) {
 
     // adding the state for alerts
     const [alerts, setAlerts] = useState([])
+    // host containment state, keyed by host name (released / isolating / isolated / releasing)
+    const [containment, setContainment] = useState({})
+    const [containBusy, setContainBusy] = useState(null)   // host currently being acted on
 
     // "Ask AI about this alert": a chat tied to the alert, its first question already
     // asked. The reply runs on the server, and Ask AI opens the chat and follows it
@@ -157,7 +160,13 @@ function App({ user, onLogout, onUserChange }) {
     const [aiLoading, setAiLoading] = useState(false)
     const [aiError, setAiError] = useState(null)
 
-    const [chatMessages, setChatMessages] = useState([])
+    const [chatMessages, setChatMessages] = useState(() => {
+        try { return JSON.parse(localStorage.getItem("og_chat_msgs") || "[]") } catch { return [] }
+    })
+    // keep the corner chat across reloads (short memory); cap what we store
+    useEffect(() => {
+        try { localStorage.setItem("og_chat_msgs", JSON.stringify(chatMessages.slice(-30))) } catch { /* private mode */ }
+    }, [chatMessages])
     const [chatLoading, setChatLoading] = useState(false)
 
     // live service health for the status panel (starts from the initial rows)
@@ -254,6 +263,46 @@ function App({ user, onLogout, onUserChange }) {
         .catch(err => setError(err.message))
     }, []);
 
+    // current containment state for every host we've touched
+    useEffect(() => {
+        api(`/containment`)
+        .then(res => res.json())
+        .then(list => setContainment(Object.fromEntries((list || []).map(s => [(s.host || "").toLowerCase(), s]))))
+        .catch(() => {})
+    }, []);
+
+    // while a host is isolating/releasing, poll its state so the dashboard updates
+    // fast and accurately even if the live push is missed (and to pick up "stalled")
+    const pendingHosts = Object.entries(containment)
+        .filter(([, v]) => v?.state === "isolating" || v?.state === "releasing")
+        .map(([k]) => k).sort().join(",")
+    useEffect(() => {
+        if (!pendingHosts) return
+        const hosts = pendingHosts.split(",")
+        const pull = () => hosts.forEach(k =>
+            api(`/hosts/${encodeURIComponent(k)}/containment`).then(r => r.ok ? r.json() : null)
+                .then(st => { if (st) setContainment(prev => ({ ...prev, [k]: { ...(prev[k] || {}), ...st } })) })
+                .catch(() => {}))
+        const id = setInterval(pull, 2500)
+        return () => clearInterval(id)
+    }, [pendingHosts]);
+
+    // isolate / release a host: ask the backend, which queues it for the host's agent
+    async function containHost(host, action) {
+        setContainBusy(host)
+        try {
+            const res = await api(`/hosts/${encodeURIComponent(host)}/${action}`, { method: "POST" })
+            const state = await res.json().catch(() => ({}))
+            if (!res.ok) throw new Error(state.detail || res.status)
+            const k = host.toLowerCase()
+            setContainment(prev => ({ ...prev, [k]: { ...(prev[k] || {}), ...state } }))
+        } catch (e) {
+            setError(`Couldn't ${action} ${host}: ${e.message}`)
+        } finally {
+            setContainBusy(null)
+        }
+    }
+
     // poll /status so the system panel shows real health. runs now and every 10s.
     useEffect(() => {
         let alive = true
@@ -297,6 +346,10 @@ function App({ user, onLogout, onUserChange }) {
                 } else if (msg.type === "alert_updated") {
                     // triaged (or an AI proposal added) here or on another analyst's screen
                     setAlerts(prev => prev.map(a => a.alert_id === msg.alert.alert_id ? msg.alert : a))
+                } else if (msg.type === "containment_updated") {
+                    // a host was isolated / released here, on another screen, or by its agent
+                    const k = (msg.host || "").toLowerCase()
+                    setContainment(prev => ({ ...prev, [k]: { ...(prev[k] || {}), host: msg.host, state: msg.state } }))
                 } else {
                     setAlerts(prev => [msg, ...prev])
                 }
@@ -630,6 +683,31 @@ function App({ user, onLogout, onUserChange }) {
         }
     }
 
+    // a short summary of what the analyst is currently looking at, so the corner
+    // helper answers in context ("is this real?" works on an alert's page)
+    function pageContext() {
+        const parts = [`Page: ${pageLabel}`]
+        if (page === "alert-detail" && selected) {
+            const a = selected
+            parts.push(
+                `Open alert: ${humanize(a.event_type)} on host ${a.host}` +
+                (a.user ? ` (user ${a.user})` : "") +
+                `, severity ${a.severity}, engine ${a.source}, status ${a.status}.` +
+                (a.domain ? ` Domain ${a.domain}.` : "") +
+                (a.dst_ip ? ` Destination IP ${a.dst_ip}.` : "") +
+                (a.brand_target ? ` Impersonates ${a.brand_target}.` : "") +
+                (a.triage ? ` Triaged as ${a.triage.verdict}.` : " Not triaged yet.")
+            )
+            if (a.description) parts.push(`Alert description: ${a.description}`)
+        } else if ((page === "search" || searchKind) && searchTerm) {
+            parts.push(`Filtered/searching for: ${searchTerm}.`)
+        }
+        const crit = alerts.filter(a => a.severity === "critical").length
+        const untriaged = alerts.filter(a => a.status === "new").length
+        parts.push(`Queue overall: ${alerts.length} alerts, ${crit} critical, ${untriaged} untriaged.`)
+        return parts.join("\n")
+    }
+
     async function sendChat(question) {
         // earlier turns go along so follow-ups ("what about that host?") have context
         const history = chatMessages.slice(-6)
@@ -639,7 +717,7 @@ function App({ user, onLogout, onUserChange }) {
             const res = await api(`/ai/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question, history }),
+                body: JSON.stringify({ question, history, context: pageContext() }),
             })
             if (!res.ok) throw new Error(res.status)
             const data = await res.json()
@@ -649,6 +727,28 @@ function App({ user, onLogout, onUserChange }) {
         } finally {
             setChatLoading(false)
         }
+    }
+
+    // hand the corner chat off to the full Ask AI (with tools), carrying the WHOLE
+    // conversation so the agent keeps all the memory, not just the last message
+    async function continueInAskAI() {
+        if (!chatMessages.length) { setPage("ask"); return }
+        // map the pop-up roles (user/ai) to the conversation roles (user/assistant)
+        const seed = chatMessages
+            .filter(m => (m.text || "").trim())
+            .map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }))
+            .slice(-40)
+        const title = ([...chatMessages].find(m => m.role === "user")?.text || "Continued chat").slice(0, 60)
+        try {
+            const r = await api("/conversations", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title, messages: seed }),
+            })
+            if (!r.ok) throw new Error()
+            const chat = await r.json()
+            try { localStorage.setItem("og_ask_convo", chat.conversation_id) } catch { /* private mode */ }
+            setSelectedId(null); setPage("ask")
+        } catch { /* stay put if it fails */ }
     }
 
     return (
@@ -1145,6 +1245,15 @@ function App({ user, onLogout, onUserChange }) {
                             <div className="split">
                                 <div>
                                     {selected.description && <p className="note">{selected.description}</p>}
+
+                                    {selected.host && (
+                                        <ContainmentPanel host={selected.host}
+                                            state={containment[selected.host.toLowerCase()]}
+                                            busy={containBusy === selected.host}
+                                            onIsolate={() => containHost(selected.host, "isolate")}
+                                            onRelease={() => containHost(selected.host, "release")}
+                                            onReset={() => containHost(selected.host, "containment/reset")} />
+                                    )}
 
                                     <TriagePanel alert={selected}
                                         onUpdated={updated => setAlerts(prev => prev.map(a => a.alert_id === updated.alert_id ? updated : a))} />
@@ -1779,6 +1888,7 @@ function App({ user, onLogout, onUserChange }) {
                     loading={chatLoading}
                     onSend={sendChat}
                     onClear={() => setChatMessages([])}
+                    onContinue={continueInAskAI}
                 />
             )}
         </div>
@@ -1864,7 +1974,6 @@ function ProfilePage({ user, onSaved }) {
 function AlertActions({ alert }) {
     const [busy, setBusy] = useState(null)
     const [investigation, setInvestigation] = useState(null)
-    const [isolation, setIsolation] = useState(null)
     const [ocsf, setOcsf] = useState(null)
     const [err, setErr] = useState(null)
 
@@ -1884,7 +1993,6 @@ function AlertActions({ alert }) {
     const isolate = () => run("isolate", async () => {
         const res = await api(`/hosts/${encodeURIComponent(alert.host)}/isolate`, { method: "POST" })
         if (!res.ok) throw new Error()
-        setIsolation(await res.json())
     })
     const exportOcsf = () => run("ocsf", async () => {
         const res = await api(`/alerts/${alert.alert_id}/ocsf`)
@@ -1901,17 +2009,8 @@ function AlertActions({ alert }) {
                 <button className="btn" onClick={exportOcsf} disabled={busy}>
                     {busy === "ocsf" ? "Exporting…" : "Export OCSF"}
                 </button>
-                <button className="btn danger" onClick={isolate} disabled={busy}>
-                    {busy === "isolate" ? "Isolating…" : "Isolate host"}
-                </button>
             </div>
             {err && <div className="login-error" style={{ marginTop: 8 }}>{err}</div>}
-            {isolation && (
-                <div className="action-result">
-                    <strong>Containment</strong> — {isolation.message}
-                    {isolation.simulated && <span className="tag">simulated</span>}
-                </div>
-            )}
             {investigation && (
                 <Modal onClose={() => setInvestigation(null)}>
                     <InvestigationResult
@@ -2456,7 +2555,7 @@ function AiTriage({ text, loading, error, onRun }) {
 
 /* floating chat widget, bottom-right. Closed = round launcher button,
    open = pop-up window. Messages live in App so closing doesn't lose them. */
-function AiChat({ messages, loading, onSend, onClear }) {
+function AiChat({ messages, loading, onSend, onClear, onContinue }) {
     const [open, setOpen] = useState(false);
     const [q, setQ] = useState("");
     const logRef = useRef(null);
@@ -2500,7 +2599,7 @@ function AiChat({ messages, loading, onSend, onClear }) {
                 <span className="ai-icon"><Bot /></span>
                 <div className="ai-titles">
                     <span className="ai-title">Ask the analyst</span>
-                    <span className="ai-sub">llama3.2:3b · answers from your alerts</span>
+                    <span className="ai-sub">llama3.2:3b · knows the page you're on</span>
                 </div>
                 {messages.length > 0 && (
                     <button className="ai-chat-clear" onClick={onClear} disabled={loading}>
@@ -2519,7 +2618,7 @@ function AiChat({ messages, loading, onSend, onClear }) {
                 <div className="ai-chat-log" ref={logRef}>
                     {messages.length === 0 && !loading && (
                         <div className="ai-note ai-empty">
-                            Ask about your alerts — e.g. &ldquo;which hosts are beaconing?&rdquo;
+                            Ask about what you&rsquo;re looking at — e.g. &ldquo;is this alert real?&rdquo; or &ldquo;which hosts are beaconing?&rdquo;
                         </div>
                     )}
                     {messages.map((m, i) => (
@@ -2535,6 +2634,13 @@ function AiChat({ messages, loading, onSend, onClear }) {
                         </div>
                     )}
                 </div>
+                {messages.length > 0 && onContinue && (
+                    <div className="ai-chat-continue">
+                        <button type="button" onClick={onContinue} disabled={loading}>
+                            <Sparkles /> Continue in Ask AI <em>for the full tools</em>
+                        </button>
+                    </div>
+                )}
                 <form className="ai-chat-input" onSubmit={submit}>
                     <textarea
                         ref={inputRef}
@@ -2587,6 +2693,84 @@ function CardEmpty({ glyph: Glyph, text, cta, onCta }) {
 }
 
 /* collapsible panel — the whole header is the hit target */
+// Real host containment: isolate a compromised host from the network (and release
+// it). The analyst decides; the host's containment agent actually applies it.
+function ContainmentPanel({ host, state, busy, onIsolate, onRelease, onReset }) {
+    const [confirming, setConfirming] = useState(false)
+    const [timedOut, setTimedOut] = useState(false)
+    const s = state?.state || "released"
+    const online = state?.agent_online
+    const isolated = s === "isolated"
+    const pending = s === "isolating" || s === "releasing"
+    // the backend flags "stalled" accurately (request pending + no agent polling);
+    // the local timer is a longer fallback in case polling and the live push fail
+    const stalled = pending && (state?.stalled || timedOut)
+    useEffect(() => {
+        setTimedOut(false)
+        if (!pending) return
+        const t = setTimeout(() => setTimedOut(true), 40000)
+        return () => clearTimeout(t)
+    }, [pending, s])
+    const tone = stalled || isolated ? "done bad" : pending ? "ai" : "open"
+    const headline = stalled ? (s === "releasing" ? "Release didn't reach the agent" : "Agent didn't respond")
+        : ({ released: "Not contained", isolating: "Isolating…", isolated: "Isolated from the network",
+            releasing: "Releasing…", error: "Containment error" }[s] || s)
+
+    return (
+        <section className={`triage-card ${tone}`} aria-label="Containment">
+            <div className="triage-bar">
+                <span className="triage-icon">{stalled ? <TriangleAlert /> : isolated ? <ShieldOff /> : <ShieldCheck />}</span>
+                <div className="triage-headline">
+                    <b>{headline}</b>
+                    <span>
+                        {stalled ? `No reply from the containment agent on ${host}.`
+                            : isolated ? `${host} is cut off from the network.`
+                            : pending ? `Waiting for the containment agent on ${host}…`
+                            : `Cut ${host} off the network to contain it.`}
+                        {"  ·  agent "}
+                        <em style={{ color: online ? "var(--good, #4ade80)" : "var(--muted, #9aa)" }}>
+                            {online ? "online" : "not reporting"}
+                        </em>
+                    </span>
+                </div>
+                <div className="triage-start">
+                    {stalled ? (
+                        <button className="btn sm" disabled={busy} onClick={onReset}><X /> Cancel</button>
+                    ) : (<>
+                        {!isolated && !pending && (confirming ? (
+                            <>
+                                <button className="btn sm bad" disabled={busy} onClick={() => { setConfirming(false); onIsolate() }}>
+                                    {busy ? <span className="btn-spinner" /> : <ShieldOff />} Confirm isolate
+                                </button>
+                                <button className="btn sm" disabled={busy} onClick={() => setConfirming(false)}><X /> Cancel</button>
+                            </>
+                        ) : (
+                            <button className="btn sm" onClick={() => setConfirming(true)}><ShieldOff /> Isolate host</button>
+                        ))}
+                        {isolated && (
+                            <button className="btn sm primary" disabled={busy} onClick={onRelease}>
+                                {busy ? <span className="btn-spinner" /> : <ShieldCheck />} Release
+                            </button>
+                        )}
+                        {pending && <span className="ai-loading"><span className="ai-dot" /><span className="ai-dot" /><span className="ai-dot" /></span>}
+                    </>)}
+                </div>
+            </div>
+            {pending && !stalled && <div className="triage-body" style={{ paddingTop: 0 }}><div className="loading-bar" /></div>}
+            {stalled && (
+                <div className="triage-body"><p className="triage-notes">
+                    The request was sent but no agent on {host} picked it up. Start <code>demo/containment_agent.py</code> there (as admin) and try again — or Cancel to clear it.
+                </p></div>
+            )}
+            {!online && !isolated && !pending && (
+                <div className="triage-body"><p className="triage-notes">
+                    No containment agent is reporting from {host}. Isolation will apply once the agent is running there (<code>demo/containment_agent.py</code>).
+                </p></div>
+            )}
+        </section>
+    )
+}
+
 function Panel({ title, note, children, flush = false, action, onAction, actionIcon: ActionIcon = ArrowRight, wide = false }) {
     return (
         <section className={`panel ${wide ? "panel-wide" : ""}`}>

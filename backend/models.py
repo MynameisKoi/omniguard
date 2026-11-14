@@ -7,7 +7,7 @@ from uuid import uuid4
 from typing import Literal
 
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 class AlertCreate(BaseModel): 
     """What a detection engine sends us. The details"""
@@ -114,6 +114,21 @@ class AlertCreate(BaseModel):
         description="brand the page impersonates, from VerifyEye logo detection",
         examples=["Microsoft 365"],
     )
+
+    # Names arrive from the extension, the beacon and the API with different
+    # capitalisation ("Lenovo-10" vs "lenovo-10"). Normalise them once, here, so
+    # correlation, the graph, lists, search and triage all treat them as one.
+    # Hostnames and domains are case-insensitive by definition, so this is safe.
+    @field_validator("host")
+    @classmethod
+    def _norm_host(cls, v):
+        return v.strip().upper() if v and v.strip() else v
+
+    @field_validator("user", "domain")
+    @classmethod
+    def _norm_lower(cls, v):
+        v = v.strip().lower() if v else None
+        return v or None
 
 # now creating a Alert class that will inherit from AlertCreate
 # we will create unique ids and then the timestamp for that alert

@@ -29,6 +29,12 @@ CACHE_MAX = 500
 _cache: dict[str, tuple[float, dict]] = {}
 _inflight: dict[str, asyncio.Future] = {}
 
+# concurrency cap (#8): a ~300 MB browser launches per distinct URL checked, so a
+# burst of many different URLs could exhaust the machine. Never run more than this
+# many browser checks at once; extra requests simply wait their turn.
+MAX_CONCURRENT = int(os.getenv("VERIFY_MAX_CONCURRENT", "3"))
+_sem = asyncio.Semaphore(MAX_CONCURRENT)
+
 app = FastAPI(title="VerifyEye Ingress")
 
 app.add_middleware(
@@ -144,7 +150,8 @@ async def verify(req: VerifyRequest, background: BackgroundTasks):
     future = asyncio.get_running_loop().create_future()
     _inflight[url] = future
     try:
-        result = await run_in_threadpool(analyze_page, url)
+        async with _sem:                              # wait if too many are running
+            result = await run_in_threadpool(analyze_page, url)
         verdict = _verdict(result)
         verdict["evidence"] = bool(result.get("screenshot"))
         future.set_result(verdict)

@@ -122,8 +122,17 @@ def verify_ledger_integrity() -> Tuple[bool, Optional[str], int]:
 
 
 def get_ledger_for_entity(entity_id: str) -> List[Dict[str, Any]]:
-    """Retrieves all decision ledger records associated with an entity or host."""
-    return list(ledger_collection.find({"entity_id": entity_id}, {"_id": 0}).sort("timestamp", -1))
+    """Retrieves all decision ledger records associated with an entity or host.
+
+    Matched case-insensitively so a lookup for 'LENOVO-10' still finds older
+    entries written as 'Lenovo-10'. We never rewrite stored entries: the ledger
+    is an append-only hash chain, so editing a past entry_id would break the
+    tamper-evidence verification."""
+    import re
+    pattern = f"^{re.escape(entity_id)}$"
+    return list(ledger_collection.find(
+        {"entity_id": {"$regex": pattern, "$options": "i"}}, {"_id": 0}
+    ).sort("timestamp", -1))
 
 
 def get_recent_ledger(limit: int = 50) -> List[Dict[str, Any]]:
