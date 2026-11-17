@@ -1,33 +1,46 @@
-# OmniGuard SOC: Autonomous Multi-Modal Threat Defense, Jitter-Invariant C2 Analytics & Graph-Based Incident Triage
+# OmniGuard SOC: Multi-Modal Threat Defense, Jitter-Invariant C2 Analytics & Graph-Based Incident Triage
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](#)
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
-[![Platform](https://img.shields.io/badge/platform-Linux%20|%20IBM%20s390x%20|%20AWS-orange.svg)](#)
+[![Platform](https://img.shields.io/badge/platform-macOS%20|%20Linux%20|%20Docker-orange.svg)](#)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![MITRE ATT&CK](https://img.shields.io/badge/MITRE-v15.0-red.svg)](https://attack.mitre.org/)
 
-An enterprise-grade, end-to-end cybersecurity intelligence platform designed to eliminate the gaps between initial ingress attacks, encrypted command-and-control beaconing, and distributed lateral movement. 
+An end-to-end cybersecurity intelligence platform that closes the loop between
+initial phishing ingress, encrypted command-and-control beaconing, and analyst
+response — **detect → reason → respond → account**, all with a human in control
+and no data leaving the network.
 
 OmniGuard SOC combines:
-1. **VerifyEye**: Real-time visual and DOM-level phishing interception with client input locking.
-2. **SpectraC2**: Non-decrypting temporal and Fast Fourier Transform (FFT) beaconing detection on IBM LinuxONE (`s390x`).
-3. **SOC Graph Visualizer & Local LLM**: Dynamic Neo4j attack path correlation with zero-cloud-egress triage powered by Ollama.
+1. **VerifyEye** — real-time DOM-level phishing interception in the browser, with brand impersonation detection and client input locking.
+2. **SpectraC2** — non-decrypting temporal / Fast Fourier Transform (FFT) beaconing detection using Isolation Forest and LSTM models.
+3. **SOC Graph + Local LLM** — Neo4j attack-path correlation and zero-cloud-egress triage powered by a local Ollama model, with real one-click host containment and a tamper-evident decision ledger.
+
+> **Read this first — honest status.** This README describes both what the
+> platform **does today** and where it's **headed**. The original scope (below,
+> in [§1](#1-executive-summary--problem-formulation)) was deliberately
+> ambitious; this document is clear about which of those pieces are live and
+> which are still on the roadmap. See [§2 Current Status](#2-current-status) for
+> the one-glance picture.
 
 ---
 
 ## Table of Contents
 - [1. Executive Summary & Problem Formulation](#1-executive-summary--problem-formulation)
-- [2. System Architecture](#2-system-architecture)
-- [3. Subsystem Deep Dives](#3-subsystem-deep-dives)
-  - [3.1 VerifyEye (Ingress & Phishing Interception)](#31-verifyeye-ingress--phishing-interception)
-  - [3.2 SpectraC2 (Encrypted Beaconing Analytics)](#32-spectrac2-encrypted-beaconing-analytics)
-  - [3.3 Autonomous Graph & Local LLM Triage](#33-autonomous-graph--local-llm-triage)
-- [4. Technology Stack](#4-technology-stack)
-- [5. Repository Structure](#5-repository-structure)
-- [6. End-to-End Attack & Validation Methodology](#6-end-to-end-attack--validation-methodology)
-- [7. Quickstart & Installation](#7-quickstart--installation)
-- [8. Project Timeline & Milestones](#8-project-timeline--milestones)
-- [9. Academic References & Literature](#9-academic-references--literature)
+- [2. Current Status: Built vs. Roadmap](#2-current-status-built-vs-roadmap)
+- [3. System Architecture](#3-system-architecture)
+- [4. Subsystem Deep Dives](#4-subsystem-deep-dives)
+  - [4.1 VerifyEye (Ingress & Phishing Interception)](#41-verifyeye-ingress--phishing-interception)
+  - [4.2 SpectraC2 (Encrypted Beaconing Analytics)](#42-spectrac2-encrypted-beaconing-analytics)
+  - [4.3 Graph, Local LLM Triage, Containment & Ledger](#43-graph-local-llm-triage-containment--ledger)
+- [5. Technology Stack](#5-technology-stack)
+- [6. Repository Structure](#6-repository-structure)
+- [7. End-to-End Attack & Validation Methodology](#7-end-to-end-attack--validation-methodology)
+- [8. Quickstart & Installation](#8-quickstart--installation)
+- [9. Roadmap & Future Work](#9-roadmap--future-work)
+- [10. Academic References & Literature](#10-academic-references--literature)
+
+**Legend:** ✅ built & working · 🟡 partial / scaffolded · 🚧 roadmap (future work)
 
 ---
 
@@ -38,180 +51,230 @@ Modern Security Operations Centers (SOCs) face an escalating crisis driven by th
 * **The Encrypted C2 Blind Spot**: Over 95% of enterprise web traffic is encrypted via TLS 1.3. Adversaries inject pseudo-random timing jitter (0%–50%) into beacon loops, allowing reverse shells and post-exploitation frameworks (e.g., Sliver, Cobalt Strike) to blend into standard HTTPS browsing without detection.
 * **Alert Fatigue & Multi-Hop Siloing**: Tier-1 to Tier-3 analysts are overwhelmed by 10,000+ daily disconnected alerts. Relational databases fail to surface multi-hop lateral movement, leaving Advanced Persistent Threats (APTs) with an average enterprise dwell time exceeding 16 days.
 
-**OmniGuard SOC** unifies browser-level visual defense, enterprise-grade encrypted network telemetry, and multi-relational graph analytics into an autonomous defense platform capable of slashing Mean Time to Detect (MTTD) and Mean Time to Respond (MTTR) from hours to seconds while maintaining zero-cloud-egress data sovereignty.
+**OmniGuard SOC** unifies browser-level visual defense, encrypted network
+telemetry analysis, and multi-relational graph analytics into one platform aimed
+at slashing Mean Time to Detect (MTTD) and Mean Time to Respond (MTTR) while
+keeping all AI reasoning and telemetry processing local — **zero cloud egress,
+with a person in control of every response action.**
 
 ---
 
-## 2. System Architecture
+## 2. Current Status: Built vs. Roadmap
+
+This is the one-glance honest picture of the platform as it stands.
+
+| Capability | Status | Notes |
+|---|---|---|
+| **VerifyEye** phishing interception (Chrome MV3 + headless Playwright) | ✅ Built | Catches credential forms that submit off-domain; names the impersonated brand; locks input. |
+| VerifyEye brand identification | 🟡 Partial | **DOM/text heuristic** brand matching is what runs. A YOLOv8 visual-logo model + pHash is scaffolded (`visual/`) but not the production verdict path. |
+| **SpectraC2** FFT / IAT beacon detection | ✅ Built | Isolation Forest + LSTM models trained and on disk; `/classify-flow` API; jitter-invariant periodicity features. |
+| SpectraC2 on IBM LinuxONE (`s390x`) | 🚧 Roadmap | Runs on commodity hardware today; `linuxone/` holds deployment manifests only. |
+| **Neo4j** attack-graph correlation & blast radius | ✅ Built | Entity/relationship ingestion, multi-hop traversal. |
+| **Local LLM triage** (Ollama, zero egress) | ✅ Built | Runs `llama3.2:3b` locally. Incident summaries, MITRE mapping, analyst Q&A. |
+| **Ask AI** conversational triage + page-aware chat | ✅ Built | Analyst can interrogate any alert; context-aware corner helper. |
+| **One-click host containment** (real network cut) | ✅ Built | A cooperative agent on the host **actually cuts and restores its network** on analyst command — not just a generated firewall rule. |
+| **Tamper-evident decision ledger** | ✅ Built | Every request, AI output, and containment action is appended to an auditable ledger. |
+| **AI transparency** layer | ✅ Built | Surfaces what the model saw and why it said what it said. |
+| **MCP server** | ✅ Built | Exposes OmniGuard data/actions to MCP-compatible clients. |
+| **React SOC dashboard** + live WebSocket updates | ✅ Built | Graph canvas, alert feed, triage, containment panel. |
+| FFT periodicity heatmaps in the UI | 🚧 Roadmap | Spectral features are computed; the heatmap visualization is not built yet. |
+| Telemetry streaming (Kafka / Redis / Zeek / Suricata) | 🟡 Scaffolded | Consumer + Zeek parser exist as code; **not in the live path.** Alerts POST directly to `/alerts`. |
+| Adversary simulation (Sliver / Cobalt Strike / Flipper Zero) | 🟡 Partial | Replaced by a safe in-repo beacon simulator (`demo/beacon_sim.py`) for the demo. |
+| Live AI (auto-watch incoming alerts) | 🚧 Roadmap | Today the AI reasons on demand; real-time auto-triage is planned. |
+
+---
+
+## 3. System Architecture
+
+The diagram below is the **full target architecture.** Boxes marked 🚧 / 🟡 are
+roadmap or scaffolded (see [§2](#2-current-status-built-vs-roadmap)); everything
+else runs today.
 
 ```text
-  [ Physical Ingress / Drop ]
+  [ Physical Ingress / Drop ]            🚧 (demo uses a safe simulator)
        Flipper Zero BadUSB
                │
                ├────────────────────────────────────────┐
                ▼                                        ▼
-    [ Victim Web Browser ]                  [ In-Memory C2 Implant ]
-    Chrome MV3 Extension                     Sliver Reverse Shell
-               │                                        │
-    (DOM & Perceptual Hash)                (Encrypted TLS 1.3 Beaconing)
+    [ Victim Web Browser ]                  [ C2 Beacon ]
+    Chrome MV3 Extension        ✅          Beacon simulator        ✅
+               │                            (Sliver/Cobalt Strike   🚧)
+    (DOM inspection)                        (Encrypted TLS beaconing)
                ▼                                        ▼
    ┌───────────────────────┐               ┌─────────────────────────┐
-   │ VerifyEye AI Engine   │               │ Network Sensors         │
-   │ - Headless Playwright │               │ - Zeek (conn/ssl.log)   │
-   │ - YOLOv8 Logo Model   │               │ - Suricata (EVE JSON)   │
-   │ - DOM Action Validator│               └────────────┬────────────┘
+   │ VerifyEye Engine   ✅ │               │ Telemetry sensors    🟡 │
+   │ - Headless Playwright │               │ - Zeek conn parser      │
+   │ - Brand heuristic  ✅ │               │ - Kafka consumer        │
+   │ - YOLOv8 logo model🟡 │               │   (scaffolded, offline) │
+   │ - DOM action check ✅ │               └────────────┬────────────┘
    └───────────┬───────────┘                            │
-               │                              (Flow Metadata Streaming)
+               │                              (flow metadata)
                │                                        ▼
                │                           ┌─────────────────────────┐
-               │                           │ Apache Kafka / Redis    │
-               │                           └────────────┬────────────┘
-               │                                        │
-               │                                        ▼
-               │                           ┌─────────────────────────┐
-               │                           │ SpectraC2 Engine        │
-               │                           │ - IBM LinuxONE (s390x)  │
+               │                           │ SpectraC2 Engine     ✅ │
                │                           │ - Inter-Arrival (IAT)   │
                │                           │ - FFT & Power Spectrum  │
                │                           │ - LSTM & Isolation For. │
+               │                           │ - IBM LinuxONE s390x 🚧 │
                │                           └────────────┬────────────┘
                │                                        │
                └───────────────────┬────────────────────┘
-                                   │ (Structured Alert Payloads)
+                                   │ (structured alerts → POST /alerts ✅)
                                    ▼
                    ┌───────────────────────────────┐
-                   │ Neo4j Property Graph          │
-                   │ - Shortest Path & Dijkstra    │
-                   │ - Blast Radius Calculations   │
-                   │ - Dynamic Entity Resolution   │
+                   │ Neo4j Property Graph       ✅ │
+                   │ - Shortest path / blast radius│
+                   │ - Entity resolution           │
                    └───────────────┬───────────────┘
                                    │
                                    ▼
                    ┌───────────────────────────────┐
-                   │ Local Air-Gapped LLM Triage   │
-                   │ - Ollama (Llama-3-Cyber)      │
-                   │ - MITRE ATT&CK Matrix Mapping │
-                   │ - Executive Incident Summary  │
+                   │ Local LLM Triage (Ollama)  ✅ │
+                   │ - llama3.2:3b, zero egress    │
+                   │ - MITRE ATT&CK mapping        │
+                   │ - Incident summary + Ask AI   │
                    └───────────────┬───────────────┘
                                    │
                                    ▼
                    ┌───────────────────────────────┐
-                   │ Unified React SOC Dashboard   │
-                   │ - React Flow Graph Canvas     │
-                   │ - FFT Periodicity Heatmaps    │
-                   │ - 1-Click Host Isolation      │
+                   │ React SOC Dashboard        ✅ │
+                   │ - Attack graph canvas         │
+                   │ - 1-click REAL host isolation │
+                   │ - Tamper-evident ledger       │
+                   │ - FFT heatmaps             🚧 │
                    └───────────────────────────────┘
 ```
 
 ---
 
-## 3. Subsystem Deep Dives
+## 4. Subsystem Deep Dives
 
-### 3.1 VerifyEye (Ingress & Phishing Interception)
-* **Client-Side Inline Protection**: A lightweight Chrome Extension (Manifest V3) that continuously monitors dynamic DOM changes, cross-origin `action` endpoints, and form input bindings.
-* **Perceptual Brand Identification**: Leverages a quantized **YOLOv8** object detection model and Perceptual Hashing (**pHash**) to classify corporate brand targets (e.g., Microsoft 365, Okta, Google Workspace) in <500ms.
-* **Zero-Hour Interception**: If a rendered site visually matches an authentic portal but originates from unverified infrastructure, VerifyEye freezes input fields, injects visual threat bounding boxes, and prevents credential dispatch before exfiltration occurs.
+### 4.1 VerifyEye (Ingress & Phishing Interception) ✅
 
-### 3.2 SpectraC2 (Encrypted Beaconing Analytics)
-* **Metadata-Only Processing**: Bypasses the need for TLS decryption or invasive Deep Packet Inspection (DPI) by ingesting flow telemetry via Zeek (`conn.log`, `ssl.log`) and Suricata.
-* **Jitter-Invariant Signal Processing**: Programmatic beacon loops—even those with 10%–50% randomized jitter—exhibit distinct underlying periodicities. SpectraC2 extracts Inter-Arrival Time (IAT) deltas $\Delta t_i = t_i - t_{i-1}$ and computes the **Fast Fourier Transform (FFT)** and **Power Spectral Density (PSD)**:
+* **Client-Side Inline Protection** ✅: A lightweight Chrome Extension (Manifest V3) that monitors dynamic DOM changes, cross-origin `action` endpoints, and form input bindings, backed by a headless Playwright crawler (`dom/crawler.py`).
+* **Brand Identification** 🟡: The production verdict uses **DOM/text heuristic** brand matching (`visual/detector.py`) against a curated brand list (Microsoft, Google, Okta, PayPal, …). A quantized **YOLOv8** object-detection model and perceptual hashing (**pHash**, `visual/phash.py`) are scaffolded for visual logo detection but are not yet the decision path.
+* **Zero-Hour Interception** ✅: If a page shows a credential form that submits to **off-domain** infrastructure while impersonating a known brand, VerifyEye flags it and can lock input before credentials are dispatched.
+
+### 4.2 SpectraC2 (Encrypted Beaconing Analytics) ✅
+
+* **Metadata-Only Processing** ✅: No TLS decryption or DPI — classification is driven by flow timing/metadata only.
+* **Jitter-Invariant Signal Processing** ✅: Beacon loops — even with 10%–50% randomized jitter — exhibit underlying periodicities. SpectraC2 extracts Inter-Arrival Time deltas $\Delta t_i = t_i - t_{i-1}$ and computes the **Fast Fourier Transform** and **Power Spectral Density**:
   $$X(f) = \sum_{n=0}^{N-1} x[n] \cdot e^{-j 2\pi f n / N}$$
-* **Enterprise Inference on IBM LinuxONE (`s390x`)**: Evaluates sequential packet order and spectral features using **Isolation Forest** and **LSTM** models, distinguishing automated reverse shells from noisy human browsing at scale.
+* **Inference** ✅: Trained **Isolation Forest** (`isolation_forest.joblib`) and **LSTM** (`spectrac2_lstm.pt`) models score flows. Runs on commodity hardware; **IBM LinuxONE (`s390x`) deployment is roadmap** 🚧 (`linuxone/` holds manifests).
+* **Telemetry source** 🟡: In the live demo, flows are fed by `demo/beacon_sim.py`. A Zeek/Kafka streaming path is scaffolded (`telemetry-pipeline/`) but not wired into the running system.
 
-### 3.3 Autonomous Graph & Local LLM Triage
-* **Property Graph Ingestion**: Ingests normalized entities (`Host`, `User`, `IP`, `Process`, `Domain`) and relationships (`CONNECTED_TO`, `SPAWNED`, `AUTHENTICATED_AS`) into **Neo4j**.
-* **Blast-Radius Propagation**: Uses NetworkX graph traversal algorithms to trace multi-hop pivot paths and quantify enterprise risk scores dynamically.
-* **Air-Gapped Synthesis**: Uses an on-premise instance of **Ollama** running `Llama-3-Cyber` or `Mistral` via strict JSON schema prompting. The engine translates graph paths into incident summaries, maps MITRE techniques (`T1566`, `T1056`, `T1071`, `TA0008`), and generates actionable 1-click containment commands (e.g., firewall block rules, host quarantine).
+### 4.3 Graph, Local LLM Triage, Containment & Ledger ✅
+
+* **Property Graph Ingestion** ✅: Normalized entities (`Host`, `User`, `IP`, `Process`, `Domain`) and relationships into **Neo4j**, with host-name normalization so the extension, beacon, and agent always correlate onto one node.
+* **Blast-Radius Propagation** ✅: Graph traversal to trace multi-hop paths and risk.
+* **Air-Gapped Synthesis** ✅: An on-premise **Ollama** instance running **`llama3.2:3b`** produces incident summaries, maps MITRE techniques (`T1566`, `T1056`, `T1071`, `TA0008`), and answers analyst questions — **100% local, zero cloud egress.**
+* **Real One-Click Containment** ✅: The analyst's "Isolate host" button hands a command to a **cooperative containment agent running on the host** (`demo/containment_agent.py`), which *actually cuts the machine off the network* (firewall default-block, keeping only the SOC control channel open) and restores it on release. Nothing happens without an analyst request, and the agent confirms back when the action is really applied.
+* **Tamper-Evident Decision Ledger** ✅: Every isolation request, AI output, and agent confirmation is appended to an auditable ledger (`backend/ledger.py`) — the "account" in detect-reason-respond-account.
+* **AI Transparency** ✅ (`backend/ai_transparency.py`) and an **MCP server** ✅ (`mcp_server/`) that exposes OmniGuard data and actions to MCP-compatible clients round out the triage layer.
 
 ---
 
-## 4. Technology Stack
+## 5. Technology Stack
 
-| Layer | Primary Technologies | Functional Responsibility |
+| Layer | Technologies | Status |
 |---|---|---|
-| **Adversary Simulation** | Flipper Zero (DuckyScript / Sub-GHz), Sliver C2, Cobalt Strike | Emulating BadUSB keystrokes, captive portals, and randomized egress beacons. |
-| **Visual Ingress AI** | PyTorch, YOLOv8, ONNX Runtime, OpenCV, Playwright, Chrome MV3 | Real-time DOM inspection, logo object detection, and credential submission freezing. |
-| **Flow Inference Engine** | IBM LinuxONE (`s390x`), NumPy, SciPy (FFT), Scikit-Learn, PyTorch, FastAPI | High-throughput temporal flow feature calculation and beacon classification. |
-| **Telemetry & Streaming** | Apache Kafka, Redis Queue, Zeek (Bro), Suricata (EVE JSON), Scapy | Scalable log streaming, protocol parsing, and backpressure management. |
-| **Graph Correlation Core** | Neo4j (Cypher), NetworkX, Python Graph Engine | Entity correlation, multi-hop shortest-path discovery, and blast radius calculation. |
-| **Air-Gapped LLM Triage** | Ollama, Llama-3-Cyber / Mistral, LangChain, Pydantic | Privacy-preserving incident summarization, MITRE tagging, and remediation generation. |
-| **Analyst Dashboard** | React.js, React Flow, D3.js, Tailwind CSS, Recharts, WebSockets | Unified multi-pane interface for graph navigation, spectral heatmaps, and mitigation. |
+| **Adversary Simulation** | In-repo beacon simulator; Flipper Zero DuckyScript payloads | ✅ sim · 🟡 Flipper assets · 🚧 Sliver/Cobalt Strike |
+| **Visual Ingress AI** | Playwright, Chrome MV3, DOM/text brand heuristics; (YOLOv8/ONNX/OpenCV scaffolded) | ✅ DOM path · 🟡 vision model |
+| **Flow Inference Engine** | NumPy, SciPy (FFT), Scikit-Learn (Isolation Forest), PyTorch (LSTM), FastAPI | ✅ |
+| **Telemetry & Streaming** | Zeek conn parser, Kafka consumer | 🟡 scaffolded, offline |
+| **Graph Correlation Core** | Neo4j (Cypher), Python graph engine | ✅ |
+| **Air-Gapped LLM Triage** | Ollama (`llama3.2:3b`), Pydantic | ✅ |
+| **Analyst Dashboard** | React.js, Vite, WebSockets | ✅ |
+| **Core API & Data** | FastAPI, MongoDB, MCP | ✅ |
+
+> **On the local model.** OmniGuard runs `llama3.2:3b` locally by design — the
+> goal is data sovereignty, not maximum model size. The architecture pushes
+> multi-step work into the backend so a small local model stays sufficient.
 
 ---
 
-## 5. Repository Structure
+## 6. Repository Structure
 
 ```text
-omniguard-soc/
-├── .github/                      # CI/CD pipelines and PR workflows
-├── adversary-simulation/         # Offensive attack tooling & test suites
-│   ├── flipper/                  # Flipper Zero DuckyScript payloads & Evil Portal configs
-│   ├── sliver/                   # C2 server listener configs & profile manifests
-│   └── pcap-replay/              # Synthetic and DARPA TC/Caldera evaluation PCAPs
-├── verifyeye-ingress/            # Visual & DOM Phishing Defense Subsystem
-│   ├── extension/                # Chrome Extension (Manifest V3) content/background scripts
-│   ├── crawler/                  # Playwright headless DOM parsing service (AWS ECS/Lambda)
-│   └── models/                   # YOLOv8 weights, ONNX export scripts, and pHash utilities
-├── spectrac2-engine/             # Encrypted Network Behavioral Analytics Subsystem
-│   ├── feature-extraction/       # IAT calculation, FFT, and spectral power density scripts
-│   ├── inference/                # Isolation Forest and LSTM model definitions & checkpoints
-│   ├── linuxone/                 # IBM LinuxONE (s390x) deployment manifests & Dockerfiles
-│   └── service/                  # FastAPI microservice exposing flow classification APIs
-├── telemetry-pipeline/           # Streaming Ingestion & Parsing
-│   ├── zeek-scripts/             # Custom Zeek policy definitions & conn/ssl log extractors
-│   ├── suricata/                 # Suricata rulesets & EVE.json parsers
-│   └── kafka-consumers/          # Message serialization, Redis queue workers, & normalizers
-├── graph-triage-core/            # Neo4j Entity Resolution & Local LLM Synthesis
-│   ├── schema/                   # Neo4j Cypher constraints, indexes, and graph schemas
-│   ├── traversal/                # NetworkX blast radius and shortest path implementations
-│   ├── ollama-triage/            # Local LLM prompt templates, Pydantic schemas, and LangChain loops
-│   └── api/                      # Core orchestration REST/WebSocket endpoints
-├── frontend-dashboard/           # Unified SOC Analyst Dashboard
-│   ├── src/
-│   │   ├── components/graph/     # React Flow interactive attack topology canvas
-│   │   ├── components/spectral/  # FFT periodicity heatmaps and beacon time series (D3/Recharts)
-│   │   ├── components/verify/    # Visual diffs, logo matches, and credential capture inspect
-│   │   └── components/triage/    # Natural language incident timeline & 1-click mitigation actions
-│   └── package.json
-├── docker-compose.yml            # Multi-service local orchestrator
+omniguard/
+├── backend/                      # ✅ FastAPI core: alerts, graph, AI triage,
+│   │                             #    containment, ledger, conversations, MCP glue
+│   ├── main.py                   #    REST + WebSocket endpoints
+│   ├── ai.py / ai_transparency.py#    Local LLM triage + transparency
+│   ├── containment.py            #    Host isolation state machine
+│   ├── ledger.py                 #    Tamper-evident decision ledger
+│   ├── graph.py                  #    Neo4j correlation & blast radius
+│   └── ...                       #    ocsf, dedup, evidence, triage, turns, auth
+├── verifyeye-ingress/            # ✅ Visual & DOM phishing defense
+│   ├── extension/                #    Chrome Extension (Manifest V3)
+│   ├── dom/crawler.py            #    Playwright headless DOM parser
+│   ├── visual/                   #    🟡 brand heuristic (detector.py) + pHash
+│   └── service.py                #    Verdict API
+├── spectrac2-engine/             # ✅ Encrypted beaconing analytics
+│   ├── feature_extraction/       #    IAT, FFT, spectral power density
+│   ├── inference/                #    Isolation Forest + LSTM (trained models)
+│   ├── linuxone/                 #    🚧 IBM LinuxONE (s390x) manifests
+│   └── service/                  #    FastAPI flow-classification API
+├── telemetry-pipeline/           # 🟡 scaffolded, not in live path
+│   ├── zeek-scripts/             #    conn.log parser
+│   └── kafka-consumers/          #    stream consumer
+├── adversary-simulation/         # 🟡 flipper/ assets
+├── demo/                         # ✅ Two-laptop live demo
+│   ├── beacon_sim.py             #    Safe C2 beacon simulator
+│   ├── containment_agent.py      #    Cooperative host-isolation agent
+│   └── setup_demo_hosts.py       #    Fake-domain hosts-file helper
+├── mcp_server/                   # ✅ MCP server exposing OmniGuard
+├── frontend/                     # ✅ React/Vite SOC dashboard
+├── fake_sites/                   #    Demo phishing pages
+├── schemas/                      #    Shared alert contract
+├── docs/                         #    Setup + demo runbooks
+├── tests/
+├── docker-compose.yml            #    mongo, neo4j, backend, verifyeye-agent, frontend
 └── README.md
 ```
 
 ---
 
-## 6. End-to-End Attack & Validation Methodology
+## 7. End-to-End Attack & Validation Methodology
 
-The platform is evaluated against a synchronized multi-stage enterprise intrusion simulation:
+The platform is exercised against a multi-stage intrusion scenario. Stages
+marked 🚧 are target scope; the live two-laptop demo covers ingress → egress →
+triage → **real response**.
 
 ```text
-[ STAGE 1: INGRESS ] ──► [ STAGE 2: EGRESS ] ──► [ STAGE 3: PIVOTING ] ──► [ STAGE 4: TRIAGE ]
-Physical BadUSB Drop      Encrypted Beaconing      Internal Lateral Pivot     Air-Gapped LLM Remediation
-- Flipper Zero injects    - Staged Sliver implant  - LSASS dump & Pass-the-   - Ollama maps ATT&CK matrix
-  keystrokes                dials AWS listener       Hash across domain         (T1566, T1056, T1071)
-- Launches fake login     - 30% jitter applied       controllers              - Generates executive narrative
-- VerifyEye locks input   - SpectraC2 FFT flags    - Neo4j graph expands      - Pushes 1-click firewall
-  & flags logo theft        harmonic spikes          blast radius in UI         quarantine rule
+[ STAGE 1: INGRESS ] ──► [ STAGE 2: EGRESS ] ──► [ STAGE 3: TRIAGE ] ──► [ STAGE 4: RESPOND ]
+   ✅                        ✅                       ✅                      ✅
+- Fake login page         - Beacon simulator dials  - Both engines correlate  - Analyst isolates the
+- VerifyEye flags the       the SOC (real timing)     onto one host in Neo4j    host → agent REALLY
+  brand impersonation     - SpectraC2 FFT flags     - Local LLM summarizes      cuts its network
+  & off-domain submit       the periodicity           & maps MITRE            - Every step written to
+                                                    - Analyst asks "Ask AI"     the tamper-evident ledger
+
+[ STAGE 3b: LATERAL MOVEMENT ]  🚧  — LSASS dump / pass-the-hash expansion is target scope, not yet simulated.
 ```
 
-### Validation Benchmarks
-* **Detection Latency**: Ingestion-to-graph correlation in $<500	ext{ ms}$.
-* **Inference Precision**: $>95\%$ precision target on active encrypted C2 flow classifications across $200+$ test runs.
-* **Zero Egress**: $100\%$ local execution of LLM summarization and network telemetry processing without third-party API exposure.
+### Validation Benchmarks — *targets, not yet measured*
+These were the project's **target** numbers. They are not independently measured
+yet; an evaluation harness is roadmap ([§9](#9-roadmap--future-work)).
+* **Detection Latency** 🚧: ingestion-to-graph correlation target `< 500 ms`.
+* **Inference Precision** 🚧: `> 95%` precision target on encrypted C2 flow classification.
+* **Zero Egress** ✅: 100% local LLM summarization and telemetry processing — no third-party API calls. (This one holds today by construction.)
 
 ---
 
-## 7. Quickstart & Installation
+## 8. Quickstart & Installation
 
 > **What runs today.** The platform core — the alert API, the MongoDB alert
-> store, the Neo4j attack graph, and the React dashboard — runs from one
-> `docker compose up`. The detection engines (VerifyEye, SpectraC2) are
-> developed in their own folders and connect to the API over HTTP; they are not
-> part of the compose stack yet. For the full, always-current setup guide see
-> [`docs/running-locally.md`](docs/running-locally.md).
+> store, the Neo4j attack graph, the local LLM triage, and the React dashboard —
+> runs locally. SpectraC2 and VerifyEye are developed in their own folders and
+> connect to the API over HTTP. For the full, always-current setup guide see
+> [`docs/running-locally.md`](docs/running-locally.md), and for the live
+> two-laptop demo see [`docs/lan-demo-setup.md`](docs/lan-demo-setup.md).
 
 ### The fast way — Docker
 
-Needs **Docker Desktop** running.
+Needs **Docker Desktop** running. The compose stack brings up `mongo`, `neo4j`,
+`backend`, `verifyeye-agent`, and `frontend`.
 
 ```bash
 git clone <this-repo>
@@ -225,21 +288,20 @@ docker compose up -d --build
 | API + Swagger | http://localhost:8000/docs |
 | Neo4j browser | http://localhost:7474    |
 
-Stop with `docker compose down` (data persists in named volumes).
-
-The Neo4j password is set in `docker-compose.yml`. The backend reaches the
-databases by service name (`mongo`, `neo4j`), not localhost — inside a container
-localhost is the container itself.
+Stop with `docker compose down` (data persists in named volumes). The backend
+reaches the databases by service name (`mongo`, `neo4j`), not localhost.
 
 ### The manual way — for development
 
 Separate processes, no rebuild on each change. Needs Python 3.11+, Node 18+,
-MongoDB, and Neo4j Desktop. Full steps in
+MongoDB, Neo4j Desktop, and [Ollama](https://ollama.com). Full steps in
 [`docs/running-locally.md`](docs/running-locally.md); in short:
 
 ```bash
-# databases: MongoDB via brew services, Neo4j via the desktop app
-# backend  — terminal 1
+# local LLM
+ollama pull llama3.2:3b
+
+# backend — terminal 1
 cd backend && python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env            # then set NEO4J_PASSWORD
@@ -251,8 +313,8 @@ cd frontend && npm install && npm run dev   # dashboard on :5173
 
 ### Sending a test alert
 
-Any engine — or you, from Swagger — posts to `POST /alerts`. The contract is one
-shape for every engine, documented in
+Any engine — or you, from Swagger — posts to `POST /alerts`. One shape for every
+engine, documented in
 [`schemas/omniguard_data_schemas.json`](schemas/omniguard_data_schemas.json).
 
 ```bash
@@ -266,30 +328,25 @@ curl -X POST http://localhost:8000/alerts -H 'Content-Type: application/json' -d
 
 It appears on the dashboard live, and in the attack graph.
 
-### Ollama (local LLM triage)
+---
 
-Planned, not wired in yet. When it lands it runs locally — zero cloud egress,
-in line with the project's data-sovereignty goal:
+## 9. Roadmap & Future Work
 
-```bash
-ollama pull llama3
-```
+Ordered roughly by priority. These are the pieces that are scaffolded or
+designed but not yet live.
+
+1. **Live AI** 🚧 — have the local model watch incoming alerts in real time and surface what needs attention, instead of only answering on demand.
+2. **Polish the UI** 🚧 — refine the dashboard, visuals, and overall analyst UX.
+3. **Train & tune the models** 🚧 — improve SpectraC2 detection accuracy and the local LLM's answers; stay on the local-only model.
+4. **Evaluation harness** 🚧 — run the beacon simulator against benign traffic through SpectraC2 and report **real, measured** precision/latency to replace the target numbers in [§7](#7-end-to-end-attack--validation-methodology).
+5. **FFT periodicity heatmaps** 🚧 in the dashboard (spectral features are already computed).
+6. **Visual logo detection** 🚧 — promote the scaffolded YOLOv8 + pHash path into the VerifyEye verdict.
+7. **Live telemetry streaming** 🚧 — wire the Zeek → Kafka pipeline into the running system instead of direct POSTs.
+8. **Enterprise targets** 🚧 — IBM LinuxONE (`s390x`) deployment; lateral-movement (pass-the-hash) scenario; real C2 frameworks in the adversary-simulation lab.
 
 ---
 
-## 8. Project Timeline & Milestones
-
-| Phase | Duration | Focus Area | Deliverables |
-|---|---|---|---|
-| **Phase 1** | Weeks 1–3 | Architecture & Infrastructure | Provision IBM LinuxONE & AWS environments; configure Kafka/Redis queues; author Flipper Zero DuckyScripts and Sliver C2 listeners. |
-| **Phase 2** | Weeks 4–6 | AI Models & Graph Schema | Train YOLOv8 brand detection model; implement FFT spectral feature pipeline; deploy Neo4j base schemas and entity resolution. |
-| **Phase 3** | Weeks 7–9 | Graph Traversal & Local LLM | Implement NetworkX shortest-path algorithms; configure Ollama Llama-3 structured prompt templates; benchmark LinuxONE throughput. |
-| **Phase 4** | Weeks 10–12 | Dashboard & Client Extension | Build Chrome MV3 Extension; deliver React Flow attack graph canvas and FFT spectral heatmaps; hook up WebSocket event streams. |
-| **Phase 5** | Weeks 13–14 | Replay, Benchmarking & Showcase | Execute end-to-end multi-stage intrusion replay; achieve $>95\%$ precision benchmarks; compile technical whitepaper and demo. |
-
----
-
-## 9. Academic References & Literature
+## 10. Academic References & Literature
 
 1. **MITRE Corporation**: *MITRE ATT&CK® Enterprise Matrix (v14/v15)*. Tactics & Techniques covering Phishing (`T1566`), Input Capture (`T1056`), Command and Control (`TA0011`, `T1071`), and Lateral Movement (`TA0008`), 2024–2025.
 2. **Lin, D., et al. (IEEE S&P)**: *Phishpedia: A Deep Learning-Based Phishing Detection System with High Accuracy and Low False Positives*. Technical foundations for logo identification, visual layout verification, and coordinate mapping.
