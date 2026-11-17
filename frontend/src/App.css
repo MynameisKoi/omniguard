@@ -4696,11 +4696,20 @@ mark.hl-match { background: var(--accent-wash); color: var(--accent-text); borde
   .toast { width: auto; max-width: none; }
 
   /* ── tables ───────────────────────────────────────────────────────────
-     generic tables (ledger, incidents, engine breakdowns) scroll sideways
-     within their card instead of pushing the page wide */
-  .table:not(.alerts-table) {
-    display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch;
+     every table reflows into cards on a phone (no sideways scroll). Generic
+     tables (Hosts, Users, Domains, Incidents, Engines): first column is the
+     title on its own line, the rest flow as a row of values beneath it */
+  .table:not(.alerts-table) { display: block; width: 100%; }
+  .table:not(.alerts-table) thead { display: none; }
+  .table:not(.alerts-table) tbody { display: block; }
+  .table:not(.alerts-table) tr {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+    padding: 12px 14px; border-bottom: 1px solid var(--line);
   }
+  .table:not(.alerts-table) td {
+    display: inline-flex; align-items: center; width: auto; padding: 0; border: 0; white-space: normal;
+  }
+  .table:not(.alerts-table) td:first-child { flex: 1 1 100%; }
 
   /* the alerts list: reflow each row into a tappable card so host + severity
      + engine + triage are all visible (they were clipped off the right) */
