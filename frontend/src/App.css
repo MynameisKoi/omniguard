@@ -4655,3 +4655,76 @@ mark.hl-match { background: var(--accent-wash); color: var(--accent-text); borde
 .td-pick { width: 34px; padding-right: 0 !important; cursor: default; }
 .td-pick input { cursor: pointer; width: 15px; height: 15px; accent-color: var(--accent); vertical-align: middle; }
 .alerts-table tr.row-picked td { background: var(--accent-wash); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RESPONSIVE PASS — make every view usable on phone / tablet / desktop.
+   Desktop keeps its layout; ≤820px gets the drawer (already handled above);
+   ≤640px is the phone layer below. Goal: nothing clips, nothing overflows
+   sideways, every control stays reachable.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* the page itself never scrolls sideways on small screens */
+@media (max-width: 820px) {
+  html, body, #root { max-width: 100%; overflow-x: hidden; }
+}
+
+@media (max-width: 640px) {
+  /* ── segmented SEVERITY / ENGINE filter bars ──────────────────────────
+     each control gets its own full-width line; the segment scrolls
+     horizontally instead of clipping "Low" off the edge */
+  .toolbar { gap: 10px; padding: 10px; }
+  .toolbar-sep { display: none; }
+  .toolbar-grow { display: none; }
+  .toolbar-count { flex-basis: 100%; }
+  .seg-group { flex: 1 1 100%; min-width: 0; }
+  .seg { flex: 1; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .seg::-webkit-scrollbar { display: none; }
+  .seg-btn { flex: none; white-space: nowrap; }
+
+  /* ── any top-bar dropdown stays within the screen ─────────────────── */
+  .topbar .dropdown { max-width: calc(100vw - 16px); }
+  /* the notification bell + toasts become full-width sheets under the bar */
+  .dropdown.notif-dd {
+    position: fixed; left: 8px; right: 8px; top: 56px;
+    width: auto; max-width: none; max-height: calc(100vh - 72px); overflow-y: auto;
+  }
+  .liveai-toggle { padding: 11px 12px; }
+  .liveai-switch { width: 40px; height: 22px; }
+  .liveai-knob { width: 18px; height: 18px; }
+  .liveai-switch.on .liveai-knob { left: 20px; }
+  .toast-stack { left: 8px; right: 8px; top: 56px; }
+  .toast { width: auto; max-width: none; }
+
+  /* ── tables ───────────────────────────────────────────────────────────
+     generic tables (ledger, incidents, engine breakdowns) scroll sideways
+     within their card instead of pushing the page wide */
+  .table:not(.alerts-table) {
+    display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch;
+  }
+
+  /* the alerts list: reflow each row into a tappable card so host + severity
+     + engine + triage are all visible (they were clipped off the right) */
+  .alerts-table thead { display: none; }
+  .alerts-table, .alerts-table tbody { display: block; width: 100%; }
+  .alerts-table tr {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+    padding: 12px 14px; border-bottom: 1px solid var(--line);
+  }
+  .alerts-table td { display: inline-flex; align-items: center; width: auto; padding: 0; border: 0; white-space: normal; }
+  .alerts-table .td-pick { display: none; }                               /* bulk-select is a desktop action */
+  .alerts-table td:nth-child(2) { order: 1; flex: 1 1 55%; min-width: 0; } /* Alert: event + time (title) */
+  .alerts-table td:nth-child(3) { order: 2; }                             /* Severity pill */
+  .alerts-table td:nth-child(6) { order: 3; }                             /* Engine tag */
+  .alerts-table td:nth-child(4) { order: 4; flex: 1 1 100%; }             /* Host */
+  .alerts-table .td-wide { display: none; }                               /* Domain hidden on phone */
+  .alerts-table td:nth-child(7) { order: 5; flex: 1 1 100%; }             /* Triage cell */
+
+  /* ── landing header ───────────────────────────────────────────────────
+     hide the in-page section links on a phone (keep brand + Sign in), and
+     stop "Sign in" wrapping to two lines */
+  .lp-nav { padding: 16px; gap: 12px; }
+  .lp-nav-links { gap: 12px; }
+  .lp-nav-links a { display: none; }
+  .lp-signin { white-space: nowrap; flex: none; }
+  .nav-name { white-space: nowrap; }
+}
