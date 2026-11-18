@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#080b12">
+<title>OmniGuard Walkthrough</title>
+<meta name="description" content="A phone-first walkthrough: watch a phishing attack breach a company without a defender, then get caught and contained by OmniGuard.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: a full-height, phone-first "story player" — one scene at a time,
+   a progress rail up top, a Next button pinned at the bottom. Single dark
+   theme on purpose: this is a security-ops product and reads as one. */
+:root {
+    --bg: #080b12;
+    --bg2: #0f1420;
+    --raised: #141b2b;
+    --line: #202a3d;
+    --fg: #e9eef6;
+    --dim: #9aa8be;
+    --faint: #5d6b83;
+    --accent: #2ad4c1;
+    --accent2: #8b7cf6;
+    --critical: #f2565c;
+    --crit-wash: rgba(242, 86, 92, 0.14);
+    --high: #ef8c3e;
+    --good: #40c07e;
+    --good-wash: rgba(64, 192, 126, 0.14);
+    --accent-wash: rgba(42, 212, 193, 0.14);
+    --font-display: "Space Grotesk", system-ui, sans-serif;
+    --font-body: "Inter", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+}
+#app {
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    max-width: 560px;
+    margin: 0 auto;
+}
+body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background:
+        radial-gradient(60% 40% at 50% 0%, rgba(42, 212, 193, 0.08), transparent 70%),
+        radial-gradient(50% 40% at 80% 100%, rgba(139, 124, 246, 0.07), transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+}
+.rail {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    gap: 5px;
+    padding: 14px max(16px, env(safe-area-inset-left, 0px)) 6px max(16px, env(safe-area-inset-right, 0px));
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
+}
+.rail span { flex: 1; height: 3px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.rail span i { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--accent); transition: width 0.35s ease; }
+.rail span.done i, .rail span.on i { width: 100%; }
+.stage { position: relative; z-index: 1; flex: 1; min-height: 0; overflow-y: auto; display: flex; }
+.scene {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; justify-content: center; gap: 18px;
+    padding: 18px max(20px, env(safe-area-inset-left, 0px)) 20px max(20px, env(safe-area-inset-right, 0px));
+    text-align: center;
+}
+.scene[hidden] { display: none !important; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+.eyebrow.bad { color: var(--critical); }
+.eyebrow.good { color: var(--good); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(27px, 8vw, 38px); line-height: 1.08; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: clamp(21px, 6vw, 27px); line-height: 1.15; letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+.lede { font-size: 15.5px; line-height: 1.6; color: var(--dim); margin: 0 auto; max-width: 42ch; }
+.lede b { color: var(--fg); font-weight: 600; }
+.tag { display: inline-flex; align-items: center; gap: 7px; align-self: center; padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
+.tag.bad { background: var(--crit-wash); color: var(--critical); }
+.tag.good { background: var(--good-wash); color: var(--good); }
+.tag .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.controls { position: relative; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 12px max(16px, env(safe-area-inset-left, 0px)); padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+.back { flex: none; width: 46px; height: 46px; border: 1px solid var(--line); border-radius: 13px; background: var(--bg2); color: var(--dim); font-size: 20px; cursor: pointer; display: grid; place-items: center; transition: background 0.15s; }
+.back:hover { background: var(--raised); color: var(--fg); }
+.back[hidden] { visibility: hidden; display: grid !important; }
+.next { flex: 1; height: 46px; border: 0; border-radius: 13px; background: var(--accent); color: #04140f; font-family: var(--font-display); font-weight: 700; font-size: 15.5px; cursor: pointer; transition: filter 0.15s, transform 0.08s; }
+.next:hover { filter: brightness(1.07); }
+.next:active { transform: translateY(1px); }
+.next.restart { background: transparent; border: 1px solid var(--line); color: var(--fg); }
+.brand { display: inline-flex; align-items: center; gap: 10px; align-self: center; }
+.logo { width: 46px; height: 46px; }
+.brand-name { font-family: var(--font-display); font-weight: 700; font-size: 19px; letter-spacing: -0.01em; }
+.brand-name em { color: var(--accent); font-style: normal; font-weight: 500; font-size: 12px; letter-spacing: 0.16em; margin-left: 4px; vertical-align: 2px; }
+.stack { display: flex; flex-direction: column; gap: 12px; align-self: center; width: 100%; max-width: 380px; }
+.card { text-align: left; background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; gap: 12px; align-items: flex-start; }
+.card .ic { flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--raised); }
+.card .ic svg { width: 19px; height: 19px; }
+.card h3 { margin: 0 0 3px; font-size: 14.5px; font-family: var(--font-display); font-weight: 600; }
+.card p { margin: 0; font-size: 12.8px; line-height: 1.5; color: var(--dim); }
+.card.bad { border-color: rgba(242,86,92,0.4); } .card.bad .ic { background: var(--crit-wash); color: var(--critical); }
+.card.good { border-color: rgba(64,192,126,0.4); } .card.good .ic { background: var(--good-wash); color: var(--good); }
+.card.accent .ic { background: var(--accent-wash); color: var(--accent); }
+.phish { align-self: center; width: 100%; max-width: 300px; background: #fff; border-radius: 14px; padding: 16px; position: relative; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+.phish .url { font-family: var(--font-mono); font-size: 11px; color: #c0392b; margin-bottom: 12px; word-break: break-all; }
+.phish .field { height: 30px; border-radius: 7px; background: #eef0f3; margin-bottom: 8px; }
+.phish .btn { height: 30px; border-radius: 7px; background: #3b5bdb; }
+.phish .freeze { position: absolute; inset: 0; background: var(--crit-wash); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); display: grid; place-items: center; gap: 6px; align-content: center; color: var(--critical); font-weight: 700; font-family: var(--font-mono); font-size: 13px; border: 2px solid var(--critical); border-radius: 14px; }
+.phish .freeze svg { width: 26px; height: 26px; }
+.beacon { align-self: center; display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 12px; color: var(--dim); }
+.beacon .pulse { width: 12px; height: 12px; border-radius: 50%; background: var(--critical); position: relative; }
+.pills { display: flex; gap: 6px; align-self: center; flex-wrap: wrap; justify-content: center; }
+.pill { font-family: var(--font-mono); font-size: 11px; padding: 4px 9px; border-radius: 999px; background: var(--raised); color: var(--dim); border: 1px solid var(--line); }
+.pill.hot { color: var(--critical); border-color: rgba(242,86,92,0.4); }
+.graph { align-self: center; }
+.graph svg { width: 240px; max-width: 72vw; height: auto; }
+.vs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-self: center; width: 100%; max-width: 420px; }
+.vs .col { border: 1px solid var(--line); border-radius: 14px; padding: 16px 12px; display: flex; flex-direction: column; gap: 6px; }
+.vs .col.bad { border-color: rgba(242,86,92,0.35); background: var(--crit-wash); }
+.vs .col.good { border-color: rgba(64,192,126,0.35); background: var(--good-wash); }
+.vs .col .k { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); }
+.vs .col .big { font-family: var(--font-display); font-weight: 700; font-size: 26px; line-height: 1; }
+.vs .col.bad .big { color: var(--critical); } .vs .col.good .big { color: var(--good); }
+.vs .col .sub { font-size: 12px; color: var(--dim); }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-self: center; width: 100%; max-width: 440px; }
+.feat { background: var(--bg2); border: 1px solid var(--line); border-radius: 13px; padding: 13px; text-align: left; }
+.feat .ic { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-wash); color: var(--accent); display: grid; place-items: center; margin-bottom: 9px; }
+.feat .ic svg { width: 16px; height: 16px; }
+.feat h4 { margin: 0 0 3px; font-size: 13px; font-family: var(--font-display); font-weight: 600; line-height: 1.2; }
+.feat p { margin: 0; font-size: 11.3px; line-height: 1.4; color: var(--faint); }
+.loop { display: flex; flex-wrap: wrap; gap: 8px; align-self: center; justify-content: center; max-width: 420px; }
+.loop span { font-family: var(--font-mono); font-size: 12px; padding: 7px 12px; border-radius: 999px; background: var(--raised); border: 1px solid var(--line); color: var(--fg); }
+.loop span.arr { background: 0; border: 0; color: var(--faint); padding: 7px 2px; }
+.team { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; align-self: center; width: 100%; max-width: 420px; }
+.member { display: flex; align-items: center; gap: 11px; background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; }
+.member .av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 12px; color: #04140f; flex: none; }
+.member .who { text-align: left; min-width: 0; }
+.member .who b { display: block; font-size: 13px; line-height: 1.2; }
+.member .who span { font-size: 10.8px; color: var(--faint); }
+.local { font-family: var(--font-mono); font-size: 12px; color: var(--accent); display: inline-flex; gap: 7px; align-items: center; align-self: center; }
+@media (prefers-reduced-motion: no-preference) {
+    .scene.active .fx { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+    .scene.active .fx:nth-child(2) { animation-delay: 0.06s; }
+    .scene.active .fx:nth-child(3) { animation-delay: 0.12s; }
+    .scene.active .fx:nth-child(4) { animation-delay: 0.18s; }
+    .scene.active .fx:nth-child(5) { animation-delay: 0.24s; }
+    .scene.active .fx:nth-child(6) { animation-delay: 0.30s; }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    .scene.active .pulse { animation: ping 1.1s ease-out infinite; }
+    @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(242,86,92,0.5); } 70% { box-shadow: 0 0 0 12px rgba(242,86,92,0); } 100% { box-shadow: 0 0 0 0 rgba(242,86,92,0); } }
+    .scene.active .freeze { animation: slam 0.4s cubic-bezier(0.3,1.4,0.5,1) both; animation-delay: 0.45s; }
+    @keyframes slam { from { opacity: 0; transform: scale(1.1); } to { opacity: 1; transform: none; } }
+    .scene.active .gnode { animation: pop 0.4s ease both; }
+    .scene.active .gnode:nth-child(2){animation-delay:.1s}.scene.active .gnode:nth-child(3){animation-delay:.2s}
+    .scene.active .gnode:nth-child(4){animation-delay:.3s}.scene.active .gnode:nth-child(5){animation-delay:.4s}
+    @keyframes pop { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+}
+</style>
+</head>
+<body>
+<div id="app">
+    <div class="rail" id="rail"></div>
+    <div class="stage">
+
+        <section class="scene active" data-scene>
+            <div class="brand fx">
+                <svg class="logo" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                    <path d="M24 3 6 10v12c0 11 7.5 19 18 23 10.5-4 18-12 18-23V10L24 3Z" fill="#0f1420" stroke="#2ad4c1" stroke-width="1.6"/>
+                    <ellipse cx="24" cy="23" rx="11" ry="7.5" fill="none" stroke="#2ad4c1" stroke-width="1.6"/>
+                    <circle cx="24" cy="23" r="3.6" fill="#2ad4c1"/>
+                </svg>
+                <span class="brand-name">OmniGuard<em>SOC</em></span>
+            </div>
+            <h1 class="fx">One attack.<br>Two endings.</h1>
+            <p class="lede fx">Watch a real phishing-to-breach attack unfold &mdash; first <b>without</b> a defender, then again <b>with</b> OmniGuard watching. Tap through at your own pace.</p>
+            <div class="tag fx" style="background:var(--accent-wash);color:var(--accent)"><span class="dot"></span>~90 seconds &middot; tap Next</div>
+        </section>
+
+        <section class="scene" data-scene>
+            <span class="eyebrow bad fx">Act 1 &mdash; without OmniGuard</span>
+            <h2 class="fx">The attack just&hellip; works.</h2>
+            <div class="stack">
+                <div class="card bad fx">
+                    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span>
+                    <div><h3>A convincing email arrives</h3><p>"Your Microsoft 365 password expires today." The link looks real. An employee clicks.</p></div>
+                </div>
+                <div class="card bad fx">
+                    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+                    <div><h3>Credentials stolen</h3><p>They type their password into the fake page. Nothing warns them. The attacker is in.</p></div>
+                </div>
+                <div class="card bad fx">
+                    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v6m0 8v6M2 12h6m8 0h6"/><circle cx="12" cy="12" r="3"/></svg></span>
+                    <div><h3>A beacon phones home</h3><p>Malware quietly checks in with its server every minute. The traffic looks like normal web browsing.</p></div>
+                </div>
+            </div>
+            <div class="tag bad fx"><span class="dot"></span>Breach undetected for months</div>
+            <p class="lede fx" style="font-size:13px">The industry average time to even <b>notice</b> a breach is over 200 days.</p>
+        </section>
+
+        <section class="scene" data-scene>
+            <span class="eyebrow good fx">Act 2 &mdash; with OmniGuard</span>
+            <h1 class="fx">Same attack.<br>Watch what happens.</h1>
+            <p class="lede fx">OmniGuard runs the whole security operation on one machine &mdash; <b>no cloud, nothing leaves the building.</b> Here's the exact same email, step by step.</p>
+            <div class="local fx">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 12l2 2 4-4"/></svg>
+                100% local &middot; zero-cloud
+            </div>
+        </section>
+
+        <section class="scene" data-scene>
+            <span class="eyebrow good fx">Step 1 &middot; VerifyEye</span>
+            <h2 class="fx">The phishing page gets frozen.</h2>
+            <div class="phish fx">
+                <div class="url">https://ms-login-verify.com/auth</div>
+                <div class="field"></div>
+                <div class="field"></div>
+                <div class="btn"></div>
+                <div class="freeze">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+                    PHISHING &mdash; BLOCKED
+                </div>
+            </div>
+            <p class="lede fx">A browser agent scores the page in real time and <b>locks the password field</b> the instant it looks like a credential trap &mdash; before anything is typed.</p>
+        </section>
+
+        <section class="scene" data-scene>
+            <span class="eyebrow good fx">Step 2 &middot; SpectraC2</span>
+            <h2 class="fx">The hidden channel gets caught.</h2>
+            <div class="beacon fx"><span class="pulse"></span> beacon &middot; every 60s &middot; jitter 2.1s</div>
+            <div class="pills fx">
+                <span class="pill">09:00</span><span class="pill">09:01</span><span class="pill">09:02</span><span class="pill hot">09:03 &#9888;</span><span class="pill hot">09:04 &#9888;</span>
+            </div>
+            <p class="lede fx">You can't read encrypted C2 traffic &mdash; but you can read its <b>rhythm</b>. SpectraC2 spots the too-regular heartbeat and flags the beacon by its timing fingerprint.</p>
+        </section>
+
+        <section class="scene" data-scene>
+            <span class="eyebrow good fx">Step 3 &middot; Attack graph</span>
+            <h2 class="fx">The whole blast radius, one view.</h2>
+            <div class="graph fx">
+                <svg viewBox="0 0 220 150" fill="none">
+                    <line x1="110" y1="75" x2="40" y2="35" stroke="#2a3652" stroke-width="1.5"/>
+                    <line x1="110" y1="75" x2="40" y2="115" stroke="#2a3652" stroke-width="1.5"/>
+                    <line x1="110" y1="75" x2="185" y2="40" stroke="#2a3652" stroke-width="1.5"/>
+                    <line x1="110" y1="75" x2="185" y2="112" stroke="#2a3652" stroke-width="1.5"/>
+                    <g class="gnode"><circle cx="110" cy="75" r="15" fill="#141b2b" stroke="#2ad4c1" stroke-width="2"/><text x="110" y="79" text-anchor="middle" font-size="9" fill="#2ad4c1" font-family="monospace">host</text></g>
+                    <g class="gnode"><circle cx="40" cy="35" r="11" fill="#141b2b" stroke="#40c07e" stroke-width="1.6"/><text x="40" y="38" text-anchor="middle" font-size="7.5" fill="#9aa8be" font-family="monospace">user</text></g>
+                    <g class="gnode"><circle cx="40" cy="115" r="11" fill="#141b2b" stroke="#ef8c3e" stroke-width="1.6"/><text x="40" y="118" text-anchor="middle" font-size="7" fill="#9aa8be" font-family="monospace">phish</text></g>
+                    <g class="gnode"><circle cx="185" cy="40" r="11" fill="#141b2b" stroke="#f2565c" stroke-width="1.6"/><text x="185" y="43" text-anchor="middle" font-size="8" fill="#9aa8be" font-family="monospace">C2</text></g>
+                    <g class="gnode"><circle cx="185" cy="112" r="11" fill="#141b2b" stroke="#8b7cf6" stroke-width="1.6"/><text x="185" y="115" text-anchor="middle" font-size="7.5" fill="#9aa8be" font-family="monospace">IP</text></g>
+                </svg>
+            </div>
+            <p class="lede fx">Both alerts land in a shared graph. The compromised <b>host, user, phishing domain and C2 server</b> connect into one picture &mdash; not scattered rows.</p>
+        </section>
+
+        <section class="scene" data-scene>
+            <span class="eyebrow good fx">Step 4 &middot; Respond</span>
+            <h2 class="fx">Reasoned, contained, recorded.</h2>
+            <div class="stack">
+                <div class="card accent fx">
+                    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="7" width="16" height="12" rx="2"/><path d="M9 7V5a3 3 0 0 1 6 0v2M9 13h.01M15 13h.01"/></svg></span>
+                    <div><h3>AI analyst reasons</h3><p>A local model reads the alerts: <b>risk 100/100, active compromise</b> &mdash; recommends isolating the host.</p></div>
+                </div>
+                <div class="card good fx">
+                    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></span>
+                    <div><h3>Host contained</h3><p>One click cuts the machine off the network &mdash; the attacker loses their foothold in seconds.</p></div>
+                </div>
+                <div class="card good fx">
+                    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg></span>
+                    <div><h3>Logged, tamper-proof</h3><p>Every move is written to a hash-chained ledger. Who did what &mdash; human or AI &mdash; is provable and unalterable.</p></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="scene" data-scene>
+            <span class="eyebrow fx" style="color:var(--dim)">The difference</span>
+            <h2 class="fx">Months &rarr; minutes.</h2>
+            <div class="vs">
+                <div class="col bad fx">
+                    <span class="k">Without</span>
+                    <span class="big">200+ days</span>
+                    <span class="sub">to even notice. Creds gone, data exfiltrated.</span>
+                </div>
+                <div class="col good fx">
+                    <span class="k">With OmniGuard</span>
+                    <span class="big">Minutes</span>
+                    <span class="sub">caught, reasoned, contained, recorded.</span>
+                </div>
+            </div>
+            <p class="lede fx">Same attacker. Same email. The only variable is whether someone &mdash; or something &mdash; was watching.</p>
+        </section>
+
+        <section class="scene" data-scene>
+            <span class="eyebrow fx">Under the hood</span>
+            <h2 class="fx">Six systems, one dashboard.</h2>
+            <div class="grid">
+                <div class="feat fx"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V5l-8-3Z"/></svg></span><h4>VerifyEye</h4><p>Real-time phishing detection &amp; freeze</p></div>
+                <div class="feat fx"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg></span><h4>SpectraC2</h4><p>Encrypted C2 beacon detection</p></div>
+                <div class="feat fx"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8 6h6M8 7l8 9"/></svg></span><h4>Attack graph</h4><p>Live blast-radius in Neo4j</p></div>
+                <div class="feat fx"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="7" width="16" height="12" rx="2"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/></svg></span><h4>AI analyst</h4><p>Local LLM triage &amp; guidance</p></div>
+                <div class="feat fx"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg></span><h4>Decision ledger</h4><p>Tamper-evident hash chain</p></div>
+                <div class="feat fx"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zM4 14h16v6H4z"/></svg></span><h4>OCSF export</h4><p>Standard feed for any SIEM</p></div>
+            </div>
+            <div class="loop fx">
+                <span>Detect</span><span class="arr">&rarr;</span><span>Correlate</span><span class="arr">&rarr;</span><span>Reason</span><span class="arr">&rarr;</span><span>Respond</span><span class="arr">&rarr;</span><span>Audit</span>
+            </div>
+        </section>
+
+        <section class="scene" data-scene>
+            <div class="brand fx">
+                <svg class="logo" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                    <path d="M24 3 6 10v12c0 11 7.5 19 18 23 10.5-4 18-12 18-23V10L24 3Z" fill="#0f1420" stroke="#2ad4c1" stroke-width="1.6"/>
+                    <ellipse cx="24" cy="23" rx="11" ry="7.5" fill="none" stroke="#2ad4c1" stroke-width="1.6"/>
+                    <circle cx="24" cy="23" r="3.6" fill="#2ad4c1"/>
+                </svg>
+                <span class="brand-name">OmniGuard<em>SOC</em></span>
+            </div>
+            <h2 class="fx">Built by students, end to end.</h2>
+            <p class="lede fx">A senior capstone at San Francisco Bay University &mdash; a complete, self-hosted security operations center.</p>
+            <div class="team">
+                <div class="member fx"><span class="av" style="background:#2ad4c1">AM</span><div class="who"><b>Aayush Maharjan</b><span>Dashboard &amp; integration</span></div></div>
+                <div class="member fx"><span class="av" style="background:#8b7cf6">AS</span><div class="who"><b>Abu Bakar Siddik</b><span>Capstone team</span></div></div>
+                <div class="member fx"><span class="av" style="background:#40c07e">KD</span><div class="who"><b>Khoi Duong</b><span>Detection &amp; containment</span></div></div>
+                <div class="member fx"><span class="av" style="background:#ef8c3e">RI</span><div class="who"><b>Rahim Ajmal Ikhlas</b><span>Capstone team</span></div></div>
+            </div>
+            <p class="lede fx" style="font-size:12.5px;color:var(--faint)">San Francisco Bay University &middot; Fall 2026 &middot; thanks for stopping by. &#128075;</p>
+        </section>
+
+    </div>
+    <div class="controls">
+        <button class="back" id="back" aria-label="Previous" hidden>&lsaquo;</button>
+        <button class="next" id="next">Start &rarr;</button>
+    </div>
+</div>
+<script>
+(function () {
+    var scenes = Array.prototype.slice.call(document.querySelectorAll('[data-scene]'));
+    var rail = document.getElementById('rail');
+    var back = document.getElementById('back');
+    var next = document.getElementById('next');
+    var i = 0;
+    scenes.forEach(function () { var s = document.createElement('span'); s.innerHTML = '<i></i>'; rail.appendChild(s); });
+    var ticks = Array.prototype.slice.call(rail.children);
+    var labels = ['Start →', 'See the other ending →', 'Begin →', 'Next →', 'Next →', 'Next →', 'Next →', 'The six systems →', 'Meet the team →', '↺ Watch again'];
+    function show(n) {
+        if (n < 0) n = 0;
+        if (n > scenes.length - 1) n = 0;
+        i = n;
+        scenes.forEach(function (s, idx) { var on = idx === i; s.hidden = !on; s.classList.toggle('active', on); });
+        ticks.forEach(function (t, idx) { t.classList.toggle('done', idx < i); t.classList.toggle('on', idx === i); });
+        back.hidden = i === 0;
+        next.textContent = labels[i] || 'Next →';
+        next.classList.toggle('restart', i === scenes.length - 1);
+        var stage = document.querySelector('.stage'); if (stage) stage.scrollTop = 0;
+    }
+    next.addEventListener('click', function () { show(i + 1); });
+    back.addEventListener('click', function () { show(i - 1); });
+    window.addEventListener('keydown', function (e) { if (e.key === 'ArrowRight') show(i + 1); if (e.key === 'ArrowLeft') show(i - 1); });
+    show(0);
+})();
+</script>
+</body>
+</html>
