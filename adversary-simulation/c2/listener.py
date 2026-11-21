@@ -37,9 +37,9 @@ class C2ListenerHandler(http.server.SimpleHTTPRequestHandler):
 
         is_telegram_c2 = "/sendMessage" in self.path or self.path.startswith("/bot")
         if is_telegram_c2:
-            print(f"[{now}] [RMM-TELEGRAM C2 #{C2ListenerHandler.checkin_count}] {method} {self.path} from {client_ip}:{client_port}")
+            print(f"[{now}] [RMM-TELEGRAM C2 #{C2ListenerHandler.checkin_count}] {method} {self.path} from {client_ip}:{client_port}", flush=True)
             if body:
-                print(f"    |-> payload: {body[:220]}")
+                print(f"    |-> payload: {body[:220]}", flush=True)
             resp_obj = {
                 "ok": True,
                 "result": {
@@ -48,7 +48,7 @@ class C2ListenerHandler(http.server.SimpleHTTPRequestHandler):
                 },
             }
         else:
-            print(f"[{now}] [BEACON #{C2ListenerHandler.checkin_count}] {method} {self.path} from {client_ip}:{client_port} ({content_len} bytes)")
+            print(f"[{now}] [BEACON #{C2ListenerHandler.checkin_count}] {method} {self.path} from {client_ip}:{client_port} ({content_len} bytes)", flush=True)
             resp_obj = {
                 "status": "active",
                 "session_id": f"sess-{C2ListenerHandler.checkin_count:04d}",

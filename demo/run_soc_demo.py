@@ -165,6 +165,7 @@ class ProcessSupervisor:
     def start(self, name: str, cmd: list[str], cwd: str | None = None, env: dict | None = None) -> subprocess.Popen:
         full_env = os.environ.copy()
         full_env.setdefault("PYTHONIOENCODING", "utf-8")
+        full_env.setdefault("PYTHONUNBUFFERED", "1")
         if env:
             full_env.update(env)
 
