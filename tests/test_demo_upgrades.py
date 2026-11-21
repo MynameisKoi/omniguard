@@ -265,6 +265,8 @@ def test_mock_portal_captcha_and_download_fixture():
 
     assert "I am not a robot" in mock_portal.CAPTCHA_HTML_TEMPLATE
     assert "__DEMO_CMD__" in mock_portal.CAPTCHA_HTML_TEMPLATE
+    assert "__PORTAL_HOST__" in mock_portal.DEMO_CMD
+    assert "urllib.request" in mock_portal.ZERO_DEP_BEACON_PY
     assert "/captcha" in mock_portal.HTML_PAYLOAD
     assert "/download/OmniGuardDemoClient.txt" in mock_portal.HTML_PAYLOAD
 

@@ -302,8 +302,7 @@ def run_attacker_role(sup: ProcessSupervisor, args: argparse.Namespace, wait: bo
     sup.start(
         "portal",
         [py, os.path.join(REPO_ROOT, "adversary-simulation", "portal", "mock_portal.py"),
-         "--port", str(args.portal_port),
-         "--demo-cmd", f"python3 demo/beacon_sim.py --host {args.host}"],
+         "--port", str(args.portal_port)],
     )
     sup.start(
         "c2",
