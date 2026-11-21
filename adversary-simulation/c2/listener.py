@@ -11,6 +11,9 @@ import json
 import socketserver
 import time
 
+MAX_BODY_BYTES = 65536
+
+
 class C2ListenerHandler(http.server.SimpleHTTPRequestHandler):
     checkin_count = 0
 
@@ -26,18 +29,34 @@ class C2ListenerHandler(http.server.SimpleHTTPRequestHandler):
         client_ip = self.client_address[0]
         client_port = self.client_address[1]
 
-        content_len = int(self.headers.get("Content-Length", 0))
+        try:
+            content_len = max(0, min(int(self.headers.get("Content-Length", 0)), MAX_BODY_BYTES))
+        except ValueError:
+            content_len = 0
         body = self.rfile.read(content_len).decode("utf-8", errors="ignore") if content_len > 0 else ""
 
-        print(f"[{now}] [BEACON #{C2ListenerHandler.checkin_count}] {method} {self.path} from {client_ip}:{client_port} ({content_len} bytes)")
+        is_telegram_c2 = "/sendMessage" in self.path or self.path.startswith("/bot")
+        if is_telegram_c2:
+            print(f"[{now}] [RMM-TELEGRAM C2 #{C2ListenerHandler.checkin_count}] {method} {self.path} from {client_ip}:{client_port}")
+            if body:
+                print(f"    └─ payload: {body[:220]}")
+            resp_obj = {
+                "ok": True,
+                "result": {
+                    "message_id": C2ListenerHandler.checkin_count,
+                    "c2_channel": "simulated_telegram_rmm_watchdog",
+                },
+            }
+        else:
+            print(f"[{now}] [BEACON #{C2ListenerHandler.checkin_count}] {method} {self.path} from {client_ip}:{client_port} ({content_len} bytes)")
+            resp_obj = {
+                "status": "active",
+                "session_id": f"sess-{C2ListenerHandler.checkin_count:04d}",
+                "tasks": [],
+                "next_beacon_ms": 10000,
+            }
 
-        # Send response simulating C2 tasking payload
-        resp_data = json.dumps({
-            "status": "active",
-            "session_id": f"sess-{C2ListenerHandler.checkin_count:04d}",
-            "tasks": [],
-            "next_beacon_ms": 10000,
-        }).encode("utf-8")
+        resp_data = json.dumps(resp_obj).encode("utf-8")
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

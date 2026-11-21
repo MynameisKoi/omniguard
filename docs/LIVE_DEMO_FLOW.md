@@ -29,47 +29,24 @@ Connect your **Windows laptop** to **SFBU** (for internet) and enable **Windows 
 
 ## 2. Pre-Demo Setup (2 Minutes Before Presenting)
 
-### A. On Debian VM (Analyst SOC)
-1. Make sure port `8000` is free (`pkill -f uvicorn` if another app is on `8000`), then verify readiness:
-   ```bash
-   cd /home/koiisme/code/omniguard
-   ./.venv/bin/python demo/check_demo_ready.py
-   ```
-2. Optional phone push notifications (set in `backend/.env` or export before starting `uvicorn`):
-   ```bash
-   export NTFY_TOPIC="omniguard-demo-soc"
-   export DASHBOARD_PUBLIC_URL="http://<SOC_IP>:5173"
-   ```
-3. Start the SOC services in separate terminals:
-   ```bash
-   # Terminal 1: Backend API
-   cd /home/koiisme/code/omniguard/backend && ../.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
-
-   # Terminal 2: Frontend Dashboard
-   cd /home/koiisme/code/omniguard/frontend && npm run dev -- --host 0.0.0.0
-
-   # Terminal 3: Flipper Zero 1-Tap Login Bridge (keep Flipper on Home screen)
-   cd /home/koiisme/code/omniguard && ./.venv/bin/python demo/flipper_badge_bridge.py
-   ```
-
-### B. On Windows Host (Attacker / C2)
-```powershell
-# Terminal 1: Fake M365 Login + Fake CAPTCHA (ClickFix) Portal
-python adversary-simulation\portal\mock_portal.py --port 8080 --demo-cmd "python3 demo/beacon_sim.py --host kali-victim"
-
-# Terminal 2: C2 Listener (or nc -lvnp 4444)
-python adversary-simulation\c2\listener.py --port 9000
-```
-
-### C. On Victim Machine (Kali / Pi / Teammate Laptop on `Koii`)
-Point the Victim's VerifyEye extension and containment agent to `192.168.137.1` (Windows Hotspot gateway). Leave `C2_IP` empty and block by `C2_PORTS` so port `8000` (SOC) stays reachable for **Release**:
+### A. On Debian VM (Analyst SOC — 1 Command)
 ```bash
-export ANALYST_IP="192.168.137.1"
-export HOST="kali-victim"
-export C2_PORTS="9000,4444,8080"
-sudo -E python3 demo/containment_agent.py
+cd /home/koiisme/code/omniguard
+./.venv/bin/python demo/run_soc_demo.py
 ```
-*(Verify in the OmniGuard dashboard that `kali-victim` shows **agent online**.)*
+*(Starts Backend `:8000`, Frontend `:5173`, warms Ollama, and auto-starts Flipper Zero USB bridge if plugged in. Add `--ntfy-topic omniguard-demo-soc` for phone alerts.)*
+
+### B. On Windows Host (Attacker / C2 — 1 Command in Admin PowerShell)
+```powershell
+python demo\run_soc_demo.py --role attacker
+```
+*(Auto-opens temporary Windows Firewall rule `OmniGuard-Demo-Ports` and removes it automatically on `Ctrl+C`. Starts Fake M365 + CAPTCHA Portal `:8080` and C2 Listener `:9000` with RMM/Telegram C2 emulation.)*
+
+### C. On Victim Machine (Kali / Pi / Teammate Laptop on `Koii` — 1 Command)
+```bash
+sudo -E python3 demo/run_soc_demo.py --role victim --host kali-victim
+```
+*(Connects to `192.168.137.1:8000`, blocks `9000,4444,8080` on isolate, and auto-restores networking on `Ctrl+C`.)*
 
 ---
 
@@ -87,12 +64,14 @@ sudo -E python3 demo/containment_agent.py
 3. Click the new alert in OmniGuard → show the **VerifyEye Screenshot Evidence** panel.
 4. **Talk Track:** *"Even zero-hour fake portals and ClickFix CAPTCHA lures are caught by DOM + brand scoring, with live sandboxed screenshot proof attached to the alert."*
 
-### Act 3 — C2 Reverse Shell / Beacon + Correlation + Phone Alert (90 sec)
+### Act 3 — C2 Beacon / RMM Watchdog + Correlation + Phone Alert (90 sec)
 1. On the Victim, click **"I am not a robot"** on `/captcha` (copies the command) and paste/run it in a terminal (or plug Flipper Zero into Victim and run **BadUSB → `omniguard_clickfix_demo.txt`**):
    ```bash
    python3 demo/beacon_sim.py --host kali-victim
+   # Or to demonstrate ScreenConnect / Telegram RMM-abuse C2 (T1219):
+   python3 adversary-simulation/c2/beacon_agent.py --server http://192.168.137.1:9000 --api-url http://192.168.137.1:8000 --host kali-victim --mode rmm-watchdog --fast-mode
    ```
-2. **SpectraC2** detects the periodic C2 beaconing → OmniGuard correlates the VerifyEye phishing alert + SpectraC2 C2 alert on the **Neo4j Attack Graph** under `kali-victim`.
+2. **SpectraC2** detects the periodic C2 / RMM-watchdog beaconing → OmniGuard correlates the VerifyEye phishing alert + SpectraC2 C2 alert on the **Neo4j Attack Graph** under `kali-victim`.
 3. **Live AI** auto-reviews the alert and pushes a **Phone Notification** (`ntfy` / Telegram) to your phone.
 4. **Talk Track:** *"Now two independent engines agree `kali-victim` is compromised. Live AI flags it immediately and alerts the on-call analyst's phone without auto-executing anything."*
 
@@ -106,6 +85,9 @@ sudo -E python3 demo/containment_agent.py
 
 ---
 
-## 4. Quick Recovery Commands (If Needed During Demo)
-* **Force-restore Victim network**: Press `Ctrl+C` in `demo/containment_agent.py` (auto-restores routes/firewall on exit) or click **Release** / **Cancel** in the dashboard.
+## 4. Safety Audit & Recovery Guarantees
+* **Zero Real Malware / Persistence**: `beacon_agent.py --mode rmm-watchdog` only simulates ScreenConnect/Telegram C2 heartbeats against your local `listener.py` (`192.168.137.1:9000`) — it never runs `msiexec`, never modifies Registry/Services, and never contacts real `api.telegram.org`.
+* **Safe Portal Stub**: `mock_portal.py` `/download/` serves a harmless `.txt` file (`OmniGuardDemoClient.txt`), never an executable.
+* **No Self-Lockout During Containment**: `containment_agent.py` never kills PID 1 or itself, explicitly skips port `8000` so the SOC Release channel stays open, auto-restores if SOC becomes unreachable, auto-releases after `10 minutes`, and restores networking on `Ctrl+C`.
+* **Clean Host Cleanup**: `run_soc_demo.py` kills all child process groups and deletes the temporary `OmniGuard-Demo-Ports` Windows Firewall rule on `Ctrl+C`.
 * **Test Phone Push beforehand**: Open the Bell dropdown in OmniGuard → click **Phone push → Test →**.

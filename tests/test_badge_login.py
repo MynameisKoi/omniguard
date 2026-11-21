@@ -120,3 +120,12 @@ def test_api_live_badge_tap_queue():
         # Second poll sees nothing pending
         assert client.get("/auth/badge-tap/pending").json() == {"pending": False}
 
+
+def test_flipper_bridge_fc_card_to_hex():
+    demo_dir = os.path.join(repo_root, "demo")
+    if demo_dir not in sys.path:
+        sys.path.insert(0, demo_dir)
+    import flipper_badge_bridge
+
+    assert flipper_badge_bridge.hid_fc_card_to_hex(46, 46966) == "2EB776"
+

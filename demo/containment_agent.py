@@ -50,7 +50,7 @@ C2_PORTS   = [
     if p.strip().isdigit()
 ]
 DEFAULT_KILL_PATTERNS = [
-    p.strip() for p in os.getenv("QUARANTINE_PATTERNS", "beacon_sim.py,beacon_agent.py").split(",")
+    p.strip() for p in os.getenv("QUARANTINE_PATTERNS", "beacon_sim.py,beacon_agent.py,rmm-watchdog").split(",")
     if p.strip()
 ]
 POLL_SECONDS        = 1        # how often to check the SOC for a command

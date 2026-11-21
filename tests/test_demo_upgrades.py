@@ -281,3 +281,26 @@ def test_containment_agent_dfir_snapshot_safe():
     assert isinstance(snap["connections"], list)
     # Never kills own PID or PID 1
     assert containment_agent.kill_suspicious_processes(kill_pids=[1, os.getpid()], kill_patterns=[]) == []
+
+
+def test_dfir_flags_rmm_watchdog_and_listener_supports_telegram_c2():
+    with patch("neo4j.GraphDatabase.driver"), patch("pymongo.MongoClient"):
+        import dfir
+
+        res = dfir.analyze_snapshot_risk({
+            "processes": [
+                {"pid": 777, "name": "powershell.exe", "cmdline": "powershell -WindowStyle Hidden -File ScreenConnectWatchdog.ps1 Unblock-File"},
+            ],
+            "connections": [
+                {"proto": "tcp", "local": "192.168.137.10:50123", "remote_ip": "192.168.137.1", "remote_port": 9000, "state": "ESTAB", "process": "powershell.exe"},
+            ],
+        })
+        assert res["risk_level"] == "critical"
+        assert len(res["suspicious_processes"]) == 1
+        assert len(res["suspicious_connections"]) == 1
+
+    c2_dir = os.path.join(REPO_ROOT, "adversary-simulation", "c2")
+    if c2_dir not in sys.path:
+        sys.path.insert(0, c2_dir)
+    import listener
+    assert listener.MAX_BODY_BYTES == 65536

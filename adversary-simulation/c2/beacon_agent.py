@@ -26,6 +26,8 @@ def main():
     parser.add_argument("--count", type=int, default=12, help="Number of beacons to send (default: 12, 0 for infinite)")
     parser.add_argument("--spectrac2-url", default="http://localhost:8001", help="SpectraC2 classification engine URL")
     parser.add_argument("--api-url", default="http://localhost:8000", help="OmniGuard backend API URL")
+    parser.add_argument("--mode", choices=["classic", "rmm-watchdog"], default="classic",
+                        help="C2 emulation profile: classic HTTP beacon or safe ScreenConnect/Telegram RMM watchdog")
     parser.add_argument("--fast-mode", action="store_true", help="Scale timing down 5x for high-speed live demo testing")
 
     args = parser.parse_args()
@@ -46,7 +48,11 @@ def main():
     print(f"[+] Base Interval:     {base_interval:.1f}s (Jitter: ±{jitter_pct*100:.0f}%)")
     print(f"[+] SpectraC2 Engine:   {args.spectrac2_url}")
     print(f"[+] OmniGuard Backend:  {args.api_url}")
+    print(f"[+] Emulation Profile:  {args.mode} (100% safe local lab simulation)")
     print("==================================================\n")
+
+    if args.mode == "rmm-watchdog":
+        print("[SIM] RMM Watchdog Check: simulating service check ('ScreenConnect Client') & MotW Unblock-File telemetry (no real MSI/install executed).")
 
     timestamps: list[float] = []
     packet_sizes: list[int] = []
@@ -69,9 +75,18 @@ def main():
 
             # Execute beacon request to listener
             try:
+                if args.mode == "rmm-watchdog":
+                    endpoint = f"{args.server.rstrip('/')}/botDEMO_LAB_TOKEN/sendMessage"
+                    body_json = {
+                        "chat_id": "demo-c2-channel",
+                        "text": f"ScreenConnect Watchdog | Computer: {args.host} | User: {args.user} | Heartbeat #{beacon_idx} (Simulated RMM T1219/T1102)",
+                    }
+                else:
+                    endpoint = f"{args.server.rstrip('/')}/api/v1/heartbeat"
+                    body_json = {"implant_id": "imp-01", "host": args.host, "user": args.user, "seq": beacon_idx}
                 resp = client.post(
-                    f"{args.server.rstrip('/')}/api/v1/heartbeat",
-                    json={"implant_id": "imp-01", "host": args.host, "user": args.user, "seq": beacon_idx},
+                    endpoint,
+                    json=body_json,
                     headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"},
                 )
                 status_code = resp.status_code
@@ -114,11 +129,11 @@ def main():
                         print(f"    └─ Periodicity Score: {data.get('periodicity_score', 0.0):.3f}")
 
                         if is_beacon:
-                            print(f"[🚨] Periodic beaconing confirmed! SpectraC2 generating T1071 alert...")
-                            alert_obj = data.get("alert") or {}
+                            print(f"[🚨] Periodic beaconing confirmed! SpectraC2 generating alert...")
+                            is_rmm = args.mode == "rmm-watchdog"
                             alert_payload = {
                                 "source": "spectrac2",
-                                "event_type": "encrypted_c2_beaconing",
+                                "event_type": "rmm_watchdog_c2_beaconing" if is_rmm else "encrypted_c2_beaconing",
                                 "severity": severity,
                                 "host": args.host,
                                 "user": args.user,
@@ -128,10 +143,14 @@ def main():
                                 "domain": domain,
                                 "beacon_interval": dom_period,
                                 "mean_jitter": float(jitter_pct * base_interval),
-                                "process_name": args.process,
-                                "mitre_technique": "T1071",
+                                "process_name": "powershell-rmm-watchdog-sim" if is_rmm else args.process,
+                                "mitre_technique": "T1219" if is_rmm else "T1071",
                                 "confidence": threat_score,
-                                "description": f"Encrypted C2 beacon detected to {dst_ip}:{dst_port} with {dom_period:.1f}s dominant periodicity.",
+                                "description": (
+                                    f"Abuse of RMM/Telegram C2 watchdog pattern detected to {dst_ip}:{dst_port} ({dom_period:.1f}s periodicity)."
+                                    if is_rmm else
+                                    f"Encrypted C2 beacon detected to {dst_ip}:{dst_port} with {dom_period:.1f}s dominant periodicity."
+                                ),
                             }
 
                             backend_resp = client.post(

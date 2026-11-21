@@ -24,8 +24,9 @@ from containment import containment_collection, _key
 dfir_collection = database["dfir_snapshots"]
 
 SUSPICIOUS_PROC_RE = re.compile(
-    r"(beacon_sim|beacon_agent|reverse.?shell|/dev/tcp|\bnc\b|\bncat\b|\bsocat\b|"
-    r"powershell.*-enc|cmd\.exe.*/c|bash\s+-i|python.*socket|meterpreter|sliver)",
+    r"(beacon_sim|beacon_agent|rmm.?watchdog|screenconnect|unblock-file|invoke-webrequest|"
+    r"reverse.?shell|/dev/tcp|\bnc\b|\bncat\b|\bsocat\b|"
+    r"powershell.*-enc|powershell.*hidden|cmd\.exe.*/c|bash\s+-i|python.*socket|meterpreter|sliver)",
     re.IGNORECASE,
 )
 
