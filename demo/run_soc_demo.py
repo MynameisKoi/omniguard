@@ -105,12 +105,62 @@ def _warm_ollama() -> None:
         print(f"[warmup] Ollama warm-up skipped ({e})")
 
 
+FW_DEMO_RULE = "OmniGuard-Demo-Ports"
+
+
+def _win_is_admin() -> bool:
+    if not IS_WIN:
+        return False
+    try:
+        import ctypes
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        return False
+
+
+def _setup_win_firewall(ports: list[int]) -> bool:
+    """Create temporary Windows Firewall rule for demo ports if running as Admin."""
+    if not IS_WIN:
+        return False
+    if not _win_is_admin():
+        print("[firewall] Not running as Administrator — skipping auto Windows Firewall rule.")
+        print(f"           If hotspot clients can't connect, run PowerShell as Admin or open TCP {','.join(map(str, ports))}.")
+        return False
+    port_csv = ",".join(str(p) for p in ports)
+    subprocess.run(
+        ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_DEMO_RULE}"],
+        capture_output=True,
+    )
+    res = subprocess.run(
+        ["netsh", "advfirewall", "firewall", "add", "rule",
+         f"name={FW_DEMO_RULE}", "dir=in", "action=allow",
+         "protocol=TCP", f"localport={port_csv}"],
+        capture_output=True, text=True,
+    )
+    if res.returncode == 0:
+        print(f"[firewall] Opened Windows Firewall TCP {port_csv} ({FW_DEMO_RULE}) — will auto-remove on exit.")
+        return True
+    print(f"[firewall] Could not add rule ({res.stderr.strip() or res.stdout.strip()})")
+    return False
+
+
+def _cleanup_win_firewall() -> None:
+    if not IS_WIN:
+        return
+    subprocess.run(
+        ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_DEMO_RULE}"],
+        capture_output=True,
+    )
+    print(f"[cleanup] Removed Windows Firewall rule '{FW_DEMO_RULE}'.")
+
+
 class ProcessSupervisor:
     """Starts child processes in their own process group and cleans all of them up."""
 
     def __init__(self) -> None:
         self.procs: list[tuple[str, subprocess.Popen]] = []
         self._cleaned = False
+        self.win_firewall_added = False
 
     def start(self, name: str, cmd: list[str], cwd: str | None = None, env: dict | None = None) -> subprocess.Popen:
         full_env = os.environ.copy()
@@ -182,6 +232,8 @@ class ProcessSupervisor:
                     print(f"[cleanup] {name} force-killed")
                 except Exception:
                     pass
+        if self.win_firewall_added:
+            _cleanup_win_firewall()
         print("[cleanup] All demo processes cleaned up.")
 
 
@@ -244,6 +296,9 @@ def run_soc_role(sup: ProcessSupervisor, args: argparse.Namespace) -> None:
 
 def run_attacker_role(sup: ProcessSupervisor, args: argparse.Namespace, wait: bool = True) -> None:
     py = _venv_python()
+    if IS_WIN and not sup.win_firewall_added:
+        demo_ports = sorted({args.backend_port, args.frontend_port, args.portal_port, args.c2_port, 4444})
+        sup.win_firewall_added = _setup_win_firewall(demo_ports)
     sup.start(
         "portal",
         [py, os.path.join(REPO_ROOT, "adversary-simulation", "portal", "mock_portal.py"),
