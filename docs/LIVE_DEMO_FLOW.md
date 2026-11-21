@@ -4,18 +4,26 @@ This guide walks through the end-to-end **Attack → Detect → Investigate → 
 
 ---
 
-## 1. Machine Roles & Network Topology
+## 1. Machine Roles & Network Topology (`Koii` Hotspot)
 
-Run everything on **Khoi's Windows Hotspot** (closed LAN, no campus firewall blocking ports).
+Connect your **Windows laptop** to **SFBU** (for internet) and enable **Windows Mobile Hotspot (`Koii`)**. All demo devices join **`Koii`** (`192.168.137.0/24`), bypassing SFBU client isolation while keeping internet working.
 
 | Role | Machine | What Runs There |
 | :--- | :--- | :--- |
-| **Attacker / C2 + LLM Host** | **Windows Laptop** | • Ollama (`llama3.2:3b` on `:11434`)<br>• Mock Phishing & Fake CAPTCHA Portal (`mock_portal.py` on `:8080`)<br>• C2 Listener (`adversary-simulation/c2/listener.py` on `:9000` / `:4444`) |
-| **Analyst / SOC Core** | **Debian VM** *(Bridged to Hotspot)* | • MongoDB (`:27017`) + Neo4j (`:7687`)<br>• OmniGuard Backend (`:8000`) + Frontend (`:5173`)<br>• VerifyEye (`:8001`) + SpectraC2 (`:8002`)<br>• Flipper Zero USB (`demo/flipper_badge_bridge.py`) |
-| **Victim Endpoint** | **Kali / Raspberry Pi / Laptop** | • Browser with **VerifyEye Extension** pointed at `http://<SOC_IP>:8000`<br>• `demo/containment_agent.py` (run with `sudo` or Admin PowerShell) |
-| **Analyst Mobile** | **Phone** *(on Hotspot)* | • `ntfy` app (or Telegram) subscribed to alert notifications<br>• Mobile browser pointed at `http://<SOC_IP>:5173` |
+| **Hotspot + Attacker / C2 + LLM** | **Windows Laptop** (`192.168.137.1`) | • Windows Mobile Hotspot **`Koii`** (`192.168.137.1/24`)<br>• Ollama (`llama3.2:3b` on `:11434`)<br>• Mock Phishing & Fake CAPTCHA Portal (`mock_portal.py` on `:8080`)<br>• C2 Listener (`adversary-simulation/c2/listener.py` on `:9000` / `:4444`)<br>• VirtualBox NAT forwarding `:8000` & `:5173` → Debian VM |
+| **Analyst / SOC Core** | **Debian VM** *(VirtualBox NAT)* | • MongoDB (`:27017`) + Neo4j (`:7687`)<br>• OmniGuard Backend (`:8000`) + Frontend (`:5173`)<br>• VerifyEye (`:8001`) + SpectraC2 (`:8002`)<br>• Flipper Zero USB (`demo/flipper_badge_bridge.py`) |
+| **Victim Endpoint** | **Kali / Pi / Laptop** (`192.168.137.x`) | • Browser with **VerifyEye Extension** pointed at `http://192.168.137.1:8000`<br>• `demo/containment_agent.py` (run with `sudo` or Admin PowerShell) |
+| **Analyst Mobile** | **Phone** (`192.168.137.x`) | • `ntfy` app (or Telegram) subscribed to alert notifications<br>• Mobile browser pointed at `http://192.168.137.1:5173` |
 
-> **Important VirtualBox Check:** Set the Debian VM network adapter to **Bridged** on the hotspot (or forward ports `8000` and `5173` in NAT) so the Victim and Phone can reach the SOC.
+> **VirtualBox NAT Port Forwarding (One-Time Setup on Windows):**
+> Keep Debian on **NAT** (so `10.0.2.2:11434` Ollama works) and open *VM Settings → Network → Adapter 1 → Advanced → Port Forwarding*:
+> - `SOC-API`: Host Port `8000` → Guest Port `8000`
+> - `SOC-UI`: Host Port `5173` → Guest Port `5173`
+>
+> **Windows Firewall (One-Time Admin PowerShell on Windows):**
+> ```powershell
+> New-NetFirewallRule -DisplayName "OmniGuard-Demo-Ports" -Direction Inbound -Protocol TCP -LocalPort 8000,5173,8080,9000,4444 -Action Allow
+> ```
 
 ---
 
@@ -53,12 +61,12 @@ python adversary-simulation\portal\mock_portal.py --port 8080 --demo-cmd "python
 python adversary-simulation\c2\listener.py --port 9000
 ```
 
-### C. On Victim Machine (Kali / Pi / Teammate Laptop)
-Set `ANALYST_IP` and `HOST` in environment (or edit top of `demo/containment_agent.py`):
+### C. On Victim Machine (Kali / Pi / Teammate Laptop on `Koii`)
+Point the Victim's VerifyEye extension and containment agent to `192.168.137.1` (Windows Hotspot gateway). Leave `C2_IP` empty and block by `C2_PORTS` so port `8000` (SOC) stays reachable for **Release**:
 ```bash
-export ANALYST_IP="<SOC_IP>"
+export ANALYST_IP="192.168.137.1"
 export HOST="kali-victim"
-export C2_IP="<WINDOWS_C2_IP>"
+export C2_PORTS="9000,4444,8080"
 sudo -E python3 demo/containment_agent.py
 ```
 *(Verify in the OmniGuard dashboard that `kali-victim` shows **agent online**.)*
