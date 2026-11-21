@@ -39,7 +39,7 @@ class C2ListenerHandler(http.server.SimpleHTTPRequestHandler):
         if is_telegram_c2:
             print(f"[{now}] [RMM-TELEGRAM C2 #{C2ListenerHandler.checkin_count}] {method} {self.path} from {client_ip}:{client_port}")
             if body:
-                print(f"    └─ payload: {body[:220]}")
+                print(f"    |-> payload: {body[:220]}")
             resp_obj = {
                 "ok": True,
                 "result": {

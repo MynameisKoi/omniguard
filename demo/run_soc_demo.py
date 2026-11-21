@@ -164,6 +164,7 @@ class ProcessSupervisor:
 
     def start(self, name: str, cmd: list[str], cwd: str | None = None, env: dict | None = None) -> subprocess.Popen:
         full_env = os.environ.copy()
+        full_env.setdefault("PYTHONIOENCODING", "utf-8")
         if env:
             full_env.update(env)
 
@@ -173,6 +174,8 @@ class ProcessSupervisor:
             "stdout": subprocess.PIPE,
             "stderr": subprocess.STDOUT,
             "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
             "bufsize": 1,
         }
         if IS_WIN:
