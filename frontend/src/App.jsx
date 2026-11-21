@@ -127,6 +127,9 @@ function App({ user, onLogout, onUserChange }) {
     // host containment state, keyed by host name (released / isolating / isolated / releasing)
     const [containment, setContainment] = useState({})
     const [containBusy, setContainBusy] = useState(null)   // host currently being acted on
+    const [dfirSnapshots, setDfirSnapshots] = useState({})
+    const [phoneStatus, setPhoneStatus] = useState(null)
+    const [phoneTestMsg, setPhoneTestMsg] = useState(null)
 
     // "Ask AI about this alert": a chat tied to the alert, its first question already
     // asked. The reply runs on the server, and Ask AI opens the chat and follows it
@@ -272,7 +275,19 @@ function App({ user, onLogout, onUserChange }) {
     const [liveAiOn, setLiveAiOn] = useState(true)
     useEffect(() => {
         api("/ai/live").then(r => r.json()).then(d => setLiveAiOn(!!d.enabled)).catch(() => {})
+        api("/notifications/status").then(r => r.ok ? r.json() : null).then(d => { if (d) setPhoneStatus(d) }).catch(() => {})
     }, [])
+    const testPhonePush = async () => {
+        setPhoneTestMsg("Sending…")
+        try {
+            const r = await api("/notifications/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) })
+            const d = await r.json()
+            setPhoneTestMsg(d.sent > 0 ? `Sent (${(d.active_channels || []).join(", ")})` : "No channel configured (set NTFY_TOPIC or TELEGRAM_BOT_TOKEN)")
+        } catch {
+            setPhoneTestMsg("Push test failed")
+        }
+        setTimeout(() => setPhoneTestMsg(null), 5000)
+    }
     const toggleLiveAi = async () => {
         const next = !liveAiOn
         setLiveAiOn(next)   // optimistic
@@ -321,10 +336,13 @@ function App({ user, onLogout, onUserChange }) {
     }, [pendingHosts]);
 
     // isolate / release a host: ask the backend, which queues it for the host's agent
-    async function containHost(host, action) {
+    async function containHost(host, action, body = null) {
         setContainBusy(host)
         try {
-            const res = await api(`/hosts/${encodeURIComponent(host)}/${action}`, { method: "POST" })
+            const opts = body
+                ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+                : { method: "POST" }
+            const res = await api(`/hosts/${encodeURIComponent(host)}/${action}`, opts)
             const state = await res.json().catch(() => ({}))
             if (!res.ok) throw new Error(state.detail || res.status)
             const k = host.toLowerCase()
@@ -383,6 +401,11 @@ function App({ user, onLogout, onUserChange }) {
                     // a host was isolated / released here, on another screen, or by its agent
                     const k = (msg.host || "").toLowerCase()
                     setContainment(prev => ({ ...prev, [k]: { ...(prev[k] || {}), host: msg.host, state: msg.state } }))
+                } else if (msg.type === "dfir_updated" && msg.snapshot) {
+                    const k = (msg.host || "").toLowerCase()
+                    setDfirSnapshots(prev => ({ ...prev, [k]: msg.snapshot }))
+                } else if (msg.type === "dfir_requested") {
+                    // acknowledged in UI via DFIRPanel loading state
                 } else if (msg.type === "ai_reviewing") {
                     // Live AI started looking at this alert — show it on the card
                     setReviewing(prev => new Set(prev).add(msg.alert_id))
@@ -1002,6 +1025,17 @@ function App({ user, onLogout, onUserChange }) {
                                     <span className="liveai-left"><Sparkles /> Live AI review</span>
                                     <span className={`liveai-switch ${liveAiOn ? "on" : ""}`}><span className="liveai-knob" /></span>
                                 </button>
+                                <button
+                                    className="liveai-toggle"
+                                    onMouseDown={(e) => { e.preventDefault(); testPhonePush(); }}
+                                    title="Send a test alert to configured phone push channels (ntfy / Telegram / Webhook)"
+                                >
+                                    <span className="liveai-left">
+                                        <Bell /> Phone push
+                                        {phoneStatus?.active_channels?.length > 0 && ` (${phoneStatus.active_channels.join(", ")})`}
+                                    </span>
+                                    <span style={{ fontSize: 11, opacity: 0.8 }}>{phoneTestMsg || "Test →"}</span>
+                                </button>
                                 <div className="dropdown-hint">Untriaged alerts needing a look — click one to investigate.</div>
                                 {notifAlerts.length === 0 ? (
                                     <div className="dropdown-empty"><Bell /><p>You're all caught up.</p></div>
@@ -1344,9 +1378,19 @@ function App({ user, onLogout, onUserChange }) {
                                         <ContainmentPanel host={selected.host}
                                             state={containment[selected.host.toLowerCase()]}
                                             busy={containBusy === selected.host}
-                                            onIsolate={() => containHost(selected.host, "isolate")}
+                                            onIsolate={() => containHost(selected.host, "isolate", selected.dst_ip ? { c2_ip: selected.dst_ip } : null)}
                                             onRelease={() => containHost(selected.host, "release")}
                                             onReset={() => containHost(selected.host, "containment/reset")} />
+                                    )}
+
+                                    {selected.host && (
+                                        <DFIRPanel
+                                            host={selected.host}
+                                            snapshot={dfirSnapshots[selected.host.toLowerCase()]}
+                                            onLoaded={(snap) => setDfirSnapshots(prev => ({ ...prev, [selected.host.toLowerCase()]: snap }))}
+                                            onQuarantine={(opts) => containHost(selected.host, "isolate", opts)}
+                                            c2Ip={selected.dst_ip}
+                                        />
                                     )}
 
                                     <TriagePanel alert={selected}
@@ -2888,6 +2932,103 @@ function ContainmentPanel({ host, state, busy, onIsolate, onRelease, onReset }) 
                 <div className="triage-body"><p className="triage-notes">
                     No containment agent is reporting from {host}. Isolation will apply once the agent is running there (<code>demo/containment_agent.py</code>).
                 </p></div>
+            )}
+        </section>
+    )
+}
+
+function DFIRPanel({ host, snapshot, onLoaded, onQuarantine, c2Ip }) {
+    const [loading, setLoading] = useState(false)
+    const [expanded, setExpanded] = useState(false)
+
+    useEffect(() => {
+        if (!host) return
+        api(`/hosts/${encodeURIComponent(host)}/dfir`)
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d?.snapshot) onLoaded(d.snapshot) })
+            .catch(() => {})
+    }, [host])
+
+    const collectNow = async () => {
+        setLoading(true)
+        try {
+            await api(`/hosts/${encodeURIComponent(host)}/dfir/collect`, { method: "POST" })
+        } catch {}
+        setTimeout(() => {
+            api(`/hosts/${encodeURIComponent(host)}/dfir`)
+                .then(r => r.ok ? r.json() : null)
+                .then(d => { if (d?.snapshot) onLoaded(d.snapshot) })
+                .catch(() => {})
+                .finally(() => setLoading(false))
+        }, 2000)
+    }
+
+    const analysis = snapshot?.analysis || {}
+    const susProcs = analysis.suspicious_processes || []
+    const susConns = analysis.suspicious_connections || []
+    const killPids = susProcs.map(p => p.pid).filter(Boolean)
+
+    return (
+        <section className={`triage-card ${susProcs.length || susConns.length ? "done bad" : "open"}`} aria-label="Live DFIR Snapshot">
+            <div className="triage-bar">
+                <span className="triage-icon"><Activity /></span>
+                <div className="triage-headline">
+                    <b>Live DFIR Snapshot</b>
+                    <span>
+                        {snapshot
+                            ? `${analysis.process_count || 0} procs · ${analysis.connection_count || 0} sockets · ${susProcs.length} suspicious proc(s) · ${susConns.length} suspicious socket(s)`
+                            : `Collect live processes & active network sockets from ${host}.`}
+                    </span>
+                </div>
+                <div className="triage-start">
+                    {killPids.length > 0 && (
+                        <button
+                            className="btn sm bad"
+                            onClick={() => onQuarantine({ kill_pids: killPids, ...(c2Ip ? { c2_ip: c2Ip } : {}) })}
+                            title="Isolate host and kill flagged reverse-shell / beacon PIDs"
+                        >
+                            <ShieldOff /> Quarantine &amp; Kill ({killPids.length})
+                        </button>
+                    )}
+                    <button className="btn sm" disabled={loading} onClick={collectNow}>
+                        {loading ? <span className="btn-spinner" /> : <Activity />} {loading ? "Collecting…" : "Collect DFIR"}
+                    </button>
+                    {snapshot && (
+                        <button className="btn sm" onClick={() => setExpanded(e => !e)}>
+                            {expanded ? "Hide" : "Inspect"}
+                        </button>
+                    )}
+                </div>
+            </div>
+            {expanded && snapshot && (
+                <div className="triage-body">
+                    <p className="triage-notes" style={{ marginBottom: 8 }}>
+                        <strong>OS:</strong> {snapshot.os} · <strong>Admin:</strong> {snapshot.is_admin ? "yes" : "no"} · <strong>Collected:</strong> {new Date(snapshot.collected_at).toLocaleTimeString()}
+                    </p>
+                    {susProcs.length > 0 && (
+                        <div style={{ marginBottom: 8 }}>
+                            <strong style={{ color: "var(--bad, #f87171)" }}>Suspicious Processes</strong>
+                            <ul style={{ margin: "4px 0 0 18px", fontSize: 12 }}>
+                                {susProcs.map((p, i) => (
+                                    <li key={i}><code>PID {p.pid}</code> <b>{p.name}</b> — <code>{p.cmdline}</code></li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                    {susConns.length > 0 && (
+                        <div style={{ marginBottom: 8 }}>
+                            <strong style={{ color: "var(--bad, #f87171)" }}>Suspicious Network Connections</strong>
+                            <ul style={{ margin: "4px 0 0 18px", fontSize: 12 }}>
+                                {susConns.map((c, i) => (
+                                    <li key={i}><code>{c.proto} {c.local} → {c.remote_ip}:{c.remote_port}</code> ({c.state}) — {c.reason}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                    {susProcs.length === 0 && susConns.length === 0 && (
+                        <p className="triage-notes">No suspicious beacon/reverse-shell processes or C2 sockets flagged in this snapshot.</p>
+                    )}
+                </div>
             )}
         </section>
     )

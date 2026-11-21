@@ -88,25 +88,53 @@ def list_states():
     return [get_state(d["_id"]) for d in containment_collection.find({}, {"_id": 1})]
 
 
-def request_isolation(host, by="unknown"):
-    """Analyst asks to cut this host off. Queues the command for its agent."""
+def request_isolation(
+    host,
+    by="unknown",
+    c2_ip=None,
+    c2_ports=None,
+    kill_pids=None,
+    kill_patterns=None,
+):
+    """Analyst asks to cut this host off. Queues the command for its agent.
+    Optional quarantine directives (`c2_ip`, `c2_ports`, `kill_pids`, `kill_patterns`)
+    instruct the agent to also drop same-subnet C2 sockets and kill reverse-shell processes."""
     now = _now()
+    quarantine = {}
+    if c2_ip:
+        quarantine["c2_ip"] = str(c2_ip).strip()
+    if c2_ports:
+        quarantine["c2_ports"] = [int(p) for p in c2_ports if str(p).isdigit()]
+    if kill_pids:
+        quarantine["kill_pids"] = [int(p) for p in kill_pids if str(p).isdigit()]
+    if kill_patterns:
+        quarantine["kill_patterns"] = [str(p).strip() for p in kill_patterns if str(p).strip()]
+
+    update_fields = {
+        "state": "isolating",
+        "requested_action": "isolate",
+        "requested_at": now,
+        "requested_by": by,
+        "message": None,
+        "quarantine": quarantine,
+    }
     containment_collection.update_one(
         {"_id": _key(host)},
-        {"$set": {"state": "isolating", "requested_action": "isolate",
-                  "requested_at": now, "requested_by": by, "message": None}},
+        {"$set": update_fields},
         upsert=True,
     )
+    extra_note = f" Quarantine directives: {quarantine}." if quarantine else ""
     append_ledger_entry(
         entity_type="HOST", entity_id=host, stage="EDR_CONTAINMENT",
         action_taken="NETWORK_ISOLATION_REQUESTED",
         reasoning_output=f"Analyst {by} requested network isolation of {host}. "
-                         f"Waiting for the host's containment agent to apply it.",
+                         f"Waiting for the host's containment agent to apply it.{extra_note}",
         analyst_user=by,
     )
     _broadcast(host, "isolating")
     return {"host": host, "state": "isolating", "requested_action": "isolate",
             "requested_by": by, "requested_at": now,
+            "quarantine": quarantine,
             "agent_online": get_state(host)["agent_online"]}
 
 
@@ -134,17 +162,19 @@ def request_release(host, by="unknown"):
 
 def agent_poll(host):
     """Called by the host's agent. Records that it's alive and returns the one
-    action it should take now (or none)."""
+    action it should take now (or none), plus optional DFIR / quarantine directives."""
     containment_collection.update_one(
         {"_id": _key(host)}, {"$set": {"agent_seen_at": _now()}}, upsert=True,
     )
     d = _doc(host) or {}
     state = d.get("state", "released")
-    if state == "isolating":
-        return {"action": "isolate"}
-    if state == "releasing":
-        return {"action": "release"}
-    return {"action": None}
+    action = "isolate" if state == "isolating" else "release" if state == "releasing" else None
+    out = {"action": action}
+    if action == "isolate" and d.get("quarantine"):
+        out["quarantine"] = d["quarantine"]
+    if d.get("dfir_requested"):
+        out["dfir_requested"] = True
+    return out
 
 
 def agent_ack(host, action, ok=True, message=None):

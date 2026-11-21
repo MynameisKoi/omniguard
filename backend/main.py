@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request, Header
+from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request, Header, Body
 from fastapi.responses import JSONResponse, StreamingResponse
 from neo4j.exceptions import ServiceUnavailable
 from starlette.concurrency import run_in_threadpool
@@ -28,7 +28,11 @@ from ledger import (
     get_recent_ledger,
 )
 import containment
+import dfir
 import live_ai
+import notifications
+import threat_intel
+import connectors
 from agents import MultiAgentInvestigationPipeline
 from ocsf import alert_to_ocsf, export_alerts_to_ocsf
 from ai_transparency import get_transparency_logs, get_transparency_trace
@@ -266,6 +270,14 @@ async def create_alert(payload: AlertCreate) -> Alert:
     # hand it to Live AI so the model reviews it and proposes a triage, live
     # (proposal only — an analyst still approves). No-op if Live AI is off.
     live_ai.enqueue(alert.alert_id, alert.host)
+
+    # If Live AI is disabled (or alert is critical), dispatch immediate phone push
+    # asynchronously so alert ingest latency is never impacted.
+    if (not live_ai.is_enabled()) or alert.severity == "critical":
+        import asyncio
+        asyncio.create_task(
+            run_in_threadpool(notifications.dispatch_alert_notification, alert.model_dump(mode="json"))
+        )
 
     return alert
 
@@ -704,11 +716,23 @@ async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
     return result
 
 
+class IsolateOptions(BaseModel):
+    c2_ip: str | None = None
+    c2_ports: list[int] | None = None
+    kill_pids: list[int] | None = None
+    kill_patterns: list[str] | None = None
+
+
 @app.post("/hosts/{hostname}/isolate", status_code=202)
-async def isolate_host(hostname: str, me: dict = Depends(current_user)):
-    """Ask the host's containment agent to cut it off the network. The agent
-    confirms back when it's really applied (see containment.py)."""
-    return await run_in_threadpool(containment.request_isolation, hostname, me["email"])
+async def isolate_host(
+    hostname: str,
+    payload: IsolateOptions | None = Body(default=None),
+    me: dict = Depends(current_user),
+):
+    """Ask the host's containment agent to cut it off the network and optionally
+    block a same-subnet C2 IP/port or terminate reverse-shell processes."""
+    opts = payload.model_dump(exclude_none=True) if payload else {}
+    return await run_in_threadpool(containment.request_isolation, hostname, me["email"], **opts)
 
 
 @app.post("/hosts/{hostname}/release", status_code=202)
@@ -820,4 +844,121 @@ async def read_ai_transparency_trace(trace_id: str):
     if not trace:
         raise HTTPException(status_code=404, detail=f"AI trace '{trace_id}' not found")
     return trace
+
+
+# ── Live Host DFIR Snapshot Endpoints ───────────────────────────────
+
+class DFIRReportIn(BaseModel):
+    host: str
+    os: str = "unknown"
+    hostname: str | None = None
+    is_admin: bool = False
+    gateways: list[str] = Field(default_factory=list)
+    processes: list[dict] = Field(default_factory=list)
+    connections: list[dict] = Field(default_factory=list)
+    hosts_entries: list[str] = Field(default_factory=list)
+
+
+@app.post("/hosts/{hostname}/dfir/collect", status_code=202)
+async def request_host_dfir(hostname: str, me: dict = Depends(current_user)):
+    """Queue a live DFIR snapshot (processes, sockets, hosts) from the endpoint agent."""
+    try:
+        return await run_in_threadpool(dfir.request_snapshot, hostname, me["email"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/hosts/{hostname}/dfir", dependencies=AUTH)
+async def read_host_dfir(hostname: str):
+    """Retrieve the latest DFIR forensic snapshot for a host."""
+    try:
+        snap = await run_in_threadpool(dfir.get_latest_snapshot, hostname)
+        return {"host": hostname, "snapshot": snap}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/agent/dfir/report")
+async def agent_dfir_report(payload: DFIRReportIn, x_agent_key: str | None = Header(default=None)):
+    """Endpoint for containment_agent.py to submit live DFIR telemetry."""
+    if not agent_key_ok(x_agent_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing containment agent key")
+    try:
+        return await run_in_threadpool(dfir.store_snapshot, payload.host, payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Phone / External Alert Notification Endpoints ───────────────────
+
+class NotificationConfigIn(BaseModel):
+    enabled: bool | None = None
+    min_severity: Literal["low", "medium", "high", "critical"] | None = None
+    ntfy_server: str | None = None
+    ntfy_topic: str | None = None
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+    webhook_url: str | None = None
+    dashboard_url: str | None = None
+
+
+class NotificationTestIn(BaseModel):
+    note: str = Field(default="Test alert from OmniGuard SOC", max_length=300)
+
+
+@app.get("/notifications/status", dependencies=AUTH)
+async def read_notification_status():
+    return notifications.get_notification_status()
+
+
+@app.post("/notifications/config", dependencies=AUTH)
+async def update_notification_config(payload: NotificationConfigIn):
+    return notifications.configure_notifications(**payload.model_dump(exclude_none=True))
+
+
+@app.post("/notifications/test", dependencies=AUTH)
+async def trigger_test_notification(payload: NotificationTestIn = Body(default_factory=NotificationTestIn)):
+    return await run_in_threadpool(notifications.send_test_notification, payload.note)
+
+
+# ── Security Patch & News Analyzer (CISA KEV) ───────────────────────
+
+class PatchAnalyzeIn(BaseModel):
+    query: str | None = None
+    limit: int = Field(default=8, ge=1, le=25)
+    host_os_hints: list[str] | None = None
+
+
+@app.get("/intel/patches", dependencies=AUTH)
+async def list_security_patches(query: str | None = None, limit: int = 15, refresh: bool = False):
+    return await run_in_threadpool(threat_intel.fetch_cisa_kev, limit, query, refresh)
+
+
+@app.post("/intel/patches/analyze", dependencies=AUTH)
+async def analyze_patches(payload: PatchAnalyzeIn = Body(default_factory=PatchAnalyzeIn), me: dict = Depends(current_user)):
+    return await run_in_threadpool(
+        threat_intel.analyze_security_patches,
+        payload.query,
+        payload.limit,
+        payload.host_os_hints,
+        me["email"],
+    )
+
+
+# ── Pluggable 3rd-Party EDR & Threat Intel Connectors ───────────────
+
+class EnrichIn(BaseModel):
+    indicator: str = Field(min_length=1, max_length=255)
+    indicator_type: Literal["auto", "ip", "domain"] = "auto"
+
+
+@app.get("/connectors/status", dependencies=AUTH)
+async def read_connectors_status():
+    return await run_in_threadpool(connectors.get_connectors_status)
+
+
+@app.post("/connectors/enrich", dependencies=AUTH)
+async def enrich_ioc(payload: EnrichIn):
+    return await run_in_threadpool(connectors.enrich_indicator, payload.indicator, payload.indicator_type)
+
 

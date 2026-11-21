@@ -1,0 +1,12 @@
+REM ============================================================
+REM OmniGuard SOC - Benign ClickFix / Reverse-Shell Demo Payload
+REM Target: Linux / Kali Victim Machine (Closed Lab Demo Only)
+REM Triggers the benign OmniGuard C2 Beacon Simulator so SpectraC2
+REM detects periodic traffic and the analyst can isolate & kill it.
+REM ============================================================
+
+DELAY 500
+CTRL ALT t
+DELAY 900
+STRING python3 demo/beacon_sim.py --host kali-victim
+ENTER

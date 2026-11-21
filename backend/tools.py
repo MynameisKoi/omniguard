@@ -816,6 +816,44 @@ def isolate_host(hostname, reason=None, analyst="unknown"):
                      "agent_online": online, "state": state.get("state")}}
 
 
+def get_host_dfir(hostname):
+    import dfir
+    snap = dfir.get_latest_snapshot(hostname)
+    if not snap:
+        return {
+            "summary": f"No DFIR snapshot collected yet for {hostname}. Click 'Collect DFIR' on the host panel to gather live sockets and processes.",
+            "data": {"host": hostname, "snapshot": None},
+        }
+    a = snap.get("analysis") or {}
+    sus_p = a.get("suspicious_processes") or []
+    sus_c = a.get("suspicious_connections") or []
+    summary = (
+        f"DFIR snapshot for {hostname} ({snap.get('os', 'unknown')}, collected {snap.get('collected_at')}): "
+        f"{a.get('process_count', 0)} processes ({len(sus_p)} suspicious), "
+        f"{a.get('connection_count', 0)} sockets ({len(sus_c)} suspicious). Risk: {a.get('risk_level', 'low')}."
+    )
+    if sus_p:
+        summary += " Suspicious PIDs: " + ", ".join(f"{p.get('pid')} ({p.get('name')})" for p in sus_p[:5]) + "."
+    return {"summary": summary, "data": snap}
+
+
+def check_security_patches(query=None):
+    import threat_intel
+    res = threat_intel.analyze_security_patches(query=query, limit=6)
+    return {"summary": res.get("analysis", "No advisories found."), "data": res}
+
+
+def enrich_indicator(indicator):
+    import connectors
+    res = connectors.enrich_indicator(indicator)
+    local = res.get("local_soc") or {}
+    summary = (
+        f"Enrichment for {res['indicator']} ({res['type']}): "
+        f"{local.get('alert_count', 0)} local alerts across {len(local.get('affected_hosts') or [])} host(s)."
+    )
+    return {"summary": summary, "data": res}
+
+
 def set_alert_status(alert_id, status, note=None, analyst="unknown"):
     if status not in STATUSES:
         raise ToolError(f"status must be one of {STATUSES}")
@@ -881,6 +919,15 @@ TOOLS = {
     "triage_alerts": dict(fn=triage_alerts, kind="read", render="triage", needs_analyst=True,
         description="Have the AI triage an alert (by alert_id), or a host's or user's untriaged alerts (by host / user). It only proposes a verdict and actions; the analyst approves each.",
         parameters={"alert_id": S, "host": S, "user": S}, required=[]),
+    "get_host_dfir": dict(fn=get_host_dfir, kind="read", render="text",
+        description="Inspect the latest live DFIR snapshot (running processes, open network sockets, suspicious reverse-shell PIDs) collected from a host.",
+        parameters={"hostname": S}, required=["hostname"]),
+    "check_security_patches": dict(fn=check_security_patches, kind="read", render="text",
+        description="Fetch and summarize recent CISA Known Exploited Vulnerabilities (KEV) security patches, optionally filtered by vendor/product keyword.",
+        parameters={"query": S}, required=[]),
+    "enrich_indicator": dict(fn=enrich_indicator, kind="read", render="text",
+        description="Enrich an IP address or domain across local SOC alerts and configured 3rd-party threat intel connectors (AbuseIPDB, VirusTotal).",
+        parameters={"indicator": S}, required=["indicator"]),
     "isolate_host": dict(fn=isolate_host, kind="action", render="action",
         description="Isolate a compromised host from the network. Needs the analyst's approval before it runs.",
         parameters={"hostname": S, "reason": S}, required=["hostname"]),
