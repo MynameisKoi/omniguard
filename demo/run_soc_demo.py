@@ -118,8 +118,8 @@ def _win_is_admin() -> bool:
         return False
 
 
-def _setup_win_firewall(ports: list[int]) -> bool:
-    """Create temporary Windows Firewall rule for demo ports if running as Admin."""
+def _setup_win_firewall(ports: list[int], remote_ip: str = "192.168.137.0/24") -> bool:
+    """Create temporary Windows Firewall rule scoped to the hotspot subnet."""
     if not IS_WIN:
         return False
     if not _win_is_admin():
@@ -134,11 +134,11 @@ def _setup_win_firewall(ports: list[int]) -> bool:
     res = subprocess.run(
         ["netsh", "advfirewall", "firewall", "add", "rule",
          f"name={FW_DEMO_RULE}", "dir=in", "action=allow",
-         "protocol=TCP", f"localport={port_csv}"],
+         "protocol=TCP", f"localport={port_csv}", f"remoteip={remote_ip}"],
         capture_output=True, text=True,
     )
     if res.returncode == 0:
-        print(f"[firewall] Opened Windows Firewall TCP {port_csv} ({FW_DEMO_RULE}) — will auto-remove on exit.")
+        print(f"[firewall] Opened Windows Firewall TCP {port_csv} ONLY for {remote_ip} ({FW_DEMO_RULE}) — auto-removes on exit.")
         return True
     print(f"[firewall] Could not add rule ({res.stderr.strip() or res.stdout.strip()})")
     return False
