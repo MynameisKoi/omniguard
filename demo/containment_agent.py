@@ -54,9 +54,11 @@ HARD_CUT            = False    # the firewall block alone (reliable) cuts all NE
                                # some machines, so it's off by default.
 
 CORE = f"http://{ANALYST_IP}:8000"
+AGENT_KEY = os.getenv("CONTAINMENT_AGENT_KEY", "").strip()
 # ─────────────────────────────────────────────────────────────────────────────
 
 IS_WIN = platform.system() == "Windows"
+IS_LINUX = platform.system() == "Linux"
 _state = {"isolated": False, "gateways": [], "timer": None}
 
 
@@ -86,6 +88,14 @@ def current_gateways():
                 if len(p) >= 3 and p[0] == "0.0.0.0" and p[1] == "0.0.0.0":
                     if p[2].lower() != "on-link":
                         gws.append(p[2])
+        elif IS_LINUX:
+            out = _run(["ip", "route", "show", "default"]).stdout
+            for line in out.splitlines():
+                parts = line.split()
+                if "via" in parts:
+                    idx = parts.index("via")
+                    if idx + 1 < len(parts):
+                        gws.append(parts[idx + 1])
         else:
             out = _run(["route", "-n", "get", "default"]).stdout
             for line in out.splitlines():
@@ -223,7 +233,7 @@ def cut_network():
     else:
         gws = current_gateways()
         _state["gateways"] = gws
-        r = _run(["route", "delete", "default"])
+        r = _run(["ip", "route", "del", "default"] if IS_LINUX else ["route", "delete", "default"])
         if r.returncode != 0 and (r.stderr or r.stdout).strip():
             errs.append((r.stderr or r.stdout).strip())
 
@@ -259,7 +269,7 @@ def restore_network():
             _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rn}"])
     else:
         for gw in (_state.get("gateways") or current_gateways()):
-            _run(["route", "add", "default", gw])
+            _run(["ip", "route", "add", "default", "via", gw] if IS_LINUX else ["route", "add", "default", gw])
     time.sleep(1.0)
     back = has_internet()
     return back, ("internet restored" if back else "block removed -- internet not confirmed back yet")
@@ -272,9 +282,17 @@ def restore_network():
 _direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
+def _agent_headers(extra=None):
+    hdrs = dict(extra or {})
+    if AGENT_KEY:
+        hdrs["X-Agent-Key"] = AGENT_KEY
+    return hdrs
+
+
 def poll():
     url = f"{CORE}/agent/containment/poll?host={urllib.parse.quote(HOST)}"
-    with _direct.open(url, timeout=5) as r:
+    req = urllib.request.Request(url, headers=_agent_headers())
+    with _direct.open(req, timeout=5) as r:
         return json.loads(r.read().decode())
 
 
@@ -282,7 +300,7 @@ def ack(action, ok, message=None):
     data = json.dumps({"host": HOST, "action": action, "ok": ok,
                        "message": message}).encode()
     req = urllib.request.Request(f"{CORE}/agent/containment/ack", data=data,
-                                 headers={"Content-Type": "application/json"},
+                                 headers=_agent_headers({"Content-Type": "application/json"}),
                                  method="POST")
     try:
         with _direct.open(req, timeout=5) as r:

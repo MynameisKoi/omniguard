@@ -34,7 +34,10 @@ def _key(host):
     """Host names reach us from the extension, the beacon and the agent with
     different capitalisation ('Lenovo-10' vs 'lenovo-10'). Match them all to one
     key so a request and its agent can never miss each other over a capital."""
-    return (host or "").strip().lower()
+    k = (host or "").strip().lower()
+    if not k:
+        raise ValueError("host must not be empty")
+    return k
 
 
 def _broadcast(host, state):

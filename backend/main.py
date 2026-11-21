@@ -7,7 +7,7 @@ from events import manager
 from models import Alert, AlertCreate, AlertStatusUpdate
 from db import database, brands_collection
 from ai import run_triage, answer_question
-from auth import check_login, check_badge_login, update_user, create_session, session_user, end_session, seed_default_user, ingest_key_ok
+from auth import check_login, check_badge_login, update_user, create_session, session_user, end_session, seed_default_user, ingest_key_ok, agent_key_ok
 from status import check_mongo, check_neo4j, check_ollama
 from datetime import datetime, timezone, timedelta
 from typing import Literal
@@ -113,6 +113,27 @@ async def login(payload: LoginRequest):
 class BadgeLoginRequest(BaseModel):
     badge_uid: str = Field(min_length=1, max_length=100)
 
+_pending_badge_tap: dict | None = None
+_BADGE_TAP_TTL_SECONDS = 15
+
+async def _complete_badge_login(user: dict, badge_uid: str) -> dict:
+    """Issue a session token and record physical badge auth in the decision ledger."""
+    token, expires = await run_in_threadpool(create_session, user)
+    try:
+        await run_in_threadpool(
+            append_ledger_entry,
+            entity_type="ANALYST_BADGE",
+            entity_id=user["email"],
+            stage="PHYSICAL_AUTHENTICATION",
+            action_taken="BADGE_TAP_LOGIN",
+            reasoning_output=f"Analyst authenticated via Flipper Zero hardware key / badge tap (UID: {badge_uid})",
+            analyst_user=user["email"],
+            input_context={"badge_uid": badge_uid},
+        )
+    except Exception as e:
+        print(f"[ledger] Badge login audit notice: {e}")
+    return {**user, "token": token, "expires_at": expires}
+
 @app.post("/auth/badge-login")
 async def badge_login(payload: BadgeLoginRequest):
     """
@@ -122,24 +143,34 @@ async def badge_login(payload: BadgeLoginRequest):
     user = await run_in_threadpool(check_badge_login, payload.badge_uid)
     if not user:
         raise HTTPException(status_code=401, detail="Unrecognized RFID/NFC badge UID or Flipper Zero key")
-    token, expires = await run_in_threadpool(create_session, user)
+    return await _complete_badge_login(user, payload.badge_uid)
 
-    # Immutably record physical hardware authentication to the decision ledger
-    try:
-        await run_in_threadpool(
-            append_ledger_entry,
-            entity_type="ANALYST_BADGE",
-            entity_id=user["email"],
-            stage="PHYSICAL_AUTHENTICATION",
-            action_taken="BADGE_TAP_LOGIN",
-            reasoning_output=f"Analyst authenticated via Flipper Zero hardware key / badge tap (UID: {payload.badge_uid})",
-            analyst_user=user["email"],
-            input_context={"badge_uid": payload.badge_uid},
-        )
-    except Exception as e:
-        print(f"[ledger] Badge login audit notice: {e}")
+@app.post("/auth/badge-tap")
+async def register_badge_tap(payload: BadgeLoginRequest):
+    """Receives a live physical card tap from a USB-connected Flipper Zero bridge."""
+    global _pending_badge_tap
+    user = await run_in_threadpool(check_badge_login, payload.badge_uid)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unrecognized RFID/NFC badge UID or Flipper Zero key")
+    _pending_badge_tap = {
+        "user": user,
+        "badge_uid": payload.badge_uid,
+        "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_BADGE_TAP_TTL_SECONDS),
+    }
+    return {"status": "queued", "email": user["email"], "badge_uid": payload.badge_uid}
 
-    return {**user, "token": token, "expires_at": expires}
+@app.get("/auth/badge-tap/pending")
+async def consume_pending_badge_tap():
+    """Polled by the Login UI on the Flipper tab to auto-login on a physical card tap."""
+    global _pending_badge_tap
+    tap = _pending_badge_tap
+    if not tap:
+        return {"pending": False}
+    _pending_badge_tap = None
+    if datetime.now(timezone.utc) > tap["expires_at"]:
+        return {"pending": False}
+    session = await _complete_badge_login(tap["user"], tap["badge_uid"])
+    return {"pending": True, **session}
 
 @app.post("/auth/logout", status_code=204)
 async def logout(request: Request):
@@ -691,14 +722,24 @@ class AgentAck(BaseModel):
     message: str | None = None
 
 @app.get("/agent/containment/poll")
-async def agent_containment_poll(host: str):
-    return await run_in_threadpool(containment.agent_poll, host)
+async def agent_containment_poll(host: str, x_agent_key: str | None = Header(default=None)):
+    if not agent_key_ok(x_agent_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing containment agent key")
+    try:
+        return await run_in_threadpool(containment.agent_poll, host)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/agent/containment/ack")
-async def agent_containment_ack(payload: AgentAck):
-    return await run_in_threadpool(
-        containment.agent_ack, payload.host, payload.action, payload.ok, payload.message
-    )
+async def agent_containment_ack(payload: AgentAck, x_agent_key: str | None = Header(default=None)):
+    if not agent_key_ok(x_agent_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing containment agent key")
+    try:
+        return await run_in_threadpool(
+            containment.agent_ack, payload.host, payload.action, payload.ok, payload.message
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── Decision Ledger Audit Endpoints ─────────────────────────────────

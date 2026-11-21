@@ -79,7 +79,15 @@ def available_actions(a):
 
 
 def _isolated(host):
-    return any("ISOLAT" in str(r.get("action_taken", "")).upper() for r in get_ledger_for_entity(host)[:10])
+    # Check most recent isolation-related ledger entry first so a released/reset host
+    # isn't permanently treated as isolated.
+    for r in get_ledger_for_entity(host)[:10]:
+        act = str(r.get("action_taken", "")).upper()
+        if "RELEASED" in act or "RESET" in act or "FAILED" in act:
+            return False
+        if "ISOLAT" in act:
+            return True
+    return False
 
 
 # ── apply: the one way a triage is saved ────────────────────────────────────

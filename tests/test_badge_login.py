@@ -75,3 +75,48 @@ def test_api_badge_login_endpoint():
             assert res_fail.status_code == 401
             assert "Unrecognized RFID/NFC badge UID" in res_fail.json()["detail"]
 
+
+def test_check_badge_login_strips_spaces_for_hid_hex():
+    with patch.object(auth.users_collection, "find_one") as mock_find:
+        mock_find.return_value = {
+            "email": "analyst@omniguard.io",
+            "name": "SOC Analyst",
+            "badge_uid": "2EB776",
+        }
+        user = check_badge_login("2E B7 76")
+        assert user is not None
+        query = mock_find.call_args[0][0]["$or"]
+        assert {"badge_uid": "2EB776"} in query
+
+
+def test_api_live_badge_tap_queue():
+    os.environ.setdefault("NEO4J_PASSWORD", "test_pass")
+    with patch("neo4j.GraphDatabase.driver"), patch("pymongo.MongoClient"):
+        import main as backend_main
+        from fastapi.testclient import TestClient
+
+        backend_main._pending_badge_tap = None
+        client = TestClient(backend_main.app)
+
+        # No pending tap initially
+        assert client.get("/auth/badge-tap/pending").json() == {"pending": False}
+
+        # Physical tap queued from USB bridge
+        with patch("main.check_badge_login", return_value={"email": "analyst@omniguard.io", "name": "SOC Analyst", "badge_uid": "2EB776"}):
+            tap_res = client.post("/auth/badge-tap", json={"badge_uid": "2EB776"})
+            assert tap_res.status_code == 200
+            assert tap_res.json()["status"] == "queued"
+
+        # Pending poll consumes the tap once and issues a session
+        with patch("main.create_session", return_value=("tap-token-123", "2026-11-14T18:30:00Z")), \
+             patch("main.append_ledger_entry") as mock_ledger:
+            pending_res = client.get("/auth/badge-tap/pending")
+            assert pending_res.status_code == 200
+            body = pending_res.json()
+            assert body["pending"] is True
+            assert body["token"] == "tap-token-123"
+            mock_ledger.assert_called_once()
+
+        # Second poll sees nothing pending
+        assert client.get("/auth/badge-tap/pending").json() == {"pending": False}
+
