@@ -229,7 +229,22 @@ API_URL = "__SOC_URL__"
 HOST = "__VICTIM_HOST__"
 INTERVAL = 2.0
 
-print(f"[SIM] RMM Watchdog / C2 Beacon active on {HOST} -> C2={SERVER} (SOC={API_URL})")
+
+def _local_ip(target_host, target_port):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect((target_host, target_port))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+c2_host = SERVER.split("//", 1)[-1].split(":", 1)[0]
+c2_port = int(SERVER.rsplit(":", 1)[-1])
+SRC_IP = _local_ip(c2_host, c2_port)
+print(f"[SIM] RMM Watchdog / C2 Beacon active on {HOST} ({SRC_IP}) -> C2={SERVER} (SOC={API_URL})")
 alerted = False
 seq = 0
 while True:
@@ -256,9 +271,10 @@ while True:
             "severity": "critical",
             "host": HOST,
             "user": "victim",
-            "dst_ip": SERVER.split("//", 1)[-1].split(":", 1)[0],
-            "dst_port": int(SERVER.rsplit(":", 1)[-1]),
-            "domain": SERVER.split("//", 1)[-1].split(":", 1)[0],
+            "src_ip": SRC_IP,
+            "dst_ip": c2_host,
+            "dst_port": c2_port,
+            "domain": c2_host,
             "beacon_interval": INTERVAL,
             "mean_jitter": 0.2,
             "process_name": "powershell-rmm-watchdog-sim",

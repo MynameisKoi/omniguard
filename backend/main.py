@@ -206,7 +206,21 @@ async def update_profile(payload: ProfileUpdate, request: Request, me: dict = De
 # This is coming from our security system
 # They store the event here
 @app.post("/alerts", response_model=Alert, status_code=201, dependencies=INGEST)
-async def create_alert(payload: AlertCreate) -> Alert:
+async def create_alert(payload: AlertCreate, request: Request) -> Alert:
+    import ipaddress
+    from urllib.parse import urlparse
+
+    if not payload.src_ip and request.client and request.client.host:
+        payload = payload.model_copy(update={"src_ip": request.client.host})
+    if not payload.dst_ip and (payload.target_url or payload.domain):
+        cand = payload.domain or urlparse(str(payload.target_url)).hostname
+        if cand:
+            try:
+                ipaddress.ip_address(cand)
+                payload = payload.model_copy(update={"dst_ip": cand})
+            except ValueError:
+                pass
+
     now = datetime.now(timezone.utc)
     sim_val, sim_hex = compute_alert_simhash(payload.model_dump())
 
