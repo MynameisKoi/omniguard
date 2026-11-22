@@ -195,20 +195,36 @@ def block_c2_target(c2_ip="", c2_ports=None):
             _run(cmd)
             applied.append(f"win-block-ports:{port_csv}")
     elif IS_LINUX:
-        if target_ip and target_ip != ANALYST_IP:
-            r = _run(["iptables", "-I", "OUTPUT", "1", "-d", target_ip, "-j", "DROP"])
-            if r.returncode == 0:
-                _state["c2_blocks"].append(["-d", target_ip, "-j", "DROP"])
-                applied.append(f"iptables-ip:{target_ip}")
-        else:
-            for p in ports:
-                rule = ["-p", "tcp", "--dport", str(p), "-j", "DROP"]
-                if target_ip:
-                    rule = ["-d", target_ip] + rule
-                r = _run(["iptables", "-I", "OUTPUT", "1"] + rule)
+        import shutil
+        if shutil.which("iptables"):
+            if target_ip and target_ip != ANALYST_IP:
+                r = _run(["iptables", "-I", "OUTPUT", "1", "-d", target_ip, "-j", "DROP"])
                 if r.returncode == 0:
-                    _state["c2_blocks"].append(rule)
-                    applied.append(f"iptables-port:{p}")
+                    _state["c2_blocks"].append(("iptables", ["-d", target_ip, "-j", "DROP"]))
+                    applied.append(f"iptables-ip:{target_ip}")
+            else:
+                for p in ports:
+                    rule = ["-p", "tcp", "--dport", str(p), "-j", "DROP"]
+                    if target_ip:
+                        rule = ["-d", target_ip] + rule
+                    r = _run(["iptables", "-I", "OUTPUT", "1"] + rule)
+                    if r.returncode == 0:
+                        _state["c2_blocks"].append(("iptables", rule))
+                        applied.append(f"iptables-port:{p}")
+        elif shutil.which("nft"):
+            _run(["nft", "add", "table", "inet", "omniguard_c2"])
+            _run(["nft", "add", "chain", "inet", "omniguard_c2", "output", "{ type filter hook output priority 0 ; }"])
+            if target_ip and target_ip != ANALYST_IP:
+                r = _run(["nft", "add", "rule", "inet", "omniguard_c2", "output", "ip", "daddr", target_ip, "drop"])
+                if r.returncode == 0:
+                    _state["c2_blocks"].append(("nft", ["omniguard_c2"]))
+                    applied.append(f"nft-ip:{target_ip}")
+            elif ports:
+                port_set = ", ".join(str(p) for p in ports)
+                r = _run(["nft", "add", "rule", "inet", "omniguard_c2", "output", "tcp", "dport", "{", port_set, "}", "drop"])
+                if r.returncode == 0:
+                    _state["c2_blocks"].append(("nft", ["omniguard_c2"]))
+                    applied.append(f"nft-ports:{port_set}")
     return applied
 
 
@@ -216,8 +232,11 @@ def unblock_c2_target():
     if IS_WIN:
         _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_BLOCK_C2}"])
     elif IS_LINUX:
-        for rule in list(_state.get("c2_blocks") or []):
-            _run(["iptables", "-D", "OUTPUT"] + rule)
+        for kind, rule in list(_state.get("c2_blocks") or []):
+            if kind == "nft":
+                _run(["nft", "delete", "table", "inet", rule[0]])
+            else:
+                _run(["iptables", "-D", "OUTPUT"] + rule)
         _state["c2_blocks"] = []
 
 
