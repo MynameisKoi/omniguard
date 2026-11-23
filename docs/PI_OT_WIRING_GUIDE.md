@@ -50,7 +50,10 @@ Plug the **T-shaped GPIO Extension Board** across the center groove at the top o
                           └─────────────────┘
 
   === COMPONENTS ON BREADBOARD ===
-  • RGB LED (Common Cathode): R <- G17 (220Ω) | G <- G27 (220Ω) | B <- G22 (220Ω) | Longest leg -> [-] GND RAIL
+  • HiPi RGB LED Module (VCC, R, G, B — built-in resistors, Common Anode):
+      VCC -> LEFT [+] 3.3V RAIL | R -> G17 (Pin 11) | G -> G27 (Pin 13) | B -> G22 (Pin 15)
+      (Run pi_ot_controller.py with --common-anode!)
+  • Bare RGB LED (if using Da Vinci 4-leg LED): R <- G17 (220Ω) | G <- G27 (220Ω) | B <- G22 (220Ω) | Longest leg -> [-] GND RAIL
   • Active Buzzer: (+) <- G23 | (-) -> [-] GND RAIL
   • I2C LCD1602 (4-pin header): VCC -> [+] 5V RAIL | GND -> [-] GND RAIL | SDA -> SDA (Pin 3) | SCL -> SCL (Pin 5)
   • Optional DS18B20: VCC -> 3V3 (Pin 1) | GND -> [-] GND RAIL | DATA -> G4 (Pin 7) + [4.7kΩ resistor to 3V3]
