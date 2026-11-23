@@ -8,6 +8,57 @@ This turns your **Raspberry Pi 5 (`192.168.137.32`)** with the **SunFounder Da V
 
 > **Safety Rule:** Always power off or unplug the Pi 5 before wiring, and **never** connect the DC fan directly to a GPIO pin (use the **L293D** motor driver IC from your Da Vinci kit).
 
+---
+
+## Visual Breadboard Layout (SunFounder T-GPIO Extension Board)
+
+Plug the **T-shaped GPIO Extension Board** across the center groove at the top of your breadboard, and connect the `+` (Red) rail to **`5V`** and `-` (Blue) rail to **`GND`**:
+
+```text
+  [+] 5V RAIL  <────────────── (Pin 2: 5V) ──┐
+  [-] GND RAIL <──── (Pin 9: GND) ───────────┼── (Pin 6/14/20: GND)
+                                             │
+               ┌─────────────────────────────┴─────────────────────────────┐
+               │       SUNFOUNDER T-GPIO EXTENSION BOARD (40-Pin)          │
+               │        (Ribbon cable notch facing Pi / top)               │
+               ├─────────────────────────────┬─────────────────────────────┤
+  Optional     │  1: 3V3   (DS18B20 VCC)     │  2: 5V    ──> [+] 5V RAIL   │
+  I2C LCD ───> │  3: SDA   (LCD SDA)         │  4: 5V    (spare 5V)        │
+  I2C LCD ───> │  5: SCL   (LCD SCL)         │  6: GND   ──> LCD GND       │
+  Optional ──> │  7: G4    (DS18B20 DATA)    │  8: TXD   (unused)          │
+  [-] Rail ──> │  9: GND   ──> [-] GND RAIL  │ 10: RXD   (unused)          │
+  RGB Red  ──> │ 11: G17 ─[220Ω]─> LED R     │ 12: G18   (unused)          │
+  RGB Grn  ──> │ 13: G27 ─[220Ω]─> LED G     │ 14: GND   ──> [-] GND RAIL  │
+  RGB Blu  ──> │ 15: G22 ─[220Ω]─> LED B     │ 16: G23   ──> Buzzer (+)    │
+               │ 17: 3V3   (DS18B20 pullup)  │ 18: G24   ──> L293D Pin 2   │
+               │ 19: MOSI  (unused)          │ 20: GND   ──> [-] GND RAIL  │
+               │ 21: MISO  (unused)          │ 22: G25   ──> L293D Pin 1   │
+               └─────────────────────────────┴─────────────────────────────┘
+                             │   (center groove)   │
+                             ▼                     ▼
+
+  === LOWER BREADBOARD: L293D MOTOR DRIVER (straddling center groove) ===
+
+                          ┌──────╲__/──────┐
+       G25 (Pin 22) ─────>│ 1 EN1    VCC1 16│<───── [+] 5V RAIL
+       G24 (Pin 18) ─────>│ 2 IN1     IN4 15│  (unused)
+       Fan Wire A   <─────│ 3 OUT1   OUT4 14│  (unused)
+       [-] GND RAIL ─────>│ 4 GND     GND 13│<───── [-] GND RAIL
+       [-] GND RAIL ─────>│ 5 GND     GND 12│<───── [-] GND RAIL
+       Fan Wire B   <─────│ 6 OUT2   OUT3 11│  (unused)
+       [-] GND RAIL ─────>│ 7 IN2     IN3 10│  (unused)
+       [+] 5V RAIL  ─────>│ 8 VCC2   EN2   9│  (unused)
+                          └─────────────────┘
+
+  === COMPONENTS ON BREADBOARD ===
+  • RGB LED (Common Cathode): R <- G17 (220Ω) | G <- G27 (220Ω) | B <- G22 (220Ω) | Longest leg -> [-] GND RAIL
+  • Active Buzzer: (+) <- G23 | (-) -> [-] GND RAIL
+  • I2C LCD1602 (4-pin header): VCC -> [+] 5V RAIL | GND -> [-] GND RAIL | SDA -> SDA (Pin 3) | SCL -> SCL (Pin 5)
+  • Optional DS18B20: VCC -> 3V3 (Pin 1) | GND -> [-] GND RAIL | DATA -> G4 (Pin 7) + [4.7kΩ resistor to 3V3]
+```
+
+---
+
 | Component | Module Pin | Raspberry Pi 5 Pin (BCM / Physical) | Notes |
 | :--- | :--- | :--- | :--- |
 | **I2C LCD1602** | `VCC` | **5V** (Pin 2) | Standard 5V logic |
