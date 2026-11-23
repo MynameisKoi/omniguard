@@ -575,6 +575,17 @@ def _cancel_timer():
         _state["timer"] = None
 
 
+def _write_ot_state(state_name):
+    """Signal local Raspberry Pi OT controller (no-op on other machines)."""
+    if not IS_LINUX:
+        return
+    try:
+        with open("/tmp/omniguard_ot_state.json", "w", encoding="utf-8") as f:
+            json.dump({"state": state_name, "ts": time.time()}, f)
+    except Exception:
+        pass
+
+
 def do_isolate(quarantine=None):
     if _state["isolated"]:
         # already in the target state — confirm it so the SOC stops re-sending
@@ -585,6 +596,7 @@ def do_isolate(quarantine=None):
     ok, msg = cut_network(quarantine=quarantine)
     if ok:
         _state["isolated"] = True
+        _write_ot_state("isolated")
         print(f"  >> ISOLATED  ({msg})")
         print(f"     internet is cut. SOC still reachable. auto-release in "
               f"{AUTO_RELEASE_MINUTES} min if not released sooner.")
@@ -610,6 +622,7 @@ def do_release(reason="analyst"):
     _cancel_timer()
     ok, msg = restore_network()
     _state["isolated"] = False
+    _write_ot_state("normal")
     print(f"  << {'RESTORED' if ok else 'RESTORE HAD ISSUES'}  ({msg})")
     ack("release", ok, f"{reason}: {msg}")
     print_diagnostics("after release")
