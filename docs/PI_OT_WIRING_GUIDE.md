@@ -12,12 +12,11 @@ This turns your **Raspberry Pi 5 (`192.168.137.32`)** with the **SunFounder Da V
 
 ## Visual Breadboard Layout (SunFounder T-GPIO Extension Board)
 
-Plug the **T-shaped GPIO Extension Board** across the center groove at the top of your breadboard, and connect the `+` (Red) rail to **`5V`** and `-` (Blue) rail to **`GND`**:
+Plug the **T-shaped GPIO Extension Board** across the center groove at the top of your breadboard, and wire **Left `+` = `3.3V`**, **Right `+` = `5V`**, and **Both `-` = `GND`** (bridged together):
 
 ```text
-  [+] 5V RAIL  <────────────── (Pin 2: 5V) ──┐
-  [-] GND RAIL <──── (Pin 9: GND) ───────────┼── (Pin 6/14/20: GND)
-                                             │
+  LEFT  [+] 3.3V RAIL <── (Pin 1: 3V3)       RIGHT [+] 5V RAIL <── (Pin 2: 5V)
+  LEFT  [-] GND  RAIL <── (Pin 9: GND) ───── RIGHT [-] GND RAIL <─ (Pin 6/14/20: GND)
                ┌─────────────────────────────┴─────────────────────────────┐
                │       SUNFOUNDER T-GPIO EXTENSION BOARD (40-Pin)          │
                │        (Ribbon cable notch facing Pi / top)               │
