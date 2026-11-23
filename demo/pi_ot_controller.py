@@ -34,10 +34,11 @@ import time
 STATE_FILE = "/tmp/omniguard_ot_state.json"
 ROGUE_PATTERNS = ("rmm_watchdog_sim.py", "beacon_sim.py", "beacon_agent.py")
 GIBBERISH_LINES = (
+    "TEMP RISING >60C!",
     "#@!$ C2 :9000 !?",
+    "TEMP: 64.8C WARN",
     "*%^& SHELL OPEN!",
     "!! RMM OVERRIDE !",
-    "0xDEAD > /dev/c2",
 )
 
 # Default BCM GPIO pin mapping (non-overlapping on Raspberry Pi 5)
@@ -175,9 +176,10 @@ def _read_containment_state() -> str:
 
 
 class OTHardware:
-    """Controls RGB LED, L293D DC Fan, Active Buzzer, and I2C LCD1602."""
+    """Controls RGB LED, DC Fan (via Relay or L293D), Active Buzzer, and I2C LCD1602."""
 
-    def __init__(self, simulate: bool = False, common_anode: bool = False, quiet: bool = False) -> None:
+    def __init__(self, simulate: bool = False, common_anode: bool = False,
+                 fan_active_low: bool = False, quiet: bool = False) -> None:
         self.simulate = simulate
         self.quiet = quiet
         self.lcd = None
@@ -196,8 +198,8 @@ class OTHardware:
             blue=DEFAULT_PINS["blue"],
             active_high=not common_anode,
         )
-        self.fan_in1 = DigitalOutputDevice(DEFAULT_PINS["fan_in1"])
-        self.fan_en = DigitalOutputDevice(DEFAULT_PINS["fan_en"])
+        self.fan_in1 = DigitalOutputDevice(DEFAULT_PINS["fan_in1"], active_high=not fan_active_low)
+        self.fan_en = DigitalOutputDevice(DEFAULT_PINS["fan_en"], active_high=not fan_active_low)
         self.buzzer = Buzzer(DEFAULT_PINS["buzzer"])
         self.lcd = I2CLCD1602(bus_num=1)
 
@@ -348,11 +350,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="OmniGuard Raspberry Pi 5 OT Hardware Controller")
     parser.add_argument("--simulate", action="store_true", help="Console-only simulation (no GPIO required)")
     parser.add_argument("--test-cycle", action="store_true", help="Run a 12-second Normal/Hacked/Isolated/Cured cycle")
-    parser.add_argument("--common-anode", action="store_true", help="Set if your RGB LED is common-anode (longest pin to 3.3V)")
+    parser.add_argument("--common-anode", action="store_true", help="Set if your RGB LED is common-anode (VCC -> 3.3V)")
+    parser.add_argument("--fan-active-low", action="store_true", help="Set if your relay module triggers ON when IN is LOW")
     parser.add_argument("--quiet", action="store_true", help="Mute active buzzer alerts")
     args = parser.parse_args()
 
-    hw = OTHardware(simulate=args.simulate, common_anode=args.common_anode, quiet=args.quiet)
+    hw = OTHardware(
+        simulate=args.simulate,
+        common_anode=args.common_anode,
+        fan_active_low=args.fan_active_low,
+        quiet=args.quiet,
+    )
 
     def _stop(*_):
         hw.cleanup()
