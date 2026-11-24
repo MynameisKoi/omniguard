@@ -26,8 +26,13 @@ installed and we prove they can talk to the SOC *before* anything happens.
    python demo\run_soc_demo.py --role victim --soc-ip <MAC-IP>
    ```
    (no `--host` needed — it defaults to `WORKSTATION-CORP-01`)
-2. **VerifyEye extension** (the "browser security guard") — set `CORE`, `VERIFY`,
-   and `HOST` at the top of `background.js`, then load it in Chrome and reload.
+2. **VerifyEye extension** (the "browser security guard") — configure it by
+   command (no file editing), then load it in Chrome:
+   ```
+   python demo\configure_verifyeye.py --soc-ip <MAC-IP>
+   ```
+   Then: `chrome://extensions` → Load unpacked → `verifyeye-ingress/extension`
+   (or just reload if already loaded).
 
 **Prove every service is reachable (the poll):**
    ```
