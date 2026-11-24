@@ -3069,6 +3069,9 @@ button { font: inherit; color: inherit; }
 .liveai-switch.on { background: var(--accent); }
 .liveai-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .15s ease; }
 .liveai-switch.on .liveai-knob { left: 18px; }
+.liveai-toggle.push-toggle { margin-top: 0; }
+.liveai-toggle.disabled { opacity: .55; cursor: default; }
+.liveai-toggle.disabled:hover { filter: none; }
 
 /* Live AI toast pop-ups (top-right, under the header — near the bell they come
    from, and clear of the Ask-AI chat bubble pinned bottom-right) */
@@ -4654,4 +4657,27 @@ mark.hl-match { background: var(--accent-wash); color: var(--accent-text); borde
 .bulk-clear { margin-left: auto; font-size: var(--t-xs); }
 .td-pick { width: 34px; padding-right: 0 !important; cursor: default; }
 .td-pick input { cursor: pointer; width: 15px; height: 15px; accent-color: var(--accent); vertical-align: middle; }
+
+/* ── minimal mobile fix: make the notification bell + its toggles reachable ──
+   (the full mobile redesign is a separate, later pass; this just unblocks
+   enabling phone push on a small screen) */
+@media (max-width: 640px) {
+  /* the bell dropdown was a fixed 340px desktop panel that opened off the left
+     edge on a phone — turn it into a full-width sheet under the top bar */
+  .dropdown.notif-dd {
+    position: fixed;
+    left: 8px; right: 8px; top: 56px;
+    width: auto; max-width: none;
+    max-height: calc(100vh - 72px);
+    overflow-y: auto;
+  }
+  /* make the Live AI / phone-alerts toggles comfortable to tap */
+  .liveai-toggle { padding: 11px 12px; }
+  .liveai-switch { width: 40px; height: 22px; }
+  .liveai-knob { width: 18px; height: 18px; }
+  .liveai-switch.on .liveai-knob { left: 20px; }
+  /* in-app toasts: full width under the top bar instead of a 340px card */
+  .toast-stack { left: 8px; right: 8px; top: 56px; }
+  .toast { width: auto; max-width: none; }
+}
 .alerts-table tr.row-picked td { background: var(--accent-wash); }

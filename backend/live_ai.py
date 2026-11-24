@@ -92,12 +92,29 @@ async def _review_one(alert_id: str, host: str | None) -> None:
         "alert": _serialize(alert),
         "needs_attention": needs_attention,
     })
+    # External channels (ntfy / Telegram / webhook — no app needed)
     if needs_attention and alert:
         try:
             from notifications import dispatch_alert_notification
             await run_in_threadpool(dispatch_alert_notification, _serialize(alert), proposal)
         except Exception as e:
             print(f"live-ai: phone notification error for {alert_id}: {e}")
+
+    # Web push to the installed PWA: a contentless ping so the analyst is told
+    # even when the dashboard is closed. No alert details leave the network —
+    # the notification just says "open the dashboard"; the app fetches the rest
+    # locally once tapped. (Runs alongside the external channels above.)
+    if needs_attention:
+        try:
+            import push
+            await run_in_threadpool(
+                push.send_to_all,
+                "OmniGuard SOC",
+                "An alert needs your attention — open the dashboard.",
+                "/",
+            )
+        except Exception as e:
+            print(f"live-ai: push failed for {alert_id}: {e}")
 
 
 async def _worker() -> None:

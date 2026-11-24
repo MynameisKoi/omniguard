@@ -6,6 +6,7 @@ import GraphExplorer from './GraphExplorer';
 import { timeAgo, exactTime } from './time';
 import { scopeIds } from './graphScope';
 import { label, humanize, MITRE_NAMES, VERDICT_SHORT, ACTION_LABEL } from './labels';
+import { pushSupported, registerSW, currentPushState, enablePush, disablePush } from './push';
 import TriageCell from './TriageCell';
 import { EvidencePanel, EvidenceGallery } from './Evidence';
 import AiMarkdown from './AiMarkdown';
@@ -18,7 +19,7 @@ import {
     ShieldAlert, Globe, Check, TriangleAlert, Inbox, X,
     Siren, Users, Activity, Target, TrendingUp, TrendingDown, Search, Bell,
     UserRound, LogOut, Sparkles, RefreshCw, Send, Bot, Calendar,
-    GitMerge, Gauge, ShieldCheck, ShieldOff, UserCheck, Link2, Copy,
+    GitMerge, Gauge, ShieldCheck, ShieldOff, UserCheck, Link2, Copy, Smartphone,
 } from 'lucide-react';
 import { Sparkline, StackedArea, BarRow, PieChart, BarChart, SampleBadge } from './charts';
 
@@ -295,6 +296,25 @@ function App({ user, onLogout, onUserChange }) {
             const r = await api("/ai/live", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: next }) })
             const d = await r.json(); setLiveAiOn(!!d.enabled)
         } catch { setLiveAiOn(!next) }
+    }
+
+    // phone / browser push notifications: 'unsupported' | 'denied' | 'on' | 'off' | 'working'
+    const [pushState, setPushState] = useState("off")
+    useEffect(() => {
+        registerSW()                                   // ready the worker early
+        currentPushState().then(setPushState).catch(() => {})
+    }, [])
+    const togglePush = async () => {
+        if (pushState === "unsupported" || pushState === "denied" || pushState === "working") return
+        const turnOn = pushState !== "on"
+        setPushState("working")
+        try {
+            if (turnOn) { await enablePush(); setPushState("on") }
+            else { await disablePush(); setPushState("off") }
+        } catch (e) {
+            setError(e.message || "Couldn't change notification settings")
+            setPushState(await currentPushState())
+        }
     }
 
     // "See in network graph": entities to light up on the graph tab, and what they came from
@@ -1025,6 +1045,7 @@ function App({ user, onLogout, onUserChange }) {
                                     <span className="liveai-left"><Sparkles /> Live AI review</span>
                                     <span className={`liveai-switch ${liveAiOn ? "on" : ""}`}><span className="liveai-knob" /></span>
                                 </button>
+                                {/* External phone channels (ntfy / Telegram / Webhook) — no app needed */}
                                 <button
                                     className="liveai-toggle"
                                     onMouseDown={(e) => { e.preventDefault(); testPhonePush(); }}
@@ -1036,6 +1057,24 @@ function App({ user, onLogout, onUserChange }) {
                                     </span>
                                     <span style={{ fontSize: 11, opacity: 0.8 }}>{phoneTestMsg || "Test →"}</span>
                                 </button>
+                                {/* Web push to the installed PWA on this device */}
+                                {pushState !== "unsupported" && (
+                                    <button
+                                        className={`liveai-toggle push-toggle ${pushState === "on" ? "on" : ""} ${(pushState === "denied" || pushState === "working") ? "disabled" : ""}`}
+                                        onMouseDown={(e) => { e.preventDefault(); togglePush(); }}
+                                        title={pushState === "denied"
+                                            ? "Notifications are blocked in the browser settings"
+                                            : "Get a notification on this device even when the dashboard is closed"}
+                                    >
+                                        <span className="liveai-left"><Smartphone /> {
+                                            pushState === "on" ? "Phone alerts on"
+                                            : pushState === "working" ? "Working…"
+                                            : pushState === "denied" ? "Phone alerts blocked"
+                                            : "Enable phone alerts"
+                                        }</span>
+                                        <span className={`liveai-switch ${pushState === "on" ? "on" : ""}`}><span className="liveai-knob" /></span>
+                                    </button>
+                                )}
                                 <div className="dropdown-hint">Untriaged alerts needing a look — click one to investigate.</div>
                                 {notifAlerts.length === 0 ? (
                                     <div className="dropdown-empty"><Bell /><p>You're all caught up.</p></div>
