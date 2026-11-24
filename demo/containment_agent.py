@@ -41,9 +41,18 @@ import urllib.error
 import urllib.parse
 
 # ── settings ─────────────────────────────────────────────────────────────────
-ANALYST_IP = "192.168.1.234"   # the SOC machine
-HOST       = "lenovo-10"       # this machine's name -- MATCH the extension /
-                               # beacon host exactly, so isolate targets it.
+ANALYST_IP = os.getenv("ANALYST_IP", "192.168.1.234").strip()   # the SOC machine
+HOST       = os.getenv("HOST", "lenovo-10").strip()             # this machine's name -- MATCH the extension /
+                                                                # beacon host exactly, so isolate targets it.
+C2_IP      = os.getenv("C2_IP", "").strip()                     # optional same-subnet C2 IP to explicitly block
+C2_PORTS   = [
+    int(p.strip()) for p in os.getenv("C2_PORTS", "4444,9000,1337").split(",")
+    if p.strip().isdigit()
+]
+DEFAULT_KILL_PATTERNS = [
+    p.strip() for p in os.getenv("QUARANTINE_PATTERNS", "beacon_sim.py,beacon_agent.py,rmm-watchdog,rmm_watchdog_sim.py").split(",")
+    if p.strip()
+]
 POLL_SECONDS        = 1        # how often to check the SOC for a command
 AUTO_RELEASE_MINUTES = 10      # safety net: auto-restore after this long isolated
 HARD_CUT            = False    # the firewall block alone (reliable) cuts all NEW
@@ -54,10 +63,12 @@ HARD_CUT            = False    # the firewall block alone (reliable) cuts all NE
                                # some machines, so it's off by default.
 
 CORE = f"http://{ANALYST_IP}:8000"
+AGENT_KEY = os.getenv("CONTAINMENT_AGENT_KEY", "").strip()
 # ─────────────────────────────────────────────────────────────────────────────
 
 IS_WIN = platform.system() == "Windows"
-_state = {"isolated": False, "gateways": [], "timer": None}
+IS_LINUX = platform.system() == "Linux"
+_state = {"isolated": False, "gateways": [], "timer": None, "c2_blocks": []}
 
 
 # ── admin check ──────────────────────────────────────────────────────────────
@@ -86,6 +97,14 @@ def current_gateways():
                 if len(p) >= 3 and p[0] == "0.0.0.0" and p[1] == "0.0.0.0":
                     if p[2].lower() != "on-link":
                         gws.append(p[2])
+        elif IS_LINUX:
+            out = _run(["ip", "route", "show", "default"]).stdout
+            for line in out.splitlines():
+                parts = line.split()
+                if "via" in parts:
+                    idx = parts.index("via")
+                    if idx + 1 < len(parts):
+                        gws.append(parts[idx + 1])
         else:
             out = _run(["route", "-n", "get", "default"]).stdout
             for line in out.splitlines():
@@ -146,6 +165,247 @@ def flush_connections():
 FW_RULE = "OmniGuard-Isolate"          # old IPv4 remoteip rule (cleaned up)
 FW_RULE6 = "OmniGuard-Isolate-v6"      # old IPv6 rule (cleaned up)
 FW_ALLOW = "OmniGuard-AllowSOC"        # allow-local rule used with the block policy
+FW_BLOCK_C2 = "OmniGuard-BlockC2"      # explicit block for same-subnet C2 IP/ports
+
+
+def block_c2_target(c2_ip="", c2_ports=None):
+    """Explicitly block a same-subnet C2 server/ports so an active reverse shell
+    drops immediately even when the C2 shares the hotspot /24 with the SOC.
+    Safety: never blocks ANALYST_IP:8000."""
+    target_ip = (c2_ip or C2_IP or "").strip()
+    ports = [int(p) for p in (c2_ports if c2_ports is not None else C2_PORTS) if int(p) != 8000]
+    applied = []
+    if not target_ip and not ports:
+        return applied
+
+    if IS_WIN:
+        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_BLOCK_C2}"])
+        if target_ip and target_ip != ANALYST_IP:
+            _run(["netsh", "advfirewall", "firewall", "add", "rule",
+                  f"name={FW_BLOCK_C2}", "dir=out", "action=block",
+                  f"remoteip={target_ip}", "enable=yes"])
+            applied.append(f"win-block-ip:{target_ip}")
+        elif ports:
+            port_csv = ",".join(str(p) for p in ports)
+            cmd = ["netsh", "advfirewall", "firewall", "add", "rule",
+                   f"name={FW_BLOCK_C2}", "dir=out", "action=block",
+                   "protocol=TCP", f"remoteport={port_csv}", "enable=yes"]
+            if target_ip:
+                cmd.append(f"remoteip={target_ip}")
+            _run(cmd)
+            applied.append(f"win-block-ports:{port_csv}")
+    elif IS_LINUX:
+        import shutil
+        if shutil.which("iptables"):
+            if target_ip and target_ip != ANALYST_IP:
+                r = _run(["iptables", "-I", "OUTPUT", "1", "-d", target_ip, "-j", "DROP"])
+                if r.returncode == 0:
+                    _state["c2_blocks"].append(("iptables", ["-d", target_ip, "-j", "DROP"]))
+                    applied.append(f"iptables-ip:{target_ip}")
+            else:
+                for p in ports:
+                    rule = ["-p", "tcp", "--dport", str(p), "-j", "DROP"]
+                    if target_ip:
+                        rule = ["-d", target_ip] + rule
+                    r = _run(["iptables", "-I", "OUTPUT", "1"] + rule)
+                    if r.returncode == 0:
+                        _state["c2_blocks"].append(("iptables", rule))
+                        applied.append(f"iptables-port:{p}")
+        elif shutil.which("nft"):
+            _run(["nft", "add", "table", "inet", "omniguard_c2"])
+            _run(["nft", "add", "chain", "inet", "omniguard_c2", "output", "{ type filter hook output priority 0 ; }"])
+            if target_ip and target_ip != ANALYST_IP:
+                r = _run(["nft", "add", "rule", "inet", "omniguard_c2", "output", "ip", "daddr", target_ip, "drop"])
+                if r.returncode == 0:
+                    _state["c2_blocks"].append(("nft", ["omniguard_c2"]))
+                    applied.append(f"nft-ip:{target_ip}")
+            elif ports:
+                port_set = ", ".join(str(p) for p in ports)
+                r = _run(["nft", "add", "rule", "inet", "omniguard_c2", "output", "tcp", "dport", "{", port_set, "}", "drop"])
+                if r.returncode == 0:
+                    _state["c2_blocks"].append(("nft", ["omniguard_c2"]))
+                    applied.append(f"nft-ports:{port_set}")
+    return applied
+
+
+def unblock_c2_target():
+    if IS_WIN:
+        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_BLOCK_C2}"])
+    elif IS_LINUX:
+        for kind, rule in list(_state.get("c2_blocks") or []):
+            if kind == "nft":
+                _run(["nft", "delete", "table", "inet", rule[0]])
+            else:
+                _run(["iptables", "-D", "OUTPUT"] + rule)
+        _state["c2_blocks"] = []
+
+
+def kill_suspicious_processes(kill_pids=None, kill_patterns=None):
+    """Terminate demo reverse-shell / C2 beacon processes during quarantine.
+    Never kills this containment agent itself or PID 1."""
+    my_pid = os.getpid()
+    patterns = [p.lower() for p in (kill_patterns or DEFAULT_KILL_PATTERNS) if p]
+    target_pids = {int(p) for p in (kill_pids or []) if str(p).isdigit() and int(p) not in (1, my_pid)}
+
+    # Discover processes matching patterns
+    if patterns:
+        for proc in _collect_processes():
+            pid = proc.get("pid")
+            if not pid or pid in (1, my_pid):
+                continue
+            cmd = f"{proc.get('name', '')} {proc.get('cmdline', '')}".lower()
+            if "containment_agent" in cmd:
+                continue
+            if any(pat in cmd for pat in patterns):
+                target_pids.add(int(pid))
+
+    killed = []
+    for pid in sorted(target_pids):
+        try:
+            if IS_WIN:
+                r = _run(["taskkill", "/F", "/PID", str(pid)])
+                if r.returncode == 0:
+                    killed.append(pid)
+            else:
+                os.kill(pid, signal.SIGKILL)
+                killed.append(pid)
+        except Exception:
+            continue
+    return killed
+
+
+def _collect_processes():
+    procs = []
+    try:
+        if IS_WIN:
+            ps = ("Get-CimInstance Win32_Process | Select-Object -First 80 ProcessId,Name,CommandLine | "
+                  "ConvertTo-Json -Compress")
+            out = _run(["powershell", "-NoProfile", "-Command", ps]).stdout.strip()
+            if out:
+                raw = json.loads(out)
+                if isinstance(raw, dict):
+                    raw = [raw]
+                for item in raw:
+                    procs.append({
+                        "pid": item.get("ProcessId"),
+                        "name": item.get("Name") or "",
+                        "cmdline": (item.get("CommandLine") or "")[:240],
+                        "user": "",
+                    })
+        else:
+            out = _run(["ps", "-eo", "pid=,user=,comm=,args="]).stdout
+            for line in out.splitlines()[:100]:
+                parts = line.strip().split(None, 3)
+                if len(parts) >= 3 and parts[0].isdigit():
+                    procs.append({
+                        "pid": int(parts[0]),
+                        "user": parts[1],
+                        "name": parts[2],
+                        "cmdline": (parts[3] if len(parts) > 3 else parts[2])[:240],
+                    })
+    except Exception:
+        pass
+    return procs
+
+
+def _collect_connections():
+    conns = []
+    try:
+        if IS_WIN:
+            out = _run(["netstat", "-ano"]).stdout
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and parts[0].upper() in ("TCP", "UDP"):
+                    local, remote = parts[1], parts[2]
+                    state = parts[3] if parts[0].upper() == "TCP" else "STATELESS"
+                    pid = parts[4] if parts[0].upper() == "TCP" else parts[3]
+                    rip, _, rport = remote.rpartition(":")
+                    conns.append({
+                        "proto": parts[0].lower(),
+                        "local": local,
+                        "remote_ip": rip.strip("[]"),
+                        "remote_port": int(rport) if rport.isdigit() else None,
+                        "state": state,
+                        "pid": int(pid) if pid.isdigit() else None,
+                        "process": "",
+                    })
+        elif IS_LINUX:
+            out = _run(["ss", "-tupn"]).stdout
+            for line in out.splitlines()[1:]:
+                parts = line.split()
+                if len(parts) >= 6:
+                    proto, state, local, remote = parts[0], parts[1], parts[4], parts[5]
+                    proc_info = " ".join(parts[6:]) if len(parts) > 6 else ""
+                    rip, _, rport = remote.rpartition(":")
+                    conns.append({
+                        "proto": proto,
+                        "local": local,
+                        "remote_ip": rip.strip("[]"),
+                        "remote_port": int(rport) if rport.isdigit() else None,
+                        "state": state,
+                        "process": proc_info[:120],
+                    })
+        else:
+            out = _run(["lsof", "-i", "-n", "-P"]).stdout
+            for line in out.splitlines()[1:80]:
+                parts = line.split()
+                if len(parts) >= 9:
+                    conns.append({
+                        "proto": parts[7].lower(),
+                        "local": parts[8],
+                        "remote_ip": "",
+                        "remote_port": None,
+                        "state": parts[9] if len(parts) > 9 else "",
+                        "process": f"{parts[0]}({parts[1]})",
+                    })
+    except Exception:
+        pass
+    return conns[:80]
+
+
+def _collect_hosts_entries():
+    path = r"C:\Windows\System32\drivers\etc\hosts" if IS_WIN else "/etc/hosts"
+    entries = []
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                s = line.strip()
+                if s and not s.startswith("#"):
+                    entries.append(s[:160])
+    except Exception:
+        pass
+    return entries[:40]
+
+
+def collect_dfir_snapshot():
+    """Gather a point-in-time forensic snapshot (processes, sockets, hosts)."""
+    return {
+        "host": HOST,
+        "hostname": platform.node(),
+        "os": f"{platform.system()} {platform.release()}",
+        "is_admin": is_admin(),
+        "gateways": current_gateways(),
+        "processes": _collect_processes(),
+        "connections": _collect_connections(),
+        "hosts_entries": _collect_hosts_entries(),
+    }
+
+
+def report_dfir():
+    snap = collect_dfir_snapshot()
+    data = json.dumps(snap).encode()
+    req = urllib.request.Request(
+        f"{CORE}/agent/dfir/report",
+        data=data,
+        headers=_agent_headers({"Content-Type": "application/json"}),
+        method="POST",
+    )
+    try:
+        with _direct.open(req, timeout=8) as r:
+            r.read(1)
+        print(f"  >> DFIR snapshot uploaded ({len(snap['processes'])} procs, {len(snap['connections'])} sockets)")
+    except Exception as e:
+        print(f"  ! could not upload DFIR snapshot: {e}")
 
 
 def _soc_block_ranges():
@@ -186,15 +446,17 @@ def print_diagnostics(tag=""):
     print(f"  --- end diagnostics ---")
 
 
-def cut_network():
+def cut_network(quarantine=None):
     """Cut the host off the internet, keeping the SOC subnet reachable so the
-    analyst can still release it. VERIFIES the cut actually worked.
-
-    Windows: a firewall rule (reliable; route delete gets auto-undone by Windows).
-    Mac/Linux: remove the default route."""
+    analyst can still release it. Also kills reverse-shell/beacon processes and
+    explicitly blocks same-subnet C2 targets when configured."""
     if not is_admin():
         return False, ("not running as admin -- this needs elevation. "
                        "Windows: reopen PowerShell as Administrator. Mac/Linux: use sudo.")
+
+    q = quarantine or {}
+    killed_pids = kill_suspicious_processes(q.get("kill_pids"), q.get("kill_patterns"))
+    c2_rules = block_c2_target(q.get("c2_ip"), q.get("c2_ports"))
 
     errs = []
     if IS_WIN:
@@ -223,7 +485,7 @@ def cut_network():
     else:
         gws = current_gateways()
         _state["gateways"] = gws
-        r = _run(["route", "delete", "default"])
+        r = _run(["ip", "route", "del", "default"] if IS_LINUX else ["route", "delete", "default"])
         if r.returncode != 0 and (r.stderr or r.stdout).strip():
             errs.append((r.stderr or r.stdout).strip())
 
@@ -246,11 +508,17 @@ def cut_network():
             detail += f"; command said: {' | '.join(errs)}"
         restore_network()  # don't leave a half-applied state
         return False, detail
-    return True, "internet cut; SOC subnet still reachable"
+    notes = ["internet cut; SOC subnet still reachable"]
+    if c2_rules:
+        notes.append(f"C2 blocked ({', '.join(c2_rules)})")
+    if killed_pids:
+        notes.append(f"killed suspicious PIDs {killed_pids}")
+    return True, "; ".join(notes)
 
 
 def restore_network():
     """Undo the cut -> internet back. Verifies connectivity returned."""
+    unblock_c2_target()
     if IS_WIN:
         # restore the normal default (outbound allowed) and remove our rules
         _run(["netsh", "advfirewall", "set", "allprofiles",
@@ -259,7 +527,7 @@ def restore_network():
             _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rn}"])
     else:
         for gw in (_state.get("gateways") or current_gateways()):
-            _run(["route", "add", "default", gw])
+            _run(["ip", "route", "add", "default", "via", gw] if IS_LINUX else ["route", "add", "default", gw])
     time.sleep(1.0)
     back = has_internet()
     return back, ("internet restored" if back else "block removed -- internet not confirmed back yet")
@@ -272,9 +540,17 @@ def restore_network():
 _direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
+def _agent_headers(extra=None):
+    hdrs = dict(extra or {})
+    if AGENT_KEY:
+        hdrs["X-Agent-Key"] = AGENT_KEY
+    return hdrs
+
+
 def poll():
     url = f"{CORE}/agent/containment/poll?host={urllib.parse.quote(HOST)}"
-    with _direct.open(url, timeout=5) as r:
+    req = urllib.request.Request(url, headers=_agent_headers())
+    with _direct.open(req, timeout=5) as r:
         return json.loads(r.read().decode())
 
 
@@ -282,7 +558,7 @@ def ack(action, ok, message=None):
     data = json.dumps({"host": HOST, "action": action, "ok": ok,
                        "message": message}).encode()
     req = urllib.request.Request(f"{CORE}/agent/containment/ack", data=data,
-                                 headers={"Content-Type": "application/json"},
+                                 headers=_agent_headers({"Content-Type": "application/json"}),
                                  method="POST")
     try:
         with _direct.open(req, timeout=5) as r:
@@ -299,16 +575,28 @@ def _cancel_timer():
         _state["timer"] = None
 
 
-def do_isolate():
+def _write_ot_state(state_name):
+    """Signal local Raspberry Pi OT controller (no-op on other machines)."""
+    if not IS_LINUX:
+        return
+    try:
+        with open("/tmp/omniguard_ot_state.json", "w", encoding="utf-8") as f:
+            json.dump({"state": state_name, "ts": time.time()}, f)
+    except Exception:
+        pass
+
+
+def do_isolate(quarantine=None):
     if _state["isolated"]:
         # already in the target state — confirm it so the SOC stops re-sending
         print("  (already isolated — confirming to SOC)")
         ack("isolate", True, "already isolated")
         return
     print("\n  >> ISOLATE requested by the SOC")
-    ok, msg = cut_network()
+    ok, msg = cut_network(quarantine=quarantine)
     if ok:
         _state["isolated"] = True
+        _write_ot_state("isolated")
         print(f"  >> ISOLATED  ({msg})")
         print(f"     internet is cut. SOC still reachable. auto-release in "
               f"{AUTO_RELEASE_MINUTES} min if not released sooner.")
@@ -334,6 +622,7 @@ def do_release(reason="analyst"):
     _cancel_timer()
     ok, msg = restore_network()
     _state["isolated"] = False
+    _write_ot_state("normal")
     print(f"  << {'RESTORED' if ok else 'RESTORE HAD ISSUES'}  ({msg})")
     ack("release", ok, f"{reason}: {msg}")
     print_diagnostics("after release")
@@ -381,11 +670,15 @@ def main():
 
     while True:
         try:
-            cmd = poll().get("action")
+            resp = poll()
+            if resp.get("dfir_requested"):
+                print("  (SOC requested live DFIR snapshot)")
+                report_dfir()
+            cmd = resp.get("action")
             if cmd:
                 print(f"  (SOC command received: {cmd})")
             if cmd == "isolate":
-                do_isolate()
+                do_isolate(quarantine=resp.get("quarantine"))
             elif cmd == "release":
                 do_release("analyst")
         except urllib.error.URLError as e:

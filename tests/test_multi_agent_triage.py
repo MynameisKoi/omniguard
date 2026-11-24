@@ -120,6 +120,12 @@ def test_api_pipeline_endpoint():
         from main import app
         from fastapi.testclient import TestClient
 
+        app.dependency_overrides[backend_main.current_user] = lambda: {
+            "email": "analyst@omniguard.io",
+            "name": "SOC Analyst",
+            "role": "analyst",
+        }
+
         client = TestClient(app)
         # endpoints need a signed-in analyst (session tokens): sign the test client in
         app.dependency_overrides[backend_main.current_user] = lambda: {"email": "test@omniguard.io", "name": "Test"}
@@ -139,3 +145,4 @@ def test_api_pipeline_endpoint():
             assert data["host"] == "TARGET-PC"
             assert "triage" in data
             assert "containment" in data
+

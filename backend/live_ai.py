@@ -86,11 +86,18 @@ async def _review_one(alert_id: str, host: str | None) -> None:
         return
 
     proposal = (alert or {}).get("triage_proposal")
+    needs_attention = _needs_attention(proposal)
     await manager.broadcast({
         "type": "ai_proposed",
         "alert": _serialize(alert),
-        "needs_attention": _needs_attention(proposal),
+        "needs_attention": needs_attention,
     })
+    if needs_attention and alert:
+        try:
+            from notifications import dispatch_alert_notification
+            await run_in_threadpool(dispatch_alert_notification, _serialize(alert), proposal)
+        except Exception as e:
+            print(f"live-ai: phone notification error for {alert_id}: {e}")
 
 
 async def _worker() -> None:

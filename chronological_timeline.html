@@ -452,27 +452,27 @@
       z-index: 1;
     }
 
-    /* Active Progress Rail Fill up to Phase 2 (Week 5) */
+    /* Active Progress Rail Fill up to Phase 3 (Week 7) */
     .rail-line-progress {
       position: absolute;
       top: 50%;
       left: calc(10% + 20px);
-      width: calc(25% + 15px); /* reaches past node 2 toward node 3 */
+      width: calc(40% - 20px); /* reaches through node 2 directly to node 3 */
       height: 3px;
-      background: linear-gradient(90deg, #10b981, var(--cyan) 75%, var(--amber));
+      background: linear-gradient(90deg, #10b981 0%, #10b981 45%, var(--cyan) 75%, var(--amber) 100%);
       transform: translateY(-50%);
       z-index: 2;
-      box-shadow: 0 0 10px var(--cyan);
+      box-shadow: 0 0 12px var(--amber);
     }
 
-    /* Dashed Bridge from Week 5 to Week 7 */
+    /* Dashed Bridge from Week 7 to Phase 4 (Week 10) */
     .rail-line-bridge {
       position: absolute;
       top: 50%;
-      left: calc(35% + 25px);
-      width: calc(20%);
+      left: calc(50% + 20px);
+      width: calc(20% - 20px);
       height: 3px;
-      background: repeating-linear-gradient(90deg, var(--amber), var(--amber) 6px, transparent 6px, transparent 12px);
+      background: repeating-linear-gradient(90deg, var(--cyan), var(--cyan) 6px, transparent 6px, transparent 12px);
       transform: translateY(-50%);
       z-index: 2;
     }
@@ -513,29 +513,29 @@
       box-shadow: 0 0 16px var(--green-glow);
     }
 
-    /* Node 2: Current (Checkpoint 1 - Week 5) */
+    /* Node 2: Completed (Checkpoint 1 - Week 5) */
     .node-anchor:nth-child(2) .timeline-node {
-      background: var(--cyan);
+      background: #10b981;
+      color: #041410;
+      box-shadow: 0 0 16px var(--green-glow);
+      border: 2px solid #10b981;
+    }
+
+    /* Node 3: Current Active (Checkpoint 2 - Week 7) */
+    .node-anchor:nth-child(3) .timeline-node {
+      background: linear-gradient(135deg, var(--cyan), var(--amber));
       color: #051429;
-      box-shadow: 0 0 22px var(--cyan-glow);
+      box-shadow: 0 0 24px var(--amber-glow);
       border: 3px solid #ffffff;
     }
-    .node-anchor:nth-child(2)::before {
+    .node-anchor:nth-child(3)::before {
       content: '';
       position: absolute;
       width: 60px;
       height: 60px;
       border-radius: 50%;
-      border: 2px solid var(--cyan);
+      border: 2px solid var(--amber);
       animation: pulseWave 2s infinite ease-out;
-    }
-
-    /* Node 3: Target (Checkpoint 2 - Week 7) */
-    .node-anchor:nth-child(3) .timeline-node {
-      background: linear-gradient(135deg, var(--cyan), var(--amber));
-      color: #051429;
-      border: 2px dashed var(--amber);
-      box-shadow: 0 0 18px var(--amber-glow);
     }
 
     /* Nodes 4 & 5: Planned */
@@ -584,20 +584,18 @@
       border-top: 3px solid #10b981;
     }
 
-    /* Phase 2: Active Checkpoint 1 styling */
+    /* Phase 2: Completed Checkpoint 1 styling */
     .phase-card.phase-2 {
-      border: 1.5px solid var(--border-active);
-      border-top: 4px solid var(--cyan);
-      background: linear-gradient(180deg, rgba(0, 229, 255, 0.08), rgba(10, 27, 51, 0.95) 40%);
-      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(0, 229, 255, 0.15);
+      border: 1px solid var(--border-card);
+      border-top: 3px solid #10b981;
     }
 
-    /* Phase 3: Target Checkpoint 2 styling */
+    /* Phase 3: Active Checkpoint 2 styling */
     .phase-card.phase-3 {
       border: 1.5px solid var(--border-target);
       border-top: 4px solid var(--amber);
-      background: linear-gradient(180deg, rgba(245, 158, 11, 0.08), rgba(10, 27, 51, 0.95) 40%);
-      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), 0 0 20px rgba(245, 158, 11, 0.12);
+      background: linear-gradient(180deg, rgba(245, 158, 11, 0.12), rgba(10, 27, 51, 0.98) 40%);
+      box-shadow: 0 10px 36px rgba(0, 0, 0, 0.6), 0 0 28px rgba(245, 158, 11, 0.22);
     }
 
     .card-top {
@@ -740,50 +738,48 @@
       color: #10b981;
     }
 
-    /* Week 5: Current Checkpoint 1 */
-    .week-cell.current-cp1 {
-      background: rgba(0, 229, 255, 0.18);
-      border: 2px solid var(--cyan);
-      box-shadow: 0 0 16px var(--cyan-glow);
-      transform: scale(1.04);
+    /* Week 5: Checkpoint 1 Completed */
+    .week-cell.completed-cp1 {
+      background: rgba(16, 185, 129, 0.14);
+      border: 1.5px solid #10b981;
     }
-    .week-cell.current-cp1 .w-num {
-      color: #ffffff;
+    .week-cell.completed-cp1 .w-num {
+      color: #10b981;
       font-weight: 800;
     }
-    .week-cell.current-cp1::after {
-      content: 'CP1';
+    .week-cell.completed-cp1::after {
+      content: 'CP1 ✓';
       position: absolute;
       bottom: -18px;
       left: 50%;
       transform: translateX(-50%);
-      font-size: 9px;
+      font-size: 8px;
       font-weight: 800;
-      color: var(--cyan);
+      color: #10b981;
       background: #071526;
-      border: 1px solid var(--cyan);
+      border: 1px solid #10b981;
       border-radius: 4px;
       padding: 1px 4px;
     }
 
-    /* Week 7: Checkpoint 2 Target */
-    .week-cell.target-cp2 {
-      background: rgba(245, 158, 11, 0.18);
-      border: 2px dashed var(--amber);
-      box-shadow: 0 0 16px var(--amber-glow);
-      transform: scale(1.04);
+    /* Week 7: Current Checkpoint 2 (ACTIVE) */
+    .week-cell.current-cp2 {
+      background: rgba(245, 158, 11, 0.22);
+      border: 2px solid var(--amber);
+      box-shadow: 0 0 20px var(--amber-glow);
+      transform: scale(1.06);
     }
-    .week-cell.target-cp2 .w-num {
-      color: var(--amber);
+    .week-cell.current-cp2 .w-num {
+      color: #ffffff;
       font-weight: 800;
     }
-    .week-cell.target-cp2::after {
-      content: 'CP2';
+    .week-cell.current-cp2::after {
+      content: 'CP2 📍';
       position: absolute;
       bottom: -18px;
       left: 50%;
       transform: translateX(-50%);
-      font-size: 9px;
+      font-size: 8px;
       font-weight: 800;
       color: var(--amber);
       background: #071526;
@@ -1010,30 +1006,30 @@
       </div>
     </nav>
 
-    <!-- Checkpoint 1 (Week 5) ➔ Checkpoint 2 (Week 7) Status Banner -->
+    <!-- Checkpoint 2 (Week 7) Active Status Banner -->
     <div class="checkpoint-status-banner">
       <div class="banner-left">
         <div class="radar-pulse-ring">
-          <div class="wave"></div>
-          <div class="dot"></div>
+          <div class="wave" style="border-color: var(--amber);"></div>
+          <div class="dot" style="background: var(--amber);"></div>
         </div>
         <div class="banner-text">
           <h3>
-            Current Position: Checkpoint 1 (Week 5) Completed
-            <span style="color: var(--amber); font-weight: 500;">➔ Next Milestone: Checkpoint 2 (Week 7)</span>
+            Current Position: Checkpoint 2 (Week 7) Milestone Active
+            <span style="color: var(--amber); font-weight: 500;">➔ Next Plan: 4-Pillar Integration Sprint</span>
           </h3>
-          <p>Phase 2 core threat detection models active. Bridging to Phase 3 attack correlation & blast radius triage.</p>
+          <p>Active Focus: (1) Local Ollama on AI machine, (2) VerifyEye &amp; SpectraC2 total integration, (3) Isolate host &amp; Mark triaged actions, (4) Kafka + Zeek integration on real network capture data.</p>
         </div>
       </div>
       <div class="banner-badges">
-        <div class="status-pill current">
-          <span>📍</span> YOU ARE HERE: Week 5
+        <div class="status-pill current" style="background: rgba(245, 158, 11, 0.2); border-color: var(--amber); color: #fbbf24;">
+          <span>📍</span> YOU ARE HERE: Week 7 (CP 2)
         </div>
         <div class="status-pill target">
-          <span>🎯</span> TARGET: Week 7 (CP 2)
+          <span>🎯</span> TARGET: Phase 4 (Week 10)
         </div>
-        <div class="status-pill delta">
-          <span>⏳</span> Delta: 2 Weeks
+        <div class="status-pill delta" style="background: rgba(16, 185, 129, 0.15); border-color: #10b981; color: #10b981;">
+          <span>⚡</span> Next Plan Active
         </div>
       </div>
     </div>
@@ -1067,21 +1063,21 @@
           <div class="track-header-col">
             <span class="phase-label">PHASE 2</span>
             <span class="phase-weeks">Weeks 4–6</span>
-            <span class="checkpoint-tag cp1">📍 CP 1 (Week 5)</span>
+            <span class="checkpoint-tag" style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #10b981;">✓ Done (CP 1)</span>
           </div>
 
           <!-- Phase 3 Header (Checkpoint 2 Location) -->
           <div class="track-header-col">
             <span class="phase-label">PHASE 3</span>
             <span class="phase-weeks">Weeks 7–9</span>
-            <span class="checkpoint-tag cp2">🎯 CP 2 (Week 7)</span>
+            <span class="checkpoint-tag cp2" style="background: rgba(245, 158, 11, 0.25); border: 1px solid var(--amber); color: var(--amber);">📍 ACTIVE: CP 2 (Week 7)</span>
           </div>
 
           <!-- Phase 4 Header -->
           <div class="track-header-col">
             <span class="phase-label">PHASE 4</span>
             <span class="phase-weeks">Weeks 10–12</span>
-            <span class="phase-weeks" style="font-size: 10px; margin-top: 6px;">Planned</span>
+            <span class="phase-weeks" style="font-size: 10px; margin-top: 6px; color: var(--cyan);">🎯 Next Target</span>
           </div>
 
           <!-- Phase 5 Header -->
@@ -1101,17 +1097,17 @@
 
           <!-- Node 1 -->
           <div class="node-anchor">
-            <div class="timeline-node" title="Phase 1 (Weeks 1-3) Completed">1</div>
+            <div class="timeline-node" title="Phase 1 (Weeks 1-3) Completed">✓</div>
           </div>
 
           <!-- Node 2 (Checkpoint 1) -->
           <div class="node-anchor">
-            <div class="timeline-node" title="Phase 2 (Weeks 4-6) - Current Checkpoint 1 at Week 5">2</div>
+            <div class="timeline-node" title="Phase 2 (Weeks 4-6) - Checkpoint 1 Completed">✓</div>
           </div>
 
           <!-- Node 3 (Checkpoint 2) -->
           <div class="node-anchor">
-            <div class="timeline-node" title="Phase 3 (Weeks 7-9) - Target Checkpoint 2 at Week 7">3</div>
+            <div class="timeline-node" title="Phase 3 (Weeks 7-9) - Current Checkpoint 2 at Week 7">3</div>
           </div>
 
           <!-- Node 4 -->
@@ -1145,33 +1141,36 @@
           </div>
         </div>
 
-        <!-- CARD 2: CURRENT (CHECKPOINT 1) -->
+        <!-- CARD 2: COMPLETED (CHECKPOINT 1) -->
         <div class="phase-card phase-2">
           <div class="card-top">
-            <div class="card-milestone-flag cp1">📍 Active: Checkpoint 1 (W5)</div>
+            <div class="card-milestone-flag done">✓ Completed (W4–W6) • CP 1 Passed</div>
             <h3 class="card-title">Detection & AI Development</h3>
             <p class="card-body-text">
               Develop the phishing/visual detection system, DOM analyzer, C2 analytics, and initial attack-graph structure
             </p>
           </div>
           <div class="card-expected-box">
-            <strong>Expected Result:</strong>
+            <strong>Result Achieved:</strong>
             Initial threat-detection components (VerifyEye baseline, SpectraC2 FFT spectral features, Kafka streaming)
           </div>
         </div>
 
-        <!-- CARD 3: TARGET (CHECKPOINT 2) -->
+        <!-- CARD 3: CURRENT ACTIVE (CHECKPOINT 2) -->
         <div class="phase-card phase-3">
           <div class="card-top">
-            <div class="card-milestone-flag cp2">🎯 Next Target: Checkpoint 2 (W7)</div>
+            <div class="card-milestone-flag cp2">📍 Active: Checkpoint 2 (W7) • Next Plan</div>
             <h3 class="card-title">Attack Correlation & AI Triage</h3>
             <p class="card-body-text">
-              Connect security events into an attack graph and develop the local AI triage system
+              Execute 4-pillar integration sprint: Setup local Ollama on AI machine, complete VerifyEye &amp; SpectraC2 total integration, implement Isolate Host &amp; Mark Triaged response, and stream real Zeek telemetry via Kafka.
             </p>
           </div>
           <div class="card-expected-box">
-            <strong>Expected Result:</strong>
-            Ability to connect events and summarize incidents (Neo4j multi-entity traversal, Dijkstra blast radius, local Ollama triage)
+            <strong>Next Plan Focus:</strong>
+            • Local Ollama on AI machine (zero-cloud-egress)<br>
+            • VerifyEye + SpectraC2 total pipeline sync<br>
+            • Isolate Host &amp; Mark Triaged interactive response<br>
+            • Kafka &amp; Zeek live ingestion on real capture data
           </div>
         </div>
 
@@ -1218,49 +1217,49 @@
           <span>⏱️</span> 14-Week Capstone Trajectory
         </div>
         <div style="font-size: 12px; color: var(--text-muted);">
-          Showing current position at <strong style="color: var(--cyan);">Week 5</strong> transitioning into <strong style="color: var(--amber);">Week 7</strong>
+          Showing current position at <strong style="color: var(--amber);">Week 7 (Checkpoint 2)</strong> in <strong style="color: var(--cyan);">Phase 3: Attack Correlation &amp; AI Triage</strong>
         </div>
       </div>
 
       <div class="week-cells-row">
         <!-- Week 1 -->
         <div class="week-cell completed" title="Week 1: Environment & Architecture setup">
-          <div class="w-num">W1</div>
+          <div class="w-num">W1 ✓</div>
           <div class="w-phase">Phase 1</div>
         </div>
         <!-- Week 2 -->
         <div class="week-cell completed" title="Week 2: Kafka, Redis, & Zeek baseline">
-          <div class="w-num">W2</div>
+          <div class="w-num">W2 ✓</div>
           <div class="w-phase">Phase 1</div>
         </div>
         <!-- Week 3 -->
         <div class="week-cell completed" title="Week 3: Threat harness & Flipper USB tests">
-          <div class="w-num">W3</div>
+          <div class="w-num">W3 ✓</div>
           <div class="w-phase">Phase 1</div>
         </div>
         <!-- Week 4 -->
         <div class="week-cell completed" title="Week 4: Model prototyping & Flow parser">
-          <div class="w-num">W4</div>
+          <div class="w-num">W4 ✓</div>
           <div class="w-phase">Phase 2</div>
         </div>
-        <!-- Week 5: CURRENT -->
-        <div class="week-cell current-cp1" title="Week 5: CHECKPOINT 1 COMPLETED">
-          <div class="w-num">W5 📍</div>
-          <div class="w-phase" style="color: var(--cyan); font-weight: 700;">Phase 2</div>
+        <!-- Week 5: CHECKPOINT 1 COMPLETED -->
+        <div class="week-cell completed completed-cp1" title="Week 5: CHECKPOINT 1 COMPLETED">
+          <div class="w-num">W5 ✓</div>
+          <div class="w-phase" style="color: #10b981; font-weight: 700;">CP 1 Done</div>
         </div>
-        <!-- Week 6 -->
-        <div class="week-cell" style="border-color: rgba(245, 158, 11, 0.4);" title="Week 6: Model fine-tuning & Graph Schemas">
-          <div class="w-num" style="color: var(--amber);">W6 ➔</div>
+        <!-- Week 6: COMPLETED -->
+        <div class="week-cell completed" title="Week 6: Model fine-tuning & Graph Schemas">
+          <div class="w-num">W6 ✓</div>
           <div class="w-phase">Phase 2</div>
         </div>
-        <!-- Week 7: TARGET CP2 -->
-        <div class="week-cell target-cp2" title="Week 7: CHECKPOINT 2 TARGET">
-          <div class="w-num">W7 🎯</div>
-          <div class="w-phase" style="color: var(--amber); font-weight: 700;">Phase 3</div>
+        <!-- Week 7: CURRENT ACTIVE CP2 -->
+        <div class="week-cell current-cp2" title="Week 7: CHECKPOINT 2 ACTIVE">
+          <div class="w-num">W7 📍</div>
+          <div class="w-phase" style="color: var(--amber); font-weight: 800;">Phase 3 (Active)</div>
         </div>
         <!-- Week 8 -->
-        <div class="week-cell" title="Week 8: NetworkX algorithms & Local Ollama">
-          <div class="w-num">W8</div>
+        <div class="week-cell" style="border-color: rgba(0, 229, 255, 0.3);" title="Week 8: NetworkX algorithms & Local Ollama">
+          <div class="w-num" style="color: var(--cyan);">W8 ➔</div>
           <div class="w-phase">Phase 3</div>
         </div>
         <!-- Week 9 -->
@@ -1304,14 +1303,14 @@
       <div class="bridge-header">
         <div class="bridge-header-left">
           <h2>
-            <span>Week 5 (Checkpoint 1)</span> 
+            <span>Checkpoint 2 (Week 7) Active Status</span> 
             <span class="bridge-arrow-icon">➔</span> 
-            <span style="color: var(--amber);">Week 7 (Checkpoint 2) Transition Roadmap</span>
+            <span style="color: var(--amber);">Next Plan Implementation Roadmap</span>
           </h2>
-          <p>Detailed deliverables and team ownership required to advance from initial threat models to live graph correlation & triage.</p>
+          <p>Active execution across 4 core engineering pillars: Local Ollama on AI machine, VerifyEye + SpectraC2 total integration, Host isolation &amp; triage response, and live Zeek-Kafka ingestion on real network capture data.</p>
         </div>
         <div style="font-size: 12px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace;">
-          TEAM OMNIGUARD: KHOI • RAHIM • AAYUSH • ABU
+          TEAM OMNIGUARD: KHOI • RAHIM • ABU • AAYUSH
         </div>
       </div>
 
@@ -1340,12 +1339,12 @@
               </div>
 
               <div class="cp-state-card next">
-                <div class="cp-state-tag">🎯 Checkpoint 2 (W7) — Deliverables</div>
+                <div class="cp-state-tag" style="background: rgba(245, 158, 11, 0.2); border-color: var(--amber); color: var(--amber);">⚡ Next Plan — Real-Data Kafka &amp; Zeek</div>
                 <ul class="cp-checklist" id="tasksKhoi">
-                  <li><input type="checkbox" id="k_task1" onchange="saveTaskState()"> Wire stream_consumer.py → FastAPI live predictor</li>
-                  <li><input type="checkbox" id="k_task2" onchange="saveTaskState()"> Deploy inference on LinuxONE (Dockerfile.s390x)</li>
-                  <li><input type="checkbox" id="k_task3" onchange="saveTaskState()"> Benchmark LSTM / Isolation Forest vs jitter flows (&gt;95%)</li>
-                  <li><input type="checkbox" id="k_task4" onchange="saveTaskState()"> Feed verified C2 detections to Neo4j via Kafka</li>
+                  <li><input type="checkbox" id="k_task1" checked onchange="saveTaskState()"> Ingest live Zeek conn.log &amp; ssl.log into Kafka on real data</li>
+                  <li><input type="checkbox" id="k_task2" checked onchange="saveTaskState()"> Wire decoupled stream_consumer.py → inference engine</li>
+                  <li><input type="checkbox" id="k_task3" onchange="saveTaskState()"> Benchmark spectral beacon detection against enterprise noise</li>
+                  <li><input type="checkbox" id="k_task4" onchange="saveTaskState()"> Feed verified real-flow C2 alerts to Neo4j &amp; MongoDB</li>
                 </ul>
               </div>
             </div>
@@ -1359,7 +1358,7 @@
               <div class="member-avatar avatar-rahim">R</div>
               <div class="member-title">
                 <h4>Rahim</h4>
-                <span>VerifyEye Ingress &amp; Adversary Emulation</span>
+                <span>VerifyEye Ingress &amp; Multi-Engine Integration</span>
               </div>
             </div>
 
@@ -1375,12 +1374,12 @@
               </div>
 
               <div class="cp-state-card next">
-                <div class="cp-state-tag">🎯 Checkpoint 2 (W7) — Deliverables</div>
+                <div class="cp-state-tag" style="background: rgba(245, 158, 11, 0.2); border-color: var(--amber); color: var(--amber);">⚡ Next Plan — Total Engine Integration</div>
                 <ul class="cp-checklist" id="tasksRahim">
-                  <li><input type="checkbox" id="r_task1" onchange="saveTaskState()"> Add cross-origin form-action validation</li>
-                  <li><input type="checkbox" id="r_task2" onchange="saveTaskState()"> Train &amp; quantize YOLOv8, export to ONNX runtime</li>
-                  <li><input type="checkbox" id="r_task3" onchange="saveTaskState()"> Favicon pHash visual comparison &amp; layout matcher</li>
-                  <li><input type="checkbox" id="r_task4" onchange="saveTaskState()"> Chrome MV3 extension real-time form locking</li>
+                  <li><input type="checkbox" id="r_task1" onchange="saveTaskState()"> Total integration: VerifyEye &amp; SpectraC2 unified in backend</li>
+                  <li><input type="checkbox" id="r_task2" onchange="saveTaskState()"> Correlate phishing credential harvest with C2 beaconing</li>
+                  <li><input type="checkbox" id="r_task3" onchange="saveTaskState()"> Dual-engine crawler fallback on live threat domains</li>
+                  <li><input type="checkbox" id="r_task4" onchange="saveTaskState()"> End-to-end multi-modal alert contract v2.1 validation</li>
                 </ul>
               </div>
             </div>
@@ -1394,7 +1393,7 @@
               <div class="member-avatar avatar-abu">Ab</div>
               <div class="member-title">
                 <h4>Abu</h4>
-                <span>Graph Correlation &amp; Air-Gapped LLM</span>
+                <span>Local AI Machine &amp; Graph Correlation</span>
               </div>
             </div>
 
@@ -1410,11 +1409,11 @@
               </div>
 
               <div class="cp-state-card next">
-                <div class="cp-state-tag">🎯 Checkpoint 2 (W7) — Deliverables</div>
+                <div class="cp-state-tag" style="background: rgba(245, 158, 11, 0.2); border-color: var(--amber); color: var(--amber);">⚡ Next Plan — Local Ollama Setup</div>
                 <ul class="cp-checklist" id="tasksAbu">
-                  <li><input type="checkbox" id="ab_task1" onchange="saveTaskState()"> Deploy local Ollama (Llama-3-Cyber) triage engine</li>
-                  <li><input type="checkbox" id="ab_task2" onchange="saveTaskState()"> Author structured JSON prompts with MITRE ATT&amp;CK tags</li>
-                  <li><input type="checkbox" id="ab_task3" onchange="saveTaskState()"> Centrality &amp; lateral path discovery in NetworkX</li>
+                  <li><input type="checkbox" id="ab_task1" onchange="saveTaskState()"> Setup Ollama runtime on the local AI machine</li>
+                  <li><input type="checkbox" id="ab_task2" onchange="saveTaskState()"> Pull and calibrate Llama-3-Cyber / DeepSeek air-gapped models</li>
+                  <li><input type="checkbox" id="ab_task3" onchange="saveTaskState()"> Engineer structured Pydantic JSON triage prompts</li>
                   <li><input type="checkbox" id="ab_task4" onchange="saveTaskState()"> Automated incident summary &amp; remediation drafting</li>
                 </ul>
               </div>
@@ -1429,7 +1428,7 @@
               <div class="member-avatar avatar-aayush">Aa</div>
               <div class="member-title">
                 <h4>Aayush</h4>
-                <span>Unified Dashboard &amp; Platform</span>
+                <span>Unified Dashboard &amp; Containment Response</span>
               </div>
             </div>
 
@@ -1445,12 +1444,12 @@
               </div>
 
               <div class="cp-state-card next">
-                <div class="cp-state-tag">🎯 Checkpoint 2 (W7) — Deliverables</div>
+                <div class="cp-state-tag" style="background: rgba(245, 158, 11, 0.2); border-color: var(--amber); color: var(--amber);">⚡ Next Plan — Isolate Host &amp; Triage</div>
                 <ul class="cp-checklist" id="tasksAayush">
-                  <li><input type="checkbox" id="a_task1" onchange="saveTaskState()"> Build entity-resolution ingestion (api/main.py)</li>
-                  <li><input type="checkbox" id="a_task2" onchange="saveTaskState()"> React Flow / D3 interactive attack graph canvas</li>
-                  <li><input type="checkbox" id="a_task3" onchange="saveTaskState()"> Sub-second WebSocket streaming across all engines</li>
-                  <li><input type="checkbox" id="a_task4" onchange="saveTaskState()"> Multi-pane layout &amp; AWS ECS/Lambda deployment setup</li>
+                  <li><input type="checkbox" id="a_task1" onchange="saveTaskState()"> Working on 'Mark Triaged' status updates (PATCH /alerts/{id})</li>
+                  <li><input type="checkbox" id="a_task2" onchange="saveTaskState()"> Working on 'Isolate Host' containment action (POST /hosts/{id}/isolate)</li>
+                  <li><input type="checkbox" id="a_task3" onchange="saveTaskState()"> Real-time WebSocket streaming across all engines</li>
+                  <li><input type="checkbox" id="a_task4" onchange="saveTaskState()"> Interactive Cytoscape graph canvas with 1-click quarantine</li>
                 </ul>
               </div>
             </div>

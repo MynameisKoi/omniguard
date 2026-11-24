@@ -1,0 +1,20 @@
+REM ========================================================
+REM OmniGuard BadUSB Live Demo Payload (Linux Workstations)
+REM Target: Linux Desktop (GNOME / KDE / XFCE)
+REM Action: Opens terminal, navigates to target credential portal,
+REM         and optionally initiates victim beacon session
+REM ========================================================
+
+DELAY 1000
+REM Open Terminal (Standard shortcut Ctrl+Alt+T)
+CTRL-ALT t
+DELAY 1200
+
+REM Launch browser to the demo portal
+STRING xdg-open "http://localhost:8080/login.html" || sensible-browser "http://localhost:8080/login.html"
+ENTER
+DELAY 1000
+
+REM Optional: Notify user or run mock beacon in background
+STRING echo "[OmniGuard Intrusion Simulation Initiated]"
+ENTER

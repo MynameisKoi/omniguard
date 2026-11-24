@@ -1009,8 +1009,8 @@
       <!-- Week Stepper / Current Week Slider -->
       <div class="week-stepper">
         <label>Current Timeline:</label>
-        <span class="week-badge" id="currentWeekDisplay">Week 4</span>
-        <input type="range" class="week-slider" id="weekSlider" min="1" max="14" value="4" />
+        <span class="week-badge" id="currentWeekDisplay">Week 7</span>
+        <input type="range" class="week-slider" id="weekSlider" min="1" max="14" value="7" />
       </div>
 
     </div>
@@ -1283,69 +1283,69 @@
         tasks: [
           {
             id: "t3_1",
-            title: "Implement NetworkX / Cypher shortest-path & blast radius calculation",
+            title: "Setup Ollama runtime on the dedicated AI machine locally",
+            owner: "Abu / Aayush",
+            track: "abu",
+            startWeek: 7,
+            endWeek: 8,
+            tech: ["Ollama", "Llama-3-Cyber", "Mistral", "Air-Gapped AI"],
+            description: "Deploy and configure local Ollama on the dedicated AI machine for air-gapped threat triage with zero-cloud-egress.",
+            criteria: "Local LLM generates structured incident assessments with MITRE ATT&CK tags and zero external egress."
+          },
+          {
+            id: "t3_2",
+            title: "VerifyEye and SpectraC2 total pipeline integration",
+            owner: "Rahim / Khoi",
+            track: "rahim",
+            startWeek: 7,
+            endWeek: 8,
+            tech: ["Multi-Modal Fusion", "VerifyEye", "SpectraC2", "FastAPI v2.1"],
+            description: "Total integration of visual phishing lures and C2 beaconing alerts into the unified SOC backend and dual-DB models.",
+            criteria: "VerifyEye and SpectraC2 alerts seamlessly correlate across MongoDB and Neo4j under Unified Alert Contract v2.1."
+          },
+          {
+            id: "t3_3",
+            title: "Implement host containment (Isolate Host) and triage lifecycle (Mark Triaged)",
             owner: "Aayush Maharjan",
             track: "aayush",
             startWeek: 7,
             endWeek: 8,
-            tech: ["NetworkX", "Dijkstra", "Blast Radius Algorithm", "Python"],
+            tech: ["FastAPI", "Containment Actions", "Cytoscape", "WebSockets"],
+            description: "Implement interactive Mark Triaged workflow (PATCH /alerts/{id}) and automated host quarantine action (POST /hosts/{id}/isolate).",
+            criteria: "Sub-second triage status transitions synchronized across MongoDB, Neo4j, and live frontend graph canvas."
+          },
+          {
+            id: "t3_4",
+            title: "Kafka and Zeek telemetry stream integration on real capture data",
+            owner: "Khoi Duong",
+            track: "khoi",
+            startWeek: 7,
+            endWeek: 8,
+            tech: ["Zeek conn.log", "Kafka Brokers", "Real PCAP Telemetry", "SpectraC2"],
+            description: "Connect live Zeek network telemetry parsers into Kafka topics using real-world enterprise traffic pcaps and flow captures.",
+            criteria: "Continuous streaming of real-data network flows with robust C2 beacon classification under live background traffic."
+          },
+          {
+            id: "t3_5",
+            title: "Implement Cypher & NetworkX multi-hop blast radius & shortest path",
+            owner: "Abu / Aayush",
+            track: "aayush",
+            startWeek: 8,
+            endWeek: 9,
+            tech: ["NetworkX", "Neo4j Cypher", "Dijkstra", "Blast Radius"],
             description: "Traverse multi-hop relationships from compromised ingress hosts to calculate risk scores and blast radius.",
             criteria: "Graph engine calculates 3-hop compromised radius and centrality scores in <200ms."
           },
           {
-            id: "t3_2",
-            title: "Deploy on-premise Ollama runtime with Llama-3-Cyber / Mistral",
-            owner: "Aayush Maharjan",
-            track: "aayush",
-            startWeek: 7,
-            endWeek: 8,
-            tech: ["Ollama", "Llama-3-Cyber", "Mistral", "Air-Gapped"],
-            description: "Configure local LLM runtime ensuring zero-cloud-egress data sovereignty for sensitive SOC logs.",
-            criteria: "Local LLM generates incident assessments without any external network egress."
-          },
-          {
-            id: "t3_3",
-            title: "Engineer structured Pydantic JSON schema prompt pipelines",
-            owner: "Aayush Maharjan",
-            track: "aayush",
-            startWeek: 8,
-            endWeek: 9,
-            tech: ["LangChain", "Pydantic", "Structured Outputs", "JSON Schema"],
-            description: "Convert graph paths into rigorous JSON output (MITRE tactics, executive narrative, mitigation steps).",
-            criteria: "100% valid JSON responses conforming strictly to Pydantic incident schema across 50 test prompts."
-          },
-          {
-            id: "t3_4",
-            title: "Wire MITRE ATT&CK matrix dynamic technique tagging",
-            owner: "Aayush Maharjan",
-            track: "aayush",
-            startWeek: 8,
-            endWeek: 9,
-            tech: ["MITRE ATT&CK v15", "T1566", "T1071", "TA0008"],
-            description: "Map graph attack paths directly to MITRE kill chain tactics and techniques.",
-            criteria: "Ingress, C2, and Lateral Movement stages properly tagged with corresponding ATT&CK technique IDs."
-          },
-          {
-            id: "t3_5",
+            id: "t3_6",
             title: "Benchmark inference throughput & memory on IBM LinuxONE s390x",
             owner: "Khoi Duong",
             track: "khoi",
             startWeek: 8,
             endWeek: 9,
-            tech: ["IBM LinuxONE", "s390x Benchmarks", "Throughput Testing"],
-            description: "Profile CPU/memory utilization and flow evaluation latency under 10,000+ simulated concurrent flows.",
-            criteria: "Sub-50ms inference per flow with zero memory leaks over 24-hour stress run."
-          },
-          {
-            id: "t3_6",
-            title: "Validate zero-cloud-egress compliance and network isolation",
-            owner: "Khoi Duong",
-            track: "khoi",
-            startWeek: 9,
-            endWeek: 9,
-            tech: ["Network Isolation", "Firewall Rules", "Audit Logging"],
-            description: "Ensure no confidential threat telemetry or graph data leaves the enterprise boundary.",
-            criteria: "Packet capture verifies zero outbound DNS or HTTP requests from the LLM or graph triage nodes."
+            tech: ["IBM LinuxONE", "s390x Benchmarks", "Zero Egress"],
+            description: "Profile CPU/memory utilization and flow evaluation latency under 10,000+ concurrent flows on LinuxONE s390x.",
+            criteria: "Sub-50ms inference per flow with zero memory leaks and strict air-gapped data sovereignty."
           }
         ]
       },
@@ -1485,7 +1485,7 @@
     const STORAGE_KEY = 'omniguard_capstone_timeline_state_v1';
     let appState = {
       completedTasks: {}, // { [taskId]: boolean }
-      currentWeek: 4,
+      currentWeek: 7,
       filterTrack: 'all',
       searchQuery: '',
       collapsedPhases: {}
@@ -1792,7 +1792,7 @@
       // Current Week slider
       const slider = document.getElementById('weekSlider');
       const weekDisplay = document.getElementById('currentWeekDisplay');
-      slider.value = appState.currentWeek || 4;
+      slider.value = appState.currentWeek || 7;
       weekDisplay.textContent = `Week ${slider.value}`;
       slider.oninput = (e) => {
         appState.currentWeek = parseInt(e.target.value, 10);

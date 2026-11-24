@@ -147,3 +147,4 @@ def export_alerts_to_ocsf(alerts: List[Dict[str, Any]]) -> Dict[str, Any]:
         "count": len(findings),
         "findings": findings,
     }
+

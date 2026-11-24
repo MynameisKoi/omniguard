@@ -20,7 +20,7 @@ import uuid
 
 import httpx
 
-from config import OLLAMA_URL, OLLAMA_MODEL
+from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_NUM_GPU
 from ai_transparency import AITraceContext
 from conversations import append_message, get_conversation, update_message
 from tools import TOOLS, alert_context, alerts_collection, closest_entity, mentioned_entities, run_tool, tool_specs
@@ -644,6 +644,8 @@ def _chat(messages, tools):
     content, calls, held = "", [], None
     metrics = {"prompt": 0, "completion": 0, "duration_ms": 0.0}
     options = {"temperature": 0.2, "num_ctx": 8192, "num_predict": 500, "repeat_penalty": 1.15}
+    if OLLAMA_NUM_GPU is not None:
+        options["num_gpu"] = OLLAMA_NUM_GPU
     with httpx.stream("POST", f"{OLLAMA_URL}/api/chat", timeout=120.0, json={
         "model": OLLAMA_MODEL, "messages": messages, "tools": tools, "stream": True, "keep_alive": "30m",
         "options": options,

@@ -1,7 +1,7 @@
 from collections import Counter
 
 import httpx
-from config import OLLAMA_URL, OLLAMA_MODEL
+from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_NUM_GPU
 from ai_transparency import AITraceContext
 
 # writing the alert lines 
@@ -31,6 +31,8 @@ def build_prompt(alerts):
 
 def _base_options(extra=None):
     opts = {"temperature": 0.2, "num_ctx": 8192, "num_predict": 400}
+    if OLLAMA_NUM_GPU is not None:
+        opts["num_gpu"] = OLLAMA_NUM_GPU
     if extra:
         opts.update(extra)
     return opts

@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SpectraC2: Non-Decrypting C2 Detection Under Heavy Jitter</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body {
+    background: #090d16;
+    color: #f1f5f9;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .slide {
+    width: 1140px;
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 20px;
+    padding: 38px 48px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 26px;
+    border-bottom: 1px solid #1e293b;
+    padding-bottom: 18px;
+  }
+  .header h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #ffffff;
+  }
+  .header p {
+    color: #94a3b8;
+    font-size: 14px;
+    margin-top: 4px;
+  }
+  .pill {
+    background: rgba(0, 196, 255, 0.12);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    padding: 6px 16px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .pill-dot {
+    width: 8px;
+    height: 8px;
+    background: #38bdf8;
+    border-radius: 50%;
+    box-shadow: 0 0 8px #38bdf8;
+  }
+
+  /* Signal Transformation Graphic Canvas */
+  .signal-container {
+    background: #131b2e;
+    border: 1px solid #23314d;
+    border-radius: 16px;
+    padding: 22px 28px;
+    margin-bottom: 24px;
+    position: relative;
+  }
+  .signal-grid {
+    display: grid;
+    grid-template-columns: 1fr 140px 1fr;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .chart-box {
+    background: #0b1120;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 16px 18px;
+    position: relative;
+  }
+  .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .chart-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #f8fafc;
+  }
+  .badge-tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+  .badge-amber { background: rgba(245, 158, 11, 0.18); color: #fbbf24; }
+  .badge-cyan { background: rgba(0, 196, 255, 0.18); color: #38bdf8; }
+
+  /* Middle Transform Node */
+  .transform-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    position: relative;
+  }
+  .math-pill {
+    background: #1e293b;
+    border: 1px solid #38bdf8;
+    color: #38bdf8;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 13px;
+    box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
+    margin-bottom: 8px;
+  }
+  .transform-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #94a3b8;
+    line-height: 1.3;
+  }
+  .arrow-flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    margin-top: 8px;
+    color: #38bdf8;
+    font-size: 18px;
+  }
+
+  /* 4 Executive Cards Grid */
+  .cards-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  .card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 18px;
+    position: relative;
+  }
+  .card-amber { border-top: 4px solid #f59e0b; }
+  .card-blue { border-top: 4px solid #38bdf8; }
+  .card-purple { border-top: 4px solid #a855f7; }
+  .card-green { border-top: 4px solid #10b981; }
+
+  .card-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 6px;
+  }
+  .card-lead {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #38bdf8;
+    margin-bottom: 8px;
+    display: block;
+    letter-spacing: 0.05em;
+  }
+  .card-desc {
+    font-size: 12.5px;
+    color: #cbd5e1;
+    line-height: 1.45;
+  }
+
+  /* Highlight Banner */
+  .footer-banner {
+    margin-top: 20px;
+    background: rgba(16, 185, 129, 0.08);
+    border: 1px solid rgba(52, 211, 153, 0.3);
+    border-radius: 10px;
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+  }
+  .footer-banner strong { color: #34d399; }
+</style>
+</head>
+<body>
+
+<div class="slide">
+  <!-- Slide Header -->
+  <div class="header">
+    <div>
+      <h1>SpectraC2: Non-Decrypting C2 Detection Under Heavy Jitter</h1>
+      <p>Mathematical Frequency Analysis (FFT &amp; PSD) Unmasking Encrypted Reverse Shells</p>
+    </div>
+    <div class="pill">
+      <div class="pill-dot"></div>
+      Zero TLS Decryption · 100% Privacy
+    </div>
+  </div>
+
+  <!-- Signal Transformation Diagram -->
+  <div class="signal-container">
+    <div class="signal-grid">
+
+      <!-- LEFT: Time Domain (Noisy Jittered Packets) -->
+      <div class="chart-box">
+        <div class="chart-header">
+          <span class="chart-title">1. Time Domain (On the Wire)</span>
+          <span class="badge-tag badge-amber">25% Jitter Noise</span>
+        </div>
+        
+        <!-- SVG Graphic: Jittered arrival impulses -->
+        <svg viewBox="0 0 400 160" width="100%" height="160" style="overflow: visible;">
+          <!-- Grid Lines -->
+          <line x1="40" y1="20" x2="380" y2="20" stroke="#1e293b" stroke-dasharray="3 3"/>
+          <line x1="40" y1="70" x2="380" y2="70" stroke="#1e293b" stroke-dasharray="3 3"/>
+          <line x1="40" y1="120" x2="380" y2="120" stroke="#334155" stroke-width="1.5"/>
+          <line x1="40" y1="20" x2="40" y2="120" stroke="#334155" stroke-width="1.5"/>
+
+          <!-- Axis Labels -->
+          <text x="350" y="140" fill="#64748b" font-size="10" font-weight="bold">Time (t)</text>
+          <text x="10" y="70" fill="#64748b" font-size="10" font-weight="bold" transform="rotate(-90 15,70)">IAT (Δt)</text>
+
+          <!-- Jittered arrival spikes with varying intervals (7.6s, 11.8s, 8.2s, 12.4s, 9.5s) -->
+          <!-- Pulse 1 -->
+          <line x1="70" y1="120" x2="70" y2="45" stroke="#f59e0b" stroke-width="3"/>
+          <circle cx="70" cy="45" r="4" fill="#fbbf24"/>
+          <text x="62" y="35" fill="#f59e0b" font-size="10" font-weight="bold">7.6s</text>
+
+          <!-- Pulse 2 -->
+          <line x1="140" y1="120" x2="140" y2="30" stroke="#f59e0b" stroke-width="3"/>
+          <circle cx="140" cy="30" r="4" fill="#fbbf24"/>
+          <text x="130" y="20" fill="#f59e0b" font-size="10" font-weight="bold">11.8s</text>
+
+          <!-- Pulse 3 -->
+          <line x1="205" y1="120" x2="205" y2="50" stroke="#f59e0b" stroke-width="3"/>
+          <circle cx="205" cy="50" r="4" fill="#fbbf24"/>
+          <text x="198" y="38" fill="#f59e0b" font-size="10" font-weight="bold">8.2s</text>
+
+          <!-- Pulse 4 -->
+          <line x1="285" y1="120" x2="285" y2="25" stroke="#f59e0b" stroke-width="3"/>
+          <circle cx="285" cy="25" r="4" fill="#fbbf24"/>
+          <text x="274" y="15" fill="#f59e0b" font-size="10" font-weight="bold">12.4s</text>
+
+          <!-- Pulse 5 -->
+          <line x1="350" y1="120" x2="350" y2="40" stroke="#f59e0b" stroke-width="3"/>
+          <circle cx="350" cy="40" r="4" fill="#fbbf24"/>
+          <text x="342" y="30" fill="#f59e0b" font-size="10" font-weight="bold">9.5s</text>
+
+          <text x="50" y="155" fill="#ef4444" font-size="11" font-weight="bold">❌ Appears chaotic; evades fixed firewall thresholds</text>
+        </svg>
+      </div>
+
+      <!-- CENTER: Mathematical Transformation Node -->
+      <div class="transform-node">
+        <div class="math-pill">
+          FFT &amp; PSD<br>
+          <span style="font-size: 11px; font-weight: normal; color: #e2e8f0;">Δt<sub>i</sub> = t<sub>i</sub> - t<sub>i-1</sub></span>
+        </div>
+        <div class="transform-label">
+          Fast Fourier<br>Transform
+        </div>
+        <div class="arrow-flow">➔ ➔</div>
+      </div>
+
+      <!-- RIGHT: Frequency Domain (Clean Harmonic Spike) -->
+      <div class="chart-box" style="border-color: rgba(56, 189, 248, 0.4);">
+        <div class="chart-header">
+          <span class="chart-title">2. Frequency Domain (SpectraC2)</span>
+          <span class="badge-tag badge-cyan">94% Confidence</span>
+        </div>
+
+        <!-- SVG Graphic: Spectrum with sharp harmonic peak -->
+        <svg viewBox="0 0 400 160" width="100%" height="160" style="overflow: visible;">
+          <!-- Grid Lines -->
+          <line x1="40" y1="20" x2="380" y2="20" stroke="#1e293b" stroke-dasharray="3 3"/>
+          <line x1="40" y1="70" x2="380" y2="70" stroke="#1e293b" stroke-dasharray="3 3"/>
+          <line x1="40" y1="120" x2="380" y2="120" stroke="#334155" stroke-width="1.5"/>
+          <line x1="40" y1="20" x2="40" y2="120" stroke="#334155" stroke-width="1.5"/>
+
+          <!-- Axis Labels -->
+          <text x="340" y="140" fill="#64748b" font-size="10" font-weight="bold">Freq (Hz)</text>
+          <text x="10" y="70" fill="#64748b" font-size="10" font-weight="bold" transform="rotate(-90 15,70)">Power (PSD)</text>
+
+          <!-- Flat Noise Floor + Sharp Harmonic Peak at 0.1 Hz (10.0s period) -->
+          <path d="M 40,118 
+                   Q 80,115 120,117 
+                   Q 160,116 195,116 
+                   L 205,25 
+                   L 215,116 
+                   Q 260,115 310,118 
+                   L 380,117" 
+                fill="none" stroke="#00c4ff" stroke-width="2.5" />
+
+          <!-- Shaded Area Under Peak -->
+          <polygon points="195,116 205,25 215,116" fill="rgba(0, 196, 255, 0.25)" />
+
+          <!-- Target Peak Indicator -->
+          <circle cx="205" cy="25" r="5" fill="#38bdf8" stroke="#ffffff" stroke-width="1.5"/>
+          <line x1="205" y1="25" x2="265" y2="35" stroke="#38bdf8" stroke-dasharray="2 2"/>
+          
+          <!-- Callout Card -->
+          <rect x="250" y="25" width="130" height="34" rx="6" fill="#131b2e" stroke="#38bdf8" stroke-width="1"/>
+          <text x="258" y="40" fill="#38bdf8" font-size="10" font-weight="bold">Harmonic: 0.10 Hz</text>
+          <text x="258" y="52" fill="#34d399" font-size="9.5" font-weight="bold">Target Period: 10.0s</text>
+
+          <text x="50" y="155" fill="#34d399" font-size="11" font-weight="bold">✔ True 10.0s beacon loop isolated cleanly through noise</text>
+        </svg>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 4 Clean Executive Bullet Cards -->
+  <div class="cards-grid">
+    <!-- Card 1 -->
+    <div class="card card-amber">
+      <span class="card-lead">The Challenge</span>
+      <div class="card-title">Randomized Jitter</div>
+      <div class="card-desc">
+        Attackers (Cobalt Strike, Sliver) add <strong>10%–50% timing jitter</strong> to bypass static firewall rules.
+      </div>
+    </div>
+
+    <!-- Card 2 -->
+    <div class="card card-blue">
+      <span class="card-lead">The Innovation</span>
+      <div class="card-title">Frequency Domain</div>
+      <div class="card-desc">
+        Extracts Inter-Arrival Time (IAT) deltas and computes <strong>FFT &amp; Spectral Density</strong> over flow metadata.
+      </div>
+    </div>
+
+    <!-- Card 3 -->
+    <div class="card card-purple">
+      <span class="card-lead">The Result</span>
+      <div class="card-title">94% Confidence</div>
+      <div class="card-desc">
+        Even when beacons vary from <strong>7.5s to 12.5s</strong>, the true 10.0s harmonic spike emerges cleanly.
+      </div>
+    </div>
+
+    <!-- Card 4 -->
+    <div class="card card-green">
+      <span class="card-lead">Business Value</span>
+      <div class="card-title">Zero Decryption</div>
+      <div class="card-desc">
+        Guarantees <strong>100% data privacy</strong> on TLS 1.3 without expensive SSL decryption hardware bottlenecks.
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer Highlight -->
+  <div class="footer-banner">
+    <div><strong>Key Executive Takeaway:</strong> SpectraC2 catches hidden reverse-shell beacons without invading employee privacy or decrypting network traffic.</div>
+    <div style="color: #94a3b8; font-size: 12px;">Validates MITRE ATT&amp;CK <strong>T1071</strong></div>
+  </div>
+</div>
+
+</body>
+</html>

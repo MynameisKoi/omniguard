@@ -34,6 +34,19 @@ def ingest_key_ok(key: str | None) -> bool:
         return True   # not configured -> open, so the demo works out of the box
     return key is not None and any(hmac.compare_digest(key, k) for k in INGEST_KEYS)
 
+
+# containment agent channel: optional shared key (CONTAINMENT_AGENT_KEYS=k1,k2).
+# Open by default so LAN demos work without extra config; enforced when set.
+CONTAINMENT_AGENT_KEYS = {
+    k.strip() for k in os.getenv("CONTAINMENT_AGENT_KEYS", "").split(",") if k.strip()
+}
+
+
+def agent_key_ok(key: str | None) -> bool:
+    if not CONTAINMENT_AGENT_KEYS:
+        return True
+    return key is not None and any(hmac.compare_digest(key, k) for k in CONTAINMENT_AGENT_KEYS)
+
 def hash_password(password):
     salt = os.urandom(16)
     digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
@@ -72,8 +85,8 @@ def check_badge_login(badge_uid: str):
     if not clean_uid:
         return None
 
-    # Try exact match or match stripping colons/hyphens
-    stripped_uid = clean_uid.replace(":", "").replace("-", "")
+    # Try exact match or match stripping colons/hyphens/spaces
+    stripped_uid = clean_uid.replace(":", "").replace("-", "").replace(" ", "")
     user = users_collection.find_one({
         "$or": [
             {"badge_uid": clean_uid},

@@ -17,12 +17,29 @@ export default function Login({ onLogin, onBack, notice }) {
     const badgeInputRef = useRef(null);
     const checking = phase === "checking";
 
-    // Auto-focus badge input when switching to Flipper mode
+    // Auto-focus badge input & poll for live Flipper USB card taps when in Flipper mode
     useEffect(() => {
-        if (mode === "flipper" && badgeInputRef.current) {
+        if (mode !== "flipper") return;
+        if (badgeInputRef.current) {
             badgeInputRef.current.focus();
         }
-    }, [mode]);
+        if (phase !== "idle") return;
+        let active = true;
+        const timer = setInterval(() => {
+            fetch(`${API_URL}/auth/badge-tap/pending`)
+                .then(r => (r.ok ? r.json() : null))
+                .then(data => {
+                    if (active && data?.pending && data?.token) {
+                        handleSuccess(data);
+                    }
+                })
+                .catch(() => {});
+        }, 1000);
+        return () => {
+            active = false;
+            clearInterval(timer);
+        };
+    }, [mode, phase]);
 
     const handleSuccess = (user) => {
         setWelcome(user);
@@ -191,7 +208,7 @@ export default function Login({ onLogin, onBack, notice }) {
                             <input
                                 ref={badgeInputRef}
                                 type="text"
-                                placeholder="e.g. FLIPPER-SOC-7A39B1 or 7A:39:B1:04"
+                                placeholder="e.g. 2E B7 76 or FLIPPER-SOC-7A39B1"
                                 autoComplete="off"
                                 required
                                 disabled={checking}

@@ -1,5 +1,14 @@
 {
   "dependencies": {
     "docx": "^9.12.0"
-  }
+  },
+  "name": "report",
+  "version": "1.0.0",
+  "description": "",
+  "main": "build_report.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "type": "commonjs"
 }

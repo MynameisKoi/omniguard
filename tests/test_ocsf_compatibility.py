@@ -115,6 +115,12 @@ def test_api_ocsf_endpoints(sample_verifyeye_alert):
         from main import app
         from fastapi.testclient import TestClient
 
+        app.dependency_overrides[backend_main.current_user] = lambda: {
+            "email": "analyst@omniguard.io",
+            "name": "SOC Analyst",
+            "role": "analyst",
+        }
+
         client = TestClient(app)
         # endpoints need a signed-in analyst (session tokens): sign the test client in
         app.dependency_overrides[backend_main.current_user] = lambda: {"email": "test@omniguard.io", "name": "Test"}
@@ -140,3 +146,4 @@ def test_api_ocsf_endpoints(sample_verifyeye_alert):
             data2 = res2.json()
             assert data2["count"] == 1
             assert data2["ocsf_version"] == "1.2.0"
+

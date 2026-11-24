@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request, Header
+from fastapi import FastAPI, WebSocket,  WebSocketDisconnect, HTTPException, Response, Depends, Request, Header, Body
 from fastapi.responses import JSONResponse, StreamingResponse
 from neo4j.exceptions import ServiceUnavailable
 from starlette.concurrency import run_in_threadpool
@@ -7,7 +7,7 @@ from events import manager
 from models import Alert, AlertCreate, AlertStatusUpdate
 from db import database, brands_collection
 from ai import run_triage, answer_question
-from auth import check_login, check_badge_login, update_user, create_session, session_user, end_session, seed_default_user, ingest_key_ok
+from auth import check_login, check_badge_login, update_user, create_session, session_user, end_session, seed_default_user, ingest_key_ok, agent_key_ok
 from status import check_mongo, check_neo4j, check_ollama
 from datetime import datetime, timezone, timedelta
 from typing import Literal
@@ -28,7 +28,11 @@ from ledger import (
     get_recent_ledger,
 )
 import containment
+import dfir
 import live_ai
+import notifications
+import threat_intel
+import connectors
 from agents import MultiAgentInvestigationPipeline
 from ocsf import alert_to_ocsf, export_alerts_to_ocsf
 from ai_transparency import get_transparency_logs, get_transparency_trace
@@ -115,6 +119,27 @@ async def login(payload: LoginRequest):
 class BadgeLoginRequest(BaseModel):
     badge_uid: str = Field(min_length=1, max_length=100)
 
+_pending_badge_tap: dict | None = None
+_BADGE_TAP_TTL_SECONDS = 15
+
+async def _complete_badge_login(user: dict, badge_uid: str) -> dict:
+    """Issue a session token and record physical badge auth in the decision ledger."""
+    token, expires = await run_in_threadpool(create_session, user)
+    try:
+        await run_in_threadpool(
+            append_ledger_entry,
+            entity_type="ANALYST_BADGE",
+            entity_id=user["email"],
+            stage="PHYSICAL_AUTHENTICATION",
+            action_taken="BADGE_TAP_LOGIN",
+            reasoning_output=f"Analyst authenticated via Flipper Zero hardware key / badge tap (UID: {badge_uid})",
+            analyst_user=user["email"],
+            input_context={"badge_uid": badge_uid},
+        )
+    except Exception as e:
+        print(f"[ledger] Badge login audit notice: {e}")
+    return {**user, "token": token, "expires_at": expires}
+
 @app.post("/auth/badge-login")
 async def badge_login(payload: BadgeLoginRequest):
     """
@@ -124,24 +149,34 @@ async def badge_login(payload: BadgeLoginRequest):
     user = await run_in_threadpool(check_badge_login, payload.badge_uid)
     if not user:
         raise HTTPException(status_code=401, detail="Unrecognized RFID/NFC badge UID or Flipper Zero key")
-    token, expires = await run_in_threadpool(create_session, user)
+    return await _complete_badge_login(user, payload.badge_uid)
 
-    # Immutably record physical hardware authentication to the decision ledger
-    try:
-        await run_in_threadpool(
-            append_ledger_entry,
-            entity_type="ANALYST_BADGE",
-            entity_id=user["email"],
-            stage="PHYSICAL_AUTHENTICATION",
-            action_taken="BADGE_TAP_LOGIN",
-            reasoning_output=f"Analyst authenticated via Flipper Zero hardware key / badge tap (UID: {payload.badge_uid})",
-            analyst_user=user["email"],
-            input_context={"badge_uid": payload.badge_uid},
-        )
-    except Exception as e:
-        print(f"[ledger] Badge login audit notice: {e}")
+@app.post("/auth/badge-tap")
+async def register_badge_tap(payload: BadgeLoginRequest):
+    """Receives a live physical card tap from a USB-connected Flipper Zero bridge."""
+    global _pending_badge_tap
+    user = await run_in_threadpool(check_badge_login, payload.badge_uid)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unrecognized RFID/NFC badge UID or Flipper Zero key")
+    _pending_badge_tap = {
+        "user": user,
+        "badge_uid": payload.badge_uid,
+        "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_BADGE_TAP_TTL_SECONDS),
+    }
+    return {"status": "queued", "email": user["email"], "badge_uid": payload.badge_uid}
 
-    return {**user, "token": token, "expires_at": expires}
+@app.get("/auth/badge-tap/pending")
+async def consume_pending_badge_tap():
+    """Polled by the Login UI on the Flipper tab to auto-login on a physical card tap."""
+    global _pending_badge_tap
+    tap = _pending_badge_tap
+    if not tap:
+        return {"pending": False}
+    _pending_badge_tap = None
+    if datetime.now(timezone.utc) > tap["expires_at"]:
+        return {"pending": False}
+    session = await _complete_badge_login(tap["user"], tap["badge_uid"])
+    return {"pending": True, **session}
 
 @app.post("/auth/logout", status_code=204)
 async def logout(request: Request):
@@ -171,7 +206,21 @@ async def update_profile(payload: ProfileUpdate, request: Request, me: dict = De
 # This is coming from our security system
 # They store the event here
 @app.post("/alerts", response_model=Alert, status_code=201, dependencies=INGEST)
-async def create_alert(payload: AlertCreate) -> Alert:
+async def create_alert(payload: AlertCreate, request: Request) -> Alert:
+    import ipaddress
+    from urllib.parse import urlparse
+
+    if not payload.src_ip and request.client and request.client.host:
+        payload = payload.model_copy(update={"src_ip": request.client.host})
+    if not payload.dst_ip and (payload.target_url or payload.domain):
+        cand = payload.domain or urlparse(str(payload.target_url)).hostname
+        if cand:
+            try:
+                ipaddress.ip_address(cand)
+                payload = payload.model_copy(update={"dst_ip": cand})
+            except ValueError:
+                pass
+
     now = datetime.now(timezone.utc)
     sim_val, sim_hex = compute_alert_simhash(payload.model_dump())
 
@@ -235,6 +284,14 @@ async def create_alert(payload: AlertCreate) -> Alert:
     # hand it to Live AI so the model reviews it and proposes a triage, live
     # (proposal only — an analyst still approves). No-op if Live AI is off.
     live_ai.enqueue(alert.alert_id, alert.host)
+
+    # If Live AI is disabled (or alert is critical), dispatch immediate phone push
+    # asynchronously so alert ingest latency is never impacted.
+    if (not live_ai.is_enabled()) or alert.severity == "critical":
+        import asyncio
+        asyncio.create_task(
+            run_in_threadpool(notifications.dispatch_alert_notification, alert.model_dump(mode="json"))
+        )
 
     return alert
 
@@ -673,11 +730,23 @@ async def run_pipeline_investigation(payload: PipelineInvestigationRequest):
     return result
 
 
+class IsolateOptions(BaseModel):
+    c2_ip: str | None = None
+    c2_ports: list[int] | None = None
+    kill_pids: list[int] | None = None
+    kill_patterns: list[str] | None = None
+
+
 @app.post("/hosts/{hostname}/isolate", status_code=202)
-async def isolate_host(hostname: str, me: dict = Depends(current_user)):
-    """Ask the host's containment agent to cut it off the network. The agent
-    confirms back when it's really applied (see containment.py)."""
-    return await run_in_threadpool(containment.request_isolation, hostname, me["email"])
+async def isolate_host(
+    hostname: str,
+    payload: IsolateOptions | None = Body(default=None),
+    me: dict = Depends(current_user),
+):
+    """Ask the host's containment agent to cut it off the network and optionally
+    block a same-subnet C2 IP/port or terminate reverse-shell processes."""
+    opts = payload.model_dump(exclude_none=True) if payload else {}
+    return await run_in_threadpool(containment.request_isolation, hostname, me["email"], **opts)
 
 
 @app.post("/hosts/{hostname}/release", status_code=202)
@@ -712,14 +781,24 @@ class AgentAck(BaseModel):
     message: str | None = None
 
 @app.get("/agent/containment/poll")
-async def agent_containment_poll(host: str):
-    return await run_in_threadpool(containment.agent_poll, host)
+async def agent_containment_poll(host: str, x_agent_key: str | None = Header(default=None)):
+    if not agent_key_ok(x_agent_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing containment agent key")
+    try:
+        return await run_in_threadpool(containment.agent_poll, host)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/agent/containment/ack")
-async def agent_containment_ack(payload: AgentAck):
-    return await run_in_threadpool(
-        containment.agent_ack, payload.host, payload.action, payload.ok, payload.message
-    )
+async def agent_containment_ack(payload: AgentAck, x_agent_key: str | None = Header(default=None)):
+    if not agent_key_ok(x_agent_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing containment agent key")
+    try:
+        return await run_in_threadpool(
+            containment.agent_ack, payload.host, payload.action, payload.ok, payload.message
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── Decision Ledger Audit Endpoints ─────────────────────────────────
@@ -779,4 +858,121 @@ async def read_ai_transparency_trace(trace_id: str):
     if not trace:
         raise HTTPException(status_code=404, detail=f"AI trace '{trace_id}' not found")
     return trace
+
+
+# ── Live Host DFIR Snapshot Endpoints ───────────────────────────────
+
+class DFIRReportIn(BaseModel):
+    host: str
+    os: str = "unknown"
+    hostname: str | None = None
+    is_admin: bool = False
+    gateways: list[str] = Field(default_factory=list)
+    processes: list[dict] = Field(default_factory=list)
+    connections: list[dict] = Field(default_factory=list)
+    hosts_entries: list[str] = Field(default_factory=list)
+
+
+@app.post("/hosts/{hostname}/dfir/collect", status_code=202)
+async def request_host_dfir(hostname: str, me: dict = Depends(current_user)):
+    """Queue a live DFIR snapshot (processes, sockets, hosts) from the endpoint agent."""
+    try:
+        return await run_in_threadpool(dfir.request_snapshot, hostname, me["email"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/hosts/{hostname}/dfir", dependencies=AUTH)
+async def read_host_dfir(hostname: str):
+    """Retrieve the latest DFIR forensic snapshot for a host."""
+    try:
+        snap = await run_in_threadpool(dfir.get_latest_snapshot, hostname)
+        return {"host": hostname, "snapshot": snap}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/agent/dfir/report")
+async def agent_dfir_report(payload: DFIRReportIn, x_agent_key: str | None = Header(default=None)):
+    """Endpoint for containment_agent.py to submit live DFIR telemetry."""
+    if not agent_key_ok(x_agent_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing containment agent key")
+    try:
+        return await run_in_threadpool(dfir.store_snapshot, payload.host, payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Phone / External Alert Notification Endpoints ───────────────────
+
+class NotificationConfigIn(BaseModel):
+    enabled: bool | None = None
+    min_severity: Literal["low", "medium", "high", "critical"] | None = None
+    ntfy_server: str | None = None
+    ntfy_topic: str | None = None
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+    webhook_url: str | None = None
+    dashboard_url: str | None = None
+
+
+class NotificationTestIn(BaseModel):
+    note: str = Field(default="Test alert from OmniGuard SOC", max_length=300)
+
+
+@app.get("/notifications/status", dependencies=AUTH)
+async def read_notification_status():
+    return notifications.get_notification_status()
+
+
+@app.post("/notifications/config", dependencies=AUTH)
+async def update_notification_config(payload: NotificationConfigIn):
+    return notifications.configure_notifications(**payload.model_dump(exclude_none=True))
+
+
+@app.post("/notifications/test", dependencies=AUTH)
+async def trigger_test_notification(payload: NotificationTestIn = Body(default_factory=NotificationTestIn)):
+    return await run_in_threadpool(notifications.send_test_notification, payload.note)
+
+
+# ── Security Patch & News Analyzer (CISA KEV) ───────────────────────
+
+class PatchAnalyzeIn(BaseModel):
+    query: str | None = None
+    limit: int = Field(default=8, ge=1, le=25)
+    host_os_hints: list[str] | None = None
+
+
+@app.get("/intel/patches", dependencies=AUTH)
+async def list_security_patches(query: str | None = None, limit: int = 15, refresh: bool = False):
+    return await run_in_threadpool(threat_intel.fetch_cisa_kev, limit, query, refresh)
+
+
+@app.post("/intel/patches/analyze", dependencies=AUTH)
+async def analyze_patches(payload: PatchAnalyzeIn = Body(default_factory=PatchAnalyzeIn), me: dict = Depends(current_user)):
+    return await run_in_threadpool(
+        threat_intel.analyze_security_patches,
+        payload.query,
+        payload.limit,
+        payload.host_os_hints,
+        me["email"],
+    )
+
+
+# ── Pluggable 3rd-Party EDR & Threat Intel Connectors ───────────────
+
+class EnrichIn(BaseModel):
+    indicator: str = Field(min_length=1, max_length=255)
+    indicator_type: Literal["auto", "ip", "domain"] = "auto"
+
+
+@app.get("/connectors/status", dependencies=AUTH)
+async def read_connectors_status():
+    return await run_in_threadpool(connectors.get_connectors_status)
+
+
+@app.post("/connectors/enrich", dependencies=AUTH)
+async def enrich_ioc(payload: EnrichIn):
+    return await run_in_threadpool(connectors.enrich_indicator, payload.indicator, payload.indicator_type)
+
 
