@@ -325,7 +325,7 @@ class PortalHandler(http.server.SimpleHTTPRequestHandler):
                 ZERO_DEP_BEACON_PY
                 .replace("__C2_URL__", f"http://{base_ip}:9000")
                 .replace("__SOC_URL__", f"http://{base_ip}:8000")
-                .replace("__VICTIM_HOST__", "kali-victim")
+                .replace("__VICTIM_HOST__", "WORKSTATION-CORP-01")  # victim name: match the agent + extension HOST
             ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/x-python; charset=utf-8")

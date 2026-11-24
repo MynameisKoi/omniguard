@@ -356,7 +356,9 @@ def main() -> None:
     parser.add_argument("--portal-port", type=int, default=8080)
     parser.add_argument("--c2-port", type=int, default=9000)
     parser.add_argument("--soc-ip", default="192.168.137.1", help="SOC IP for --role victim (default: 192.168.137.1)")
-    parser.add_argument("--host", default="kali-victim", help="Victim hostname (default: kali-victim)")
+    parser.add_argument("--host", default="WORKSTATION-CORP-01",
+                        help="This victim's name; MUST match the extension's HOST in background.js "
+                             "(default: WORKSTATION-CORP-01). One unique name per victim machine.")
     parser.add_argument("--c2-ports", default="9000,4444,8080", help="C2 ports to block on isolate")
     parser.add_argument("--ntfy-topic", default=os.getenv("NTFY_TOPIC", ""), help="Optional ntfy.sh topic for phone alerts")
     parser.add_argument("--dashboard-url", default=os.getenv("DASHBOARD_PUBLIC_URL", "http://192.168.137.1:5173"))

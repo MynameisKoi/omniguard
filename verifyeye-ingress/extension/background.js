@@ -6,8 +6,14 @@
 // Where the SOC backend lives. On your own machine this is localhost. To run the
 // extension against another laptop (the analyst's machine on the LAN), change
 // these two to that laptop's IP, e.g. "http://192.168.1.50:8000".
-const CORE = "http://localhost:8000";       // alerts + brands
-const VERIFY = "http://localhost:8100";      // visual verify agent
+const CORE = "http://192.168.1.234:8000";       // alerts + brands  (SOC = this Mac)
+const VERIFY = "http://192.168.1.234:8100";      // visual verify agent
+// This victim machine's name. SET IT PER VICTIM and make it EXACTLY match the
+// --host you give the containment agent on THIS same machine. That way, when the
+// analyst isolates "<HOST>" on the SOC, the agent on this machine is the one that
+// receives it. Multiple victims => each machine gets its own unique name here AND
+// in its own agent command. This one line is the single place to set it.
+const HOST = "WORKSTATION-CORP-01";
 // Only needed if the SOC sets INGEST_API_KEYS. Leave "" when it doesn't.
 const INGEST_KEY = "";
 
@@ -37,6 +43,9 @@ function blockHost(url) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type == "phishing_detected") {
+        // stamp THIS machine's name (single source of truth above) so the SOC
+        // alert, and therefore Isolate, targets the right victim.
+        msg.alert.host = HOST;
         // lock down the harvester host before anything else
         blockHost(msg.alert.action_endpoint);
 

@@ -42,7 +42,7 @@ import urllib.parse
 
 # ── settings ─────────────────────────────────────────────────────────────────
 ANALYST_IP = os.getenv("ANALYST_IP", "192.168.1.234").strip()   # the SOC machine
-HOST       = os.getenv("HOST", "lenovo-10").strip()             # this machine's name -- MATCH the extension /
+HOST       = os.getenv("HOST", "WORKSTATION-CORP-01").strip()   # this machine's name -- MATCH the extension /
                                                                 # beacon host exactly, so isolate targets it.
 C2_IP      = os.getenv("C2_IP", "").strip()                     # optional same-subnet C2 IP to explicitly block
 C2_PORTS   = [

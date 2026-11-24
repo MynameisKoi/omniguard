@@ -100,11 +100,9 @@ function report() {
       source: "verifyeye",
       event_type: "phishing_page_detected",
       severity: "critical",
-      // host is hardcoded for now — a browser extension can't read the machine's
-      // OS hostname (no API, blocked for privacy). real deploy: push it per-machine
-      // via managed policy (chrome.storage.managed). demo: make it an options-page
-      // setting later. this field is what the graph groups alerts by, so it matters.
-      host: "LAPTOP-10",
+      // NOTE: host is set in background.js (const HOST) — the single place to
+      // configure this machine's name, so it always matches the containment
+      // agent. background stamps msg.alert.host before sending. Don't set it here.
       domain: location.hostname,
       target_url: location.href,
       action_endpoint: action,
