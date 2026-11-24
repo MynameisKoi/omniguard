@@ -258,9 +258,14 @@ def run_soc_role(sup: ProcessSupervisor, args: argparse.Namespace) -> None:
     if args.dashboard_url:
         env_extra["DASHBOARD_PUBLIC_URL"] = args.dashboard_url
 
+    # --loop asyncio --http h11: uvloop/httptools (uvicorn[standard]) don't support
+    # Python 3.14 yet and hang silently at startup on such hosts (e.g. macOS on
+    # brew python 3.14). The pure-Python loop/parser work everywhere; the perf
+    # difference is irrelevant for a demo.
     sup.start(
         "backend",
-        [py, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", str(args.backend_port)],
+        [py, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", str(args.backend_port),
+         "--loop", "asyncio", "--http", "h11"],
         cwd=os.path.join(REPO_ROOT, "backend"),
         env=env_extra,
     )
