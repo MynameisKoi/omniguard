@@ -125,12 +125,20 @@ def main() -> int:
     print(f"  [3/4] Containment agent  (/agent/.../poll) {mark} x{len(results)} -> [{codes}]")
     required_ok = required_ok and poll_ok
 
-    # 4. Visual verify agent -- OPTIONAL (demo works without it)
-    ok_v, detail_v = check("verify", f"{verify}/", lambda b: "200 OK")
-    if ok_v:
-        print(f"  [4/4] Visual verify      (:{args.verify_port})           {c(OK, '✅')} running (optional)")
+    # 4. Visual verify agent (screenshots). It only serves POST /verify, so a
+    # GET / returns 404 -- that 404 still PROVES the service is reachable/up.
+    def _verify_reachable(url: str) -> bool:
+        try:
+            _get(url)
+            return True                      # 200 -> up
+        except urllib.error.HTTPError:
+            return True                      # 404/405 -> server answered -> up
+        except (urllib.error.URLError, TimeoutError, OSError):
+            return False                     # refused/timeout -> actually down
+    if _verify_reachable(f"{verify}/"):
+        print(f"  [4/4] Visual verify      (:{args.verify_port})           {c(OK, '✅')} running (screenshots)")
     else:
-        print(f"  [4/4] Visual verify      (:{args.verify_port})           {c(WARN, '⚠️  not running — optional, OK to skip')}")
+        print(f"  [4/4] Visual verify      (:{args.verify_port})           {c(WARN, '⚠️  not running — screenshots disabled')}")
 
     print("-" * 64)
     if required_ok:

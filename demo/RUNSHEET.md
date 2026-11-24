@@ -38,6 +38,15 @@ cd ~/Documents/SFBU/capstone_project/omniguard/frontend
 npm run dev -- --host 0.0.0.0
 ```
 
+VerifyEye visual-verify service — the Playwright screenshot engine on :8100
+(runs from the non-iCloud venv; Chromium already downloaded):
+
+```bash
+cd ~/Documents/SFBU/capstone_project/omniguard/verifyeye-ingress
+CORE_API_URL="http://127.0.0.1:8000" ~/omniguard-venv/bin/uvicorn service:app \
+  --host 0.0.0.0 --port 8100 --loop asyncio --http h11
+```
+
 SOC dashboard: `http://192.168.1.234:5173`  (open on the Mac, big screen).
 
 **Why `--loop asyncio --http h11`:** Python 3.14 + uvicorn's default
