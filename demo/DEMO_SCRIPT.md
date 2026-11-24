@@ -21,22 +21,24 @@ installed and we prove they can talk to the SOC *before* anything happens.
    (see `RUNSHEET.md` for the exact commands)
 
 **On the victim (Windows) — install the two tools:**
-1. **Containment agent** (the "EDR/antivirus") — by command, Admin PowerShell:
-   ```
-   python demo\run_soc_demo.py --role victim --soc-ip <MAC-IP>
-   ```
-   (no `--host` needed — it defaults to `WORKSTATION-CORP-01`)
-2. **VerifyEye extension** (the "browser security guard") — configure it by
+Rule: on one victim, use the **same `--soc-ip` and the same `--host`** in all
+three commands. (Second victim? Give it its own `--host` name in all three.)
+
+1. **VerifyEye extension** (the "browser security guard") — configure it by
    command (no file editing), then load it in Chrome:
    ```
-   python demo\configure_verifyeye.py --soc-ip <MAC-IP>
+   python demo\configure_verifyeye.py --soc-ip <MAC-IP> --host WORKSTATION-CORP-01
    ```
    Then: `chrome://extensions` → Load unpacked → `verifyeye-ingress/extension`
    (or just reload if already loaded).
+2. **Containment agent** (the "EDR/antivirus") — by command, Admin PowerShell:
+   ```
+   python demo\run_soc_demo.py --role victim --soc-ip <MAC-IP> --host WORKSTATION-CORP-01
+   ```
 
 **Prove every service is reachable (the poll):**
    ```
-   python demo\victim_preflight.py --soc-ip <MAC-IP>
+   python demo\victim_preflight.py --soc-ip <MAC-IP> --host WORKSTATION-CORP-01
    ```
    All 4 green ✅ = the plumbing works. **Now we're ready to demo.**
 

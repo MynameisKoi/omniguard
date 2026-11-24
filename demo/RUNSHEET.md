@@ -84,19 +84,33 @@ Brands available: microsoft, google, netflix, amazon, docusign, apple, github
 
 ## 3. Victim — on the Windows laptop (third)
 
-1. Set the Mac IP in `verifyeye-ingress/extension/background.js` (lines 9–10).
-2. Load the VerifyEye extension in Chrome (chrome://extensions → Load unpacked).
-3. Start the containment/DFIR agent (this is the "antivirus/EDR" that must
-   always be running so the SOC can isolate & release). Pure stdlib — Windows
-   needs only plain Python 3, no pip installs:
+Three commands, all with the **same `--soc-ip` and `--host`**. Pure stdlib —
+Windows needs only plain Python 3, no pip installs.
+
+1. Configure the VerifyEye extension (writes IP + host into background.js):
 
 ```bash
-python3 demo/run_soc_demo.py --role victim --soc-ip 192.168.1.234 --host windows-victim
+python demo\configure_verifyeye.py --soc-ip 192.168.1.234 --host WORKSTATION-CORP-01
+```
+   Then load it: Chrome → chrome://extensions → Load unpacked →
+   `verifyeye-ingress/extension` (or reload if already loaded).
+
+2. Start the containment/DFIR agent (the "antivirus/EDR" that must always run so
+   the SOC can isolate & release) — **Admin PowerShell**:
+
+```bash
+python demo\run_soc_demo.py --role victim --soc-ip 192.168.1.234 --host WORKSTATION-CORP-01
+```
+
+3. Poll to confirm every service is reachable (regular shell is fine):
+
+```bash
+python demo\victim_preflight.py --soc-ip 192.168.1.234 --host WORKSTATION-CORP-01
 ```
 
 > `--soc-ip` is a **bare IP** (your Mac), not a URL.
-> `--host windows-victim` is the name you'll click **Isolate** on in the
-> dashboard — pick anything memorable and use the SAME name every time.
+> `--host` is the name you'll click **Isolate** on in the dashboard. Keep it the
+> SAME across all three commands. A second victim gets its own `--host` name.
 
 ---
 
