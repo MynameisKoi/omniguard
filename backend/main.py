@@ -33,6 +33,7 @@ import live_ai
 import notifications
 import threat_intel
 import connectors
+import push
 from agents import MultiAgentInvestigationPipeline
 from ocsf import alert_to_ocsf, export_alerts_to_ocsf
 from ai_transparency import get_transparency_logs, get_transparency_trace
@@ -308,6 +309,34 @@ def get_live_ai():
 def set_live_ai(payload: LiveAIToggle):
     """Turn automatic AI review of new alerts on or off (useful during a demo)."""
     return {"enabled": live_ai.set_enabled(payload.enabled)}
+
+
+# ── Phone push notifications (web push) ─────────────────────────────
+@app.get("/push/pubkey")
+def push_pubkey():
+    """The VAPID public key the browser needs to subscribe to push."""
+    return {"key": push.get_public_key()}
+
+@app.post("/push/subscribe", status_code=201, dependencies=AUTH)
+async def push_subscribe(payload: dict):
+    """Register this browser/phone to receive push notifications."""
+    ok = await run_in_threadpool(push.save_subscription, payload)
+    if not ok:
+        raise HTTPException(status_code=400, detail="invalid subscription")
+    return {"subscribed": True, "devices": push.count()}
+
+@app.post("/push/unsubscribe", status_code=204, dependencies=AUTH)
+async def push_unsubscribe(payload: dict):
+    endpoint = (payload or {}).get("endpoint")
+    if endpoint:
+        await run_in_threadpool(push.remove_subscription, endpoint)
+
+@app.post("/push/test", dependencies=AUTH)
+async def push_test():
+    """Send a test push to every subscribed device (handy during setup)."""
+    sent = await run_in_threadpool(
+        push.send_to_all, "OmniGuard SOC", "Test notification — push is working.", "/")
+    return {"sent": sent, "devices": push.count()}
 
 
 # This is for the frontend
